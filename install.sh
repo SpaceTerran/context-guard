@@ -1,0 +1,180 @@
+#!/bin/bash
+# Installs Context Guard for this Mac user:
+#   - builds it (build.sh)
+#   - puts the hook program at ~/.claude/hooks/context-guard/context-guard
+#   - adds its hooks to ~/.claude/settings.json (backed up first; other hooks are left alone)
+#   - puts the mod (mod/, the part that compacts once the session has saved) at ~/.claude/hooks/context-guard/mod
+#     and installs it as a Claude Code plugin for this user
+#   - puts the app in ~/Applications, sets it to open at login, and starts it
+#
+#   ./install.sh               install, or update in place (run it again after changing the code)
+#   ./install.sh --uninstall   remove the hooks, the hook program, the mod and the app; keeps your
+#                              settings and session records in ~/.claude/context-guard
+set -euo pipefail
+
+pkg="$(cd "$(dirname "$0")" && pwd)"
+dist="$pkg/dist"
+claude="$HOME/.claude"
+settings="$claude/settings.json"
+hook_dir="$claude/hooks/context-guard"
+hook_bin="$hook_dir/context-guard"
+mod_dir="$hook_dir/mod"
+# The plugin and the marketplace (the mod's own folder) are both named context-guard.
+plugin="context-guard@context-guard"
+app="$HOME/Applications/Context Guard.app"
+exe="$app/Contents/MacOS/ContextGuard"
+# Every Context Guard hook command contains this path; that's how install and uninstall find them.
+marker="hooks/context-guard/context-guard"
+# If the program is missing (uninstalled, or mid-update), the hook just reads its input and exits.
+command='f="$HOME/.claude/hooks/context-guard/context-guard"; if [ -x "$f" ]; then CG_CLAUDE_PID=$PPID exec "$f" hook; else cat >/dev/null; fi'
+
+say() { printf '%s\n' "$*"; }
+
+app_running() { pgrep -qf "^$exe" ; }
+
+quit_app() {
+  app_running || return 0
+  osascript -e 'quit app id "com.spaceterran.ContextGuard"' >/dev/null 2>&1 || true
+  for _ in $(seq 1 50); do app_running || return 0; sleep 0.1; done
+  pkill -f "^$exe" || true
+}
+
+# Rewrites settings.json with a jq filter: validated first, backed up, then swapped in whole, so
+# a running Claude Code never reads a half-written file. Keeps the file's permissions.
+edit_settings() {
+  local filter="$1"
+  mkdir -p "$claude"
+  [ -f "$settings" ] || printf '{}\n' > "$settings"
+  if ! jq empty "$settings" 2>/dev/null; then
+    say "error: $settings isn't valid JSON; fix it and run this again" >&2
+    exit 1
+  fi
+  local backup="$settings.context-guard-backup-$(date +%Y%m%d-%H%M%S)"
+  cp -p "$settings" "$backup"
+  local tmp
+  tmp="$(mktemp "$claude/.settings.json.XXXXXX")"
+  jq --arg c "$command" --arg m "$marker" "$filter" "$settings" > "$tmp"
+  chmod "$(stat -f %Lp "$settings")" "$tmp"
+  mv -f "$tmp" "$settings"
+  say "updated $settings (backup: $backup)"
+}
+
+# Drops Context Guard's hooks from every event, and any group or event left empty by that.
+strip='
+  def ours: (.command // "") | contains($m);
+  if .hooks then
+    .hooks |= (with_entries(.value |= map(
+                 if any(.hooks[]?; ours) then (.hooks |= map(select(ours | not))) | select(.hooks | length > 0)
+                 else . end))
+               | with_entries(select(.value | length > 0)))
+  else . end'
+
+add='
+  def hook: {type: "command", command: $c, timeout: 5};
+  .hooks //= {}
+  | .hooks.PostToolBatch += [{hooks: [hook]}]
+  | .hooks.SessionStart += [{hooks: [hook]}]
+  | .hooks.SessionEnd += [{hooks: [hook]}]
+  | .hooks.StopFailure += [{hooks: [hook]}]
+  # Runs in the background after each turn; exiting 2 wakes the idle session with the save message.
+  # 43500 s is about 12 hours, the longest one waits.
+  | .hooks.Stop += [{hooks: [hook + {asyncRewake: true, timeout: 43500,
+                                     rewakeSummary: "Context Guard: save before compacting",
+                                     rewakeMessage: "Stop hook message:"}]}]'
+
+# Copies the mod's files (not its tests) and swaps the folder in whole. Claude Code reads the
+# plugin from this folder in place, so a copy is all an update needs.
+copy_mod() {
+  local new="$hook_dir/.mod.new" old="$hook_dir/.mod.old"
+  rm -rf "$new" "$old"
+  mkdir -p "$new/.claude-plugin"
+  cp "$pkg/mod/.claude-plugin/plugin.json" "$pkg/mod/.claude-plugin/marketplace.json" "$new/.claude-plugin/"
+  cp -R "$pkg/mod/hooks" "$new/hooks"
+  [ -d "$mod_dir" ] && mv "$mod_dir" "$old"
+  mv "$new" "$mod_dir"
+  rm -rf "$old"
+  say "installed $mod_dir"
+}
+
+# Registers the mod's folder as a marketplace and installs the plugin from it, once; running it
+# again changes nothing.
+install_mod() {
+  if ! command -v claude >/dev/null; then
+    say "warning: no claude command, so the mod isn't installed; run this again where claude is on PATH" >&2
+    return
+  fi
+  local out
+  if ! out="$(claude plugin validate "$mod_dir" 2>&1)"; then
+    printf '%s\n' "$out" >&2
+    say "error: the mod didn't validate" >&2
+    exit 1
+  fi
+  claude plugin marketplace add "$mod_dir" >/dev/null
+  claude plugin install "$plugin" --scope user >/dev/null
+  say "installed the Claude Code plugin $plugin (running sessions load it at /reload-plugins or a restart)"
+}
+
+uninstall_mod() {
+  if command -v claude >/dev/null; then
+    claude plugin uninstall "$plugin" --scope user >/dev/null 2>&1 || true
+    claude plugin marketplace remove context-guard >/dev/null 2>&1 || true
+    say "removed the Claude Code plugin $plugin"
+  fi
+  rm -rf "$mod_dir"
+}
+
+uninstall() {
+  quit_app
+  if [ -x "$exe" ]; then "$exe" --login-item off 2>/dev/null || true; fi
+  rm -rf "$app"
+  say "removed $app"
+  if [ -f "$settings" ] && grep -q "$marker" "$settings"; then edit_settings "$strip"; fi
+  uninstall_mod
+  rm -f "$hook_bin"
+  rmdir "$hook_dir" 2>/dev/null || true
+  say "removed $hook_bin and $mod_dir"
+  say "kept your settings and session records in $claude/context-guard"
+}
+
+install() {
+  "$pkg/build.sh"
+
+  # The hook program first, so the hooks never point at a missing file. Renamed into place:
+  # hooks already waiting keep running the old copy until they finish.
+  mkdir -p "$hook_dir"
+  local tmp
+  tmp="$(mktemp "$hook_dir/.context-guard.XXXXXX")"
+  cp "$dist/context-guard" "$tmp"
+  chmod 755 "$tmp"
+  mv -f "$tmp" "$hook_bin"
+  say "installed $hook_bin"
+
+  # Remove then add, so running this again leaves exactly one copy of each hook.
+  edit_settings "$strip | $add"
+
+  copy_mod
+  install_mod
+
+  quit_app
+  mkdir -p "$(dirname "$app")"
+  rm -rf "$app.new"
+  ditto "$dist/Context Guard.app" "$app.new"
+  rm -rf "$app"
+  mv "$app.new" "$app"
+  say "installed $app"
+
+  if "$exe" --login-item on; then
+    say "Context Guard opens at login (change it in its Settings)"
+  else
+    say "warning: couldn't set Context Guard to open at login; turn it on in its Settings" >&2
+  fi
+  open "$app"
+
+  "$hook_bin" status
+}
+
+case "${1:-}" in
+  "") install ;;
+  --uninstall) uninstall ;;
+  *) say "usage: $0 [--uninstall]" >&2; exit 1 ;;
+esac

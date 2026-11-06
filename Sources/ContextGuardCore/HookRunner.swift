@@ -1,0 +1,296 @@
+import Foundation
+
+public enum HookEvent: String, Sendable {
+    case postToolBatch = "PostToolBatch"
+    case stop = "Stop"
+    case stopFailure = "StopFailure"
+    case sessionStart = "SessionStart"
+    case sessionEnd = "SessionEnd"
+}
+
+/// The fields Context Guard uses from Claude Code's hook input.
+public struct HookInput: Equatable, Sendable {
+    public var event: String
+    public var sessionId: String
+    public var transcriptPath: String?
+    public var cwd: String?
+    /// Present only when the hook fires inside a subagent.
+    public var agentId: String?
+    /// SessionStart: startup, resume, clear, compact, fork.
+    public var source: String?
+    /// SessionStart on resume/fork: the resumed context size.
+    public var contextTokens: Int?
+    /// SessionEnd: why it ended.
+    public var reason: String?
+
+    public init(event: String, sessionId: String, transcriptPath: String? = nil, cwd: String? = nil, agentId: String? = nil, source: String? = nil, contextTokens: Int? = nil, reason: String? = nil) {
+        self.event = event
+        self.sessionId = sessionId
+        self.transcriptPath = transcriptPath
+        self.cwd = cwd
+        self.agentId = agentId
+        self.source = source
+        self.contextTokens = contextTokens
+        self.reason = reason
+    }
+
+    public static func parse(_ data: Data) -> HookInput? {
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let event = obj["hook_event_name"] as? String,
+              let sid = obj["session_id"] as? String else { return nil }
+        let agent = obj["agent_id"] as? String
+        return HookInput(
+            event: event, sessionId: sid,
+            transcriptPath: obj["transcript_path"] as? String,
+            cwd: obj["cwd"] as? String,
+            agentId: (agent?.isEmpty ?? true) ? nil : agent,
+            source: obj["source"] as? String,
+            contextTokens: TranscriptReader.int(obj["context_tokens"]),
+            reason: obj["reason"] as? String)
+    }
+}
+
+public enum HookOutcome: Equatable, Sendable {
+    /// Print nothing, exit 0.
+    case silent
+    /// Print `hookSpecificOutput.additionalContext` JSON, exit 0.
+    case addContext(event: String, text: String)
+    /// Print the text to stderr, exit 2: the async Stop hook wakes the session with it.
+    case wake(text: String)
+    /// Stay in the background and wait for your answer (`runWaiter`).
+    case wait(token: String)
+}
+
+/// Runs one hook event against the state files. Every failure ends in `.silent`.
+public struct HookRunner: Sendable {
+    public let paths: Paths
+    /// The Claude Code process that ran the hook (`$PPID` in the hook command).
+    public let claudePid: Int32?
+    public let environment: [String: String]
+    public let probe: any ProcessProbing
+    public let registry: any RegistryReading
+    public let clock: @Sendable () -> Date
+    /// How long the hot path waits for the session lock before giving up (the next event catches up).
+    public var lockTimeout: TimeInterval = 0.3
+
+    public init(paths: Paths, claudePid: Int32?, environment: [String: String],
+                probe: any ProcessProbing = SystemProcessProbe(),
+                registry: (any RegistryReading)? = nil,
+                clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.paths = paths
+        self.claudePid = claudePid
+        self.environment = environment
+        self.probe = probe
+        self.registry = registry ?? FileRegistry(dir: paths.registryDir)
+        self.clock = clock
+    }
+
+    public func handle(_ input: HookInput) -> HookOutcome {
+        guard input.agentId == nil, Paths.isValidSessionID(input.sessionId),
+              let event = HookEvent(rawValue: input.event) else { return .silent }
+        guard (try? paths.ensureDirectories()) != nil else { return .silent }
+        let config = Config.load(paths)
+        guard let lock = FileLock.acquire(paths.lockFile(input.sessionId), timeout: event == .stop ? 2 : lockTimeout) else { return .silent }
+        defer { lock.release() }
+
+        let now = clock()
+        var s = SessionState.load(input.sessionId, paths) ?? SessionState(sessionId: input.sessionId, now: now)
+        s.updatedAt = now
+        s.lastEvent = input.event
+        if let cwd = input.cwd, !cwd.isEmpty { s.cwd = cwd }
+        if let path = input.transcriptPath, !path.isEmpty {
+            if path != s.transcriptPath { s.cursor = nil }
+            s.transcriptPath = path
+        }
+        identify(&s)
+
+        switch event {
+        case .sessionEnd:
+            s.ended = true
+            s.endedAt = now
+            s.endReason = input.reason
+            s.waiterToken = nil
+            try? s.save(paths)
+            return .silent
+        case .sessionStart:
+            s.ended = false
+            s.endedAt = nil
+            s.endReason = nil
+            if input.source == "resume" || input.source == "fork", let tokens = input.contextTokens {
+                s.tokens = tokens
+                s.tokensAt = now
+            }
+        default:
+            break
+        }
+
+        var sawCompaction = false
+        if let path = s.transcriptPath {
+            let reading = TranscriptReader.read(path: path, cursor: s.cursor, markers: s.sentNonce.map { [$0] } ?? [])
+            if let cursor = reading.cursor { s.cursor = cursor }
+            sawCompaction = reading.compaction != nil
+            Engine.observe(&s, reading, config: config, now: now)
+        }
+        if event == .sessionStart, input.source == "compact", !sawCompaction {
+            Engine.compactionStarted(&s, now: now)
+        }
+
+        Engine.apply(Answer.load(input.sessionId, paths), to: &s)
+        Engine.advance(&s, config: config, watched: !Mute.isMuted(s, paths), now: now)
+        if event == .stop { Engine.noteStop(&s) }
+
+        var outcome = HookOutcome.silent
+        switch event {
+        case .postToolBatch:
+            if let text = Engine.claimDelivery(&s, via: .step, config: config, nonce: Engine.makeNonce(), now: now) {
+                outcome = .addContext(event: HookEvent.postToolBatch.rawValue, text: text)
+            }
+        case .stop:
+            if let text = Engine.claimDelivery(&s, via: .wake, config: config, nonce: Engine.makeNonce(), now: now) {
+                outcome = .wake(text: text)
+                s.waiterToken = nil
+            } else if Engine.wantsWaiter(s) {
+                let token = UUID().uuidString
+                s.waiterToken = token
+                s.waiterPid = getpid()
+                s.waiterStart = probe.identity(of: getpid())?.start
+                s.waiterSince = now
+                outcome = .wait(token: token)
+            }
+        default:
+            break
+        }
+        // Unrecorded means it could go out twice, so a failed save sends nothing.
+        guard (try? s.save(paths)) != nil else { return .silent }
+        return outcome
+    }
+
+    /// Records which Claude process ran this and whether the session is one you drive.
+    func identify(_ s: inout SessionState) {
+        guard let pid = claudePid, let id = probe.identity(of: pid) else {
+            s.guarded = false
+            return
+        }
+        s.claudePid = pid
+        s.claudeStart = id.start
+        let entry = registry.entry(pid: pid)
+        if let name = entry?.name, !name.isEmpty { s.name = name }
+        if let entry {
+            s.guarded = id.hasTTY && entry.isInteractiveCLI && entry.sessionId == s.sessionId
+        } else {
+            // No registry entry: only trust the fallback if Claude Code stopped keeping a registry.
+            s.guarded = id.hasTTY && !registry.isAvailable && environment["CLAUDE_CODE_ENTRYPOINT"] == "cli"
+        }
+    }
+
+    // MARK: - Waiter
+
+    public struct WaiterResult: Equatable, Sendable {
+        public var exitCode: Int32
+        public var text: String?
+    }
+
+    /// Runs in the background Stop hook after every turn, until the next turn's Stop replaces it,
+    /// the session ends, Claude quits, or `maxDuration` passes. Returns exit 2 with the message when a
+    /// send is due and the session is idle (Compact, no answer in time, Compact Now, or 500k);
+    /// exit 0 otherwise.
+    public func runWaiter(sessionId: String, token: String, maxDuration: TimeInterval, poll: TimeInterval = 2) -> WaiterResult {
+        let done = WaiterResult(exitCode: 0, text: nil)
+        let deadline = clock().addingTimeInterval(maxDuration)
+        let watcher = DirectoryWatcher(paths.answersDir)
+
+        while true {
+            watcher.wait(timeout: poll)
+            if clock() >= deadline {
+                releaseWaiter(sessionId: sessionId, token: token)
+                return done
+            }
+            // Cheap checks without the lock.
+            guard let snap = SessionState.load(sessionId, paths), snap.waiterToken == token, !snap.ended else { return done }
+            guard let pid = snap.claudePid, probe.isRunning(pid, startedAt: snap.claudeStart) else {
+                releaseWaiter(sessionId: sessionId, token: token)
+                return done
+            }
+            let answer = Answer.load(sessionId, paths)
+            let newAnswer = answer.map { $0.id != snap.appliedAnswerId } ?? false
+            // Settings can change while waiting (a lower later-threshold, a shorter countdown, Off).
+            let snapConfig = Config.load(paths)
+            let watched = !Mute.isMuted(snap, paths)
+            let laterDue = watched && snap.phase == .later && snap.tokens >= snapConfig.laterAt
+            let autoYesDue = Engine.autoYesDeadline(snap, config: snapConfig, watched: watched, now: clock()).map { clock() >= $0 } ?? false
+            // Stopped watching while a question was up: drop the question now, not at the next turn.
+            let unwatchedQuestion = !watched && (snap.phase == .asking || snap.phase == .later)
+            let due = newAnswer || laterDue || autoYesDue || unwatchedQuestion
+            if !due && snap.phase != .queued && Engine.wantsWaiter(snap) { continue }
+            if !due && snap.phase == .queued && !RegistryEntry.isIdle(registry.entry(pid: pid)) { continue }
+
+            guard let lock = FileLock.acquire(paths.lockFile(sessionId), timeout: 1) else { continue }
+            guard var s = SessionState.load(sessionId, paths), s.waiterToken == token, !s.ended else {
+                lock.release()
+                return done
+            }
+            let config = Config.load(paths)
+            let now = clock()
+            let before = s
+            Engine.apply(answer, to: &s)
+            Engine.advance(&s, config: config, watched: !Mute.isMuted(s, paths), now: now)
+
+            var result: WaiterResult?
+            if s.phase == .queued {
+                let entry = registry.entry(pid: pid)
+                if let entry, entry.sessionId != sessionId {
+                    // This process now runs a different conversation (/clear, /resume): never wake it
+                    // with this one's message. The send stays queued for this session's next run.
+                    s.waiterToken = nil
+                    result = done
+                } else if !RegistryEntry.isIdle(entry) {
+                    // Mid-turn, so leave it queued: the next step or the turn's Stop delivers it, and
+                    // this waiter stays for the case where the turn ends without a Stop (Esc).
+                } else if let text = Engine.claimDelivery(&s, via: .wake, config: config, nonce: Engine.makeNonce(), now: now) {
+                    s.waiterToken = nil
+                    result = WaiterResult(exitCode: 2, text: text)
+                }
+            } else if !Engine.wantsWaiter(s) {
+                s.waiterToken = nil
+                result = done
+            }
+            if s != before {
+                s.updatedAt = now
+                if (try? s.save(paths)) == nil { result = done }
+            }
+            lock.release()
+            if let result { return result }
+        }
+    }
+
+    /// Clear this waiter's token so the app stops counting on it.
+    func releaseWaiter(sessionId: String, token: String) {
+        guard let lock = FileLock.acquire(paths.lockFile(sessionId), timeout: 0.5) else { return }
+        defer { lock.release() }
+        guard var s = SessionState.load(sessionId, paths), s.waiterToken == token else { return }
+        s.waiterToken = nil
+        try? s.save(paths)
+    }
+}
+
+/// Wakes a waiting thread when a folder's contents change (an answer file renamed into place).
+final class DirectoryWatcher: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var source: DispatchSourceFileSystemObject?
+
+    init(_ url: URL) {
+        let fd = open(url.path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete, .extend, .attrib], queue: .global(qos: .utility))
+        src.setEventHandler { [semaphore] in semaphore.signal() }
+        src.setCancelHandler { close(fd) }
+        src.resume()
+        source = src
+    }
+
+    func wait(timeout: TimeInterval) {
+        _ = semaphore.wait(timeout: .now() + timeout)
+    }
+
+    deinit { source?.cancel() }
+}
