@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    # GitHub-hosted runners only: a public repo's pull requests must never run on a self-hosted machine.
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest and newest Xcode toolchains GitHub offers, so a Swift version bump shows up here.
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: swift --version
+      - name: Tests
+        run: swift test
+      - name: Build the app and the hook program
+        run: ./build.sh

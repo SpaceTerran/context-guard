@@ -1,0 +1,14 @@
+{
+  "name": "context-guard",
+  "description": "Context Guard's helper for Claude Code sessions.",
+  "owner": {
+    "name": "SpaceTerran"
+  },
+  "plugins": [
+    {
+      "name": "context-guard",
+      "source": "./",
+      "description": "After Context Guard asks a session to save, compacts it once it has finished, then sends the continue message."
+    }
+  ]
+}

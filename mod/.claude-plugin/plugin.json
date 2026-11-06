@@ -1,0 +1,8 @@
+{
+  "name": "context-guard",
+  "version": "0.1.0",
+  "description": "After Context Guard asks a session to save, compacts it once it has finished, then sends the continue message.",
+  "author": {
+    "name": "SpaceTerran"
+  }
+}
