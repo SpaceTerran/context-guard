@@ -122,7 +122,8 @@ struct SettingsView: View {
                 }
                 Rule()
                 Row(label: "Open at login") {
-                    Toggle("Open at login", isOn: Binding(get: { login == .enabled }, set: setLogin))
+                    // A closure, not `set: setLogin`: Swift 6.1 to 6.3 crash building the method reference here.
+                    Toggle("Open at login", isOn: Binding(get: { login == .enabled }, set: { setLogin($0) }))
                         .labelsHidden()
                         .disabled(login == .unavailable)
                 }
