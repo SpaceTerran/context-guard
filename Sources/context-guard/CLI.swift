@@ -157,19 +157,9 @@ struct CLI {
             let guarded = s.state.guarded ? "" : " (not guarded)"
             let muted = s.muted ? " (not watching)" : ""
             let waiter = s.waiterAlive ? " · waiting in background" : ""
-            let follow = s.state.followUp.map { " · compacting: \($0.stage.rawValue)\(followUpDetail($0).map { " (\($0))" } ?? "")" } ?? ""
+            let follow = s.state.followUp.map { " · compacting: \($0.stage.rawValue)\($0.note.map { " (\($0))" } ?? "")" } ?? ""
             print("\(s.id.prefix(8))  \(Format.tokens(s.state.tokens).padding(toLength: 6, withPad: " ", startingAt: 0)) \(s.effectivePhase.rawValue.padding(toLength: 9, withPad: " ", startingAt: 0)) \(s.title)\(guarded)\(muted)\(waiter)\(follow)")
         }
-    }
-
-    /// Why a follow-up stands where it does: what it waits on, or Haiku's reason.
-    static func followUpDetail(_ f: FollowUp) -> String? {
-        guard f.stage == .background else { return f.note }
-        let what = FollowUpText.waitingOn(f.background)
-        let minutes = f.backgroundSince.map { max(0, Int(Date().timeIntervalSince($0) / 60)) }
-        let waited = minutes.map { $0 == 1 ? ", 1 min so far" : ", \($0) min so far" } ?? ""
-        let asked = f.backgroundAskedAt != nil ? "; asked you whether to compact anyway" : ""
-        return "waiting for \(what.phrase)\(waited)\(asked)"
     }
 
     struct StatusRow: Encodable {

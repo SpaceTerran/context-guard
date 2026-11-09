@@ -37,10 +37,8 @@ struct SessionMenu: View {
             if let followUp = model.followUpText(info) { Text(followUp) }
             if !info.subtitle.isEmpty { Text(info.subtitle) }
             Divider()
-            // Asks the session to save, then compacts it, even with Context Guard off or the tab
-            // unwatched. On a session that's done saving and waiting on background work, compacts
-            // it without waiting.
-            Button("Compact Now") { model.compactNow(info.id) }
+            // Asks the session to save, then compacts it, even with Context Guard off or the tab unwatched.
+            Button("Compact Now") { model.answer(info.id, .yes, from: .menu) }
                 .disabled(!model.canCompactNow(info))
             if info.effectivePhase == .asking {
                 if info.state.tokens < model.config.laterAt {

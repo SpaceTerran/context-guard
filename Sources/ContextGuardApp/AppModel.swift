@@ -30,8 +30,6 @@ final class AppModel {
     @ObservationIgnored private var announced: Set<String> = []
     /// Popups closed with ✕, by session id → the cycle they were closed in.
     @ObservationIgnored private var hidden: [String: Int] = [:]
-    /// Waits you answered (Keep Waiting or Compact Now), by `waitKey`: that wait doesn't ask again.
-    @ObservationIgnored private var answeredWaits: Set<String> = []
     /// When each open popup reached what it shows now, for closing it after a moment.
     @ObservationIgnored private var shownSince: [String: (QuestionProgress, Date)] = [:]
     @ObservationIgnored let panels = PanelController()
@@ -135,16 +133,10 @@ final class AppModel {
     }
 
     /// Compact Now is off while one is already under way, since it would ask the session to save
-    /// twice. The exception is a follow-up waiting on background work: there Compact Now compacts
-    /// without waiting, and doesn't ask again.
+    /// twice.
     func canCompactNow(_ info: SessionInfo) -> Bool {
-        guard !isSending(info) else { return false }
-        guard let f = info.state.followUp, f.isActive else { return true }
-        return isWaitingOnBackground(f)
+        !isSending(info) && !(info.state.followUp?.isActive ?? false)
     }
-
-    /// An automatic follow-up that's done saving and holds for work left running in the background.
-    func isWaitingOnBackground(_ f: FollowUp) -> Bool { f.stage == .background && f.manual != true }
 
     /// When an unanswered question sends by itself (the hook's own rule), or nil when it won't.
     func autoYesDeadline(_ info: SessionInfo) -> Date? {
@@ -174,44 +166,6 @@ final class AppModel {
         }
     }
 
-    // MARK: Waiting on background work
-
-    /// One wait: a follow-up, from when background work first held it.
-    private func waitKey(_ f: FollowUp) -> String {
-        "\(f.nonce):\(f.backgroundSince?.timeIntervalSince1970 ?? 0)"
-    }
-
-    /// The question after a long wait on background work: open until it's answered or the wait ends.
-    func wantsWaitQuestion(_ info: SessionInfo) -> Bool {
-        guard let f = info.state.followUp, isWaitingOnBackground(f), f.backgroundAskedAt != nil else { return false }
-        return !answeredWaits.contains(waitKey(f))
-    }
-
-    /// "Keep Waiting": it compacts once the background work finishes; Compact Now still works.
-    func keepWaiting(_ id: String) {
-        if let f = session(id)?.state.followUp { answeredWaits.insert(waitKey(f)) }
-        panels.close("wait:\(id)")
-        syncPanels()
-    }
-
-    /// Compact Now, from a session's menu: asks it to save, then compacts. On a follow-up waiting on
-    /// background work, it compacts without waiting.
-    func compactNow(_ id: String) {
-        if let f = session(id)?.state.followUp, isWaitingOnBackground(f) {
-            compactWithoutWaiting(id, from: .menu)
-        } else {
-            answer(id, .yes, from: .menu)
-        }
-    }
-
-    /// Compact Now on a follow-up waiting on background work (the menu, or the wait question).
-    func compactWithoutWaiting(_ id: String, from source: Answer.Source) {
-        guard let info = session(id), let f = info.state.followUp else { return }
-        answeredWaits.insert(waitKey(f))
-        panels.close("wait:\(id)")
-        _ = save(Answer(cycle: info.state.cycle, action: .yes, source: source, at: Date()), for: id)
-        refresh()
-    }
 
     func setEnabled(_ on: Bool) {
         var c = config
@@ -290,18 +244,6 @@ final class AppModel {
             replies[info.id] = nil
             shownSince[info.id] = (.question, now)
             panels.showQuestion(key: key, QuestionView(model: self, sessionID: info.id))
-            NSSound(named: "Glass")?.play()
-        }
-
-        // The wait question: up while a follow-up has waited long on background work.
-        for key in panels.keys where key.hasPrefix("wait:") {
-            let id = String(key.dropFirst("wait:".count))
-            if !(live.first { $0.id == id }.map(wantsWaitQuestion) ?? false) { panels.close(key) }
-        }
-        for info in live where wantsWaitQuestion(info) {
-            let key = "wait:\(info.id)"
-            guard !panels.isOpen(key) else { continue }
-            panels.showQuestion(key: key, WaitQuestionView(model: self, sessionID: info.id))
             NSSound(named: "Glass")?.play()
         }
 
