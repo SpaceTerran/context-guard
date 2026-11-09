@@ -52,7 +52,8 @@ and with Context Guard off.
 
 Settings has three tabs: **General** (on or off, open at login, what's installed), **When to Ask**
 (the thresholds, and how long a question waits before it compacts by itself; 0 for never) and
-**Messages** (the save message and the continue message).
+**Messages** (the save message and the continue message). Changes save as you type. The When to Ask
+and Messages cards say in their header when your last change was saved, or that it wasn't and why.
 
 | The session's menu | Settings |
 |---|---|

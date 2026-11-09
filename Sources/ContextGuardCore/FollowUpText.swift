@@ -104,5 +104,24 @@ public enum FollowUpText {
         trimmed(note).map { $0.prefix(1).uppercased() + $0.dropFirst() }
     }
 
-    static func quoted(_ s: String) -> String { "\u{201C}\(s)\u{201D}" }
+    /// A message in quotes, cut to its first line and `max` characters: menus don't truncate, so
+    /// one long message would widen the whole menu.
+    public static func quoted(_ s: String, max: Int = 24) -> String {
+        let whole = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        var shown = whole.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        if shown.count > max {
+            let cut = shown.prefix(max - 1)
+            // Back up to a whole word, unless that leaves too little.
+            let midWord = !shown.dropFirst(cut.count).hasPrefix(" ")
+            if midWord, let space = cut.lastIndex(of: " "), cut.distance(from: cut.startIndex, to: space) >= max / 2 {
+                shown = String(cut[..<space])
+            } else {
+                shown = String(cut)
+            }
+        }
+        guard shown != whole else { return "\u{201C}\(shown)\u{201D}" }
+        // "NOTES.md…", not "NOTES.md.…".
+        while let last = shown.last, last.isWhitespace || ".,;:".contains(last) { shown.removeLast() }
+        return "\u{201C}\(shown)…\u{201D}"
+    }
 }
