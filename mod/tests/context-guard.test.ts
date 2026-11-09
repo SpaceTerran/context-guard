@@ -24,18 +24,22 @@ type World = {
   steps: unknown[]
   /** What it answers to `mod report`, one per call, then "no more now". */
   replies: unknown[]
-  /** Each run of the program: the command (`tick` or `report`), what it read and where it ran. */
+  /** Each run of the program: the command (`tick`, `report` or `turn`), what it read and where it ran. */
   runs: { command: string; input: Input; argv: readonly string[]; cwd?: string; timeoutMs?: number }[]
   asked: ModelCompleteInput[]
   model: () => ModelCompleteResult | Promise<ModelCompleteResult>
   compactions: number
   compact: () => SessionCompactResult | Promise<SessionCompactResult>
   submitted: PromptSubmitInput[]
+  /** Why the session refuses a prompt, if it does. */
+  drop?: string
 }
 
 const SUMMARY: SessionMessage = { role: 'user', text: 'This session is being continued…', toolUses: [] }
 const NOTHING = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const USAGE = { input_tokens: 900, output_tokens: 20, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+/** Enter at the prompt. */
+const TYPED = { kind: 'composer' } as const
 const JUDGE = { action: 'judge', nonce: 'cg-1', mark: 4200, prompt: 'Has it finished?', model: 'haiku', maxTokens: 300, timeoutMs: 30_000 }
 
 function world(on: On): World {
@@ -64,7 +68,10 @@ function world(on: On): World {
   on('process.run', (_, e) => {
     const command = e.argv[e.argv.length - 1] ?? ''
     w.runs.push({ command, input: JSON.parse(e.init?.stdin ?? '{}'), argv: e.argv, cwd: e.init?.cwd, timeoutMs: e.init?.timeoutMs })
-    const answer = command === 'tick' ? (w.steps.shift() ?? { action: 'none' }) : (w.replies.shift() ?? { again: false })
+    const answer =
+      command === 'tick' ? (w.steps.shift() ?? { action: 'none' })
+      : command === 'report' ? (w.replies.shift() ?? { again: false })
+      : {}
     const stdout = w.exitCode === 0 ? JSON.stringify(answer) + '\n' : ''
     return { value: { exitCode: w.exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -82,8 +89,10 @@ function world(on: On): World {
   })
   on('prompt.submit', (_, e) => {
     w.submitted.push(e)
-    return { text: e.text, origin: e.origin }
+    return w.drop === undefined ? { text: e.text, origin: e.origin } : { drop: w.drop }
   })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'done' }))
   return w
 }
 
@@ -93,6 +102,11 @@ async function start($: Engine, isInteractive = true): Promise<void> {
 
 function commands(w: World): string[] {
   return w.runs.map((r) => r.command)
+}
+
+/** What the program was told of turns: true for a start, false for an end. */
+function notes(w: World): unknown[] {
+  return w.runs.filter((r) => r.command === 'turn').map((r) => r.input.active)
 }
 
 test('every 10 seconds it tells the program how the session stands', async ($, on) => {
@@ -263,4 +277,68 @@ test('an answer this version does not know is left alone', async ($, on) => {
   await start($)
   await clock.advance(10_000)
   expect(commands(w)).toEqual(['tick'])
+})
+
+test("the conversation's turns are noted as they start and end", async ($, on) => {
+  mock.clock(on)
+  const w = world(on)
+  await start($)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  expect(w.runs).toHaveLength(1)
+  expect(w.runs[0]!.input).toEqual({ sessionId: 's1', active: true })
+  expect(w.runs[0]!.timeoutMs).toBe(5_000)
+  await $.turn.complete({ turnId: 't1', answer: 'done', reason: 'answer', durationMs: 900, isAborted: false })
+  expect(notes(w)).toEqual([true, false])
+  await $.turn.complete({ turnId: 't2', answer: '', reason: 'aborted', durationMs: 900, isAborted: true })
+  expect(notes(w)).toEqual([true, false, false])
+})
+
+test("an agent's turns are not the conversation's", async ($, on) => {
+  mock.clock(on)
+  const w = world(on)
+  await start($)
+  await $.turn.start({ text: 'build it', turnId: 't1', agentId: 'a1' })
+  await $.turn.complete({ turnId: 't1', agentId: 'a1', answer: 'done', reason: 'answer', durationMs: 900, isAborted: false })
+  expect(w.runs).toEqual([])
+})
+
+test('a prompt typed while nothing runs counts from Enter', async ($, on) => {
+  mock.clock(on)
+  const w = world(on)
+  await start($)
+  await $.prompt.submit({ text: 'next', wait: false, origin: TYPED })
+  expect(notes(w)).toEqual([true])
+
+  // Typed during a turn, it joins that turn; a slash command's own turn is noted when it starts.
+  await $.prompt.submit({ text: 'also', wait: false, origin: TYPED, turnId: 't1' })
+  await $.prompt.submit({ text: '/status', wait: false, origin: TYPED, command: { name: 'status', args: '' } })
+  expect(notes(w)).toEqual([true])
+})
+
+test('a prompt the session refuses starts no turn', async ($, on) => {
+  mock.clock(on)
+  const w = world(on)
+  w.drop = 'a UserPromptSubmit hook said no'
+  await start($)
+  await $.prompt.submit({ text: 'next', wait: false, origin: TYPED })
+  expect(notes(w)).toEqual([true, false])
+})
+
+test('nothing is noted in a session nobody types into', async ($, on) => {
+  mock.clock(on)
+  const w = world(on)
+  await start($, false)
+  await $.prompt.submit({ text: 'next', wait: false, origin: TYPED })
+  await $.turn.start({ text: 'next', turnId: 't1' })
+  await $.turn.complete({ turnId: 't1', answer: 'done', reason: 'answer', durationMs: 900, isAborted: false })
+  expect(w.runs).toEqual([])
+})
+
+test('a note that fails never stops the turn', async ($, on) => {
+  mock.clock(on)
+  const w = world(on)
+  w.exitCode = 1
+  await start($)
+  expect(await $.turn.start({ text: 'hi', turnId: 't1' })).toEqual({ turnId: 't1' })
+  expect(notes(w)).toEqual([true])
 })

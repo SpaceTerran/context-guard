@@ -13,6 +13,8 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
     public var pendingAnswer: Answer?
     /// You stopped watching this session's tab ("Watch This Session" off).
     public var muted: Bool = false
+    /// The main conversation's latest turn start or end, from the mod.
+    public var turn: TurnRecord?
 
     public var title: String {
         if let t = state.title, !t.isEmpty { return t }
@@ -35,14 +37,23 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
         return parts.joined(separator: " · ")
     }
 
+    /// Where its Claude process stands now. The app can't count background agents (only the mod
+    /// can), so `background` work here says 0 agents.
+    public var activity: SessionActivity {
+        SessionActivity.of(registry, turn: turn, processStart: state.claudeStart, now: Date())
+    }
+
     /// Not in the middle of a turn: a wake starts a new one.
-    public var isIdle: Bool { RegistryEntry.isIdle(registry) }
+    public var isIdle: Bool { activity.isBetweenTurns }
 
     /// The phase including an answer the hook hasn't applied yet.
     public var effectivePhase: Phase {
         guard let a = pendingAnswer else { return state.phase }
         switch a.action {
-        case .yes: return .queued
+        case .yes:
+            // A follow-up already under way isn't asked to save again (`Engine.apply`).
+            if let f = state.followUp, f.isActive, state.phase == .sent, state.sentNonce == f.nonce { return state.phase }
+            return .queued
         case .later: return state.phase == .asking ? .later : state.phase
         case .skip: return state.phase == .asking || state.phase == .later ? .skipped : state.phase
         }
@@ -68,7 +79,7 @@ public enum SessionCatalog {
             var pending: Answer?
             if let a = Answer.load(id, paths), a.id != s.appliedAnswerId, a.cycle == s.cycle { pending = a }
             out.append(SessionInfo(state: s, isLive: live, registry: entry, waiterAlive: waiter, pendingAnswer: pending,
-                                   muted: Mute.isMuted(s, paths)))
+                                   muted: Mute.isMuted(s, paths), turn: TurnRecord.load(id, paths)))
         }
         return out.sorted { ($0.state.tokens, $0.id) > ($1.state.tokens, $1.id) }
     }
@@ -83,6 +94,7 @@ public enum SessionCatalog {
             try? fm.removeItem(at: paths.stateFile(info.id))
             try? fm.removeItem(at: paths.lockFile(info.id))
             try? fm.removeItem(at: paths.answerFile(info.id))
+            try? fm.removeItem(at: paths.turnFile(info.id))
         }
     }
 }

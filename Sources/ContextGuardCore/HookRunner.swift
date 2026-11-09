@@ -222,7 +222,7 @@ public struct HookRunner: Sendable {
             let unwatchedQuestion = !watched && (snap.phase == .asking || snap.phase == .later)
             let due = newAnswer || laterDue || autoYesDue || unwatchedQuestion
             if !due && snap.phase != .queued && Engine.wantsWaiter(snap) { continue }
-            if !due && snap.phase == .queued && !RegistryEntry.isIdle(registry.entry(pid: pid)) { continue }
+            if !due && snap.phase == .queued && !betweenTurns(snap, registry.entry(pid: pid)) { continue }
 
             guard let lock = FileLock.acquire(paths.lockFile(sessionId), timeout: 1) else { continue }
             guard var s = SessionState.load(sessionId, paths), s.waiterToken == token, !s.ended else {
@@ -243,7 +243,7 @@ public struct HookRunner: Sendable {
                     // with this one's message. The send stays queued for this session's next run.
                     s.waiterToken = nil
                     result = done
-                } else if !RegistryEntry.isIdle(entry) {
+                } else if !betweenTurns(s, entry) {
                     // Mid-turn, so leave it queued: the next step or the turn's Stop delivers it, and
                     // this waiter stays for the case where the turn ends without a Stop (Esc).
                 } else if let text = Engine.claimDelivery(&s, via: .wake, config: config, nonce: Engine.makeNonce(), now: now) {
@@ -261,6 +261,14 @@ public struct HookRunner: Sendable {
             lock.release()
             if let result { return result }
         }
+    }
+
+    /// Whether a wake would start a new turn. Woken mid-turn (`busy`, or `waiting` on a permission
+    /// prompt), Claude Code appends the message to a tool result under its "not a message from the
+    /// user" banner, and models ignore it as a prompt injection (seen live with Opus). Between turns
+    /// with work running in the background, a wake starts a new turn like any other.
+    func betweenTurns(_ s: SessionState, _ entry: RegistryEntry?) -> Bool {
+        SessionActivity.of(entry, turn: TurnRecord.load(s.sessionId, paths), processStart: s.claudeStart, now: clock()).isBetweenTurns
     }
 
     /// Clear this waiter's token so the app stops counting on it.

@@ -29,11 +29,15 @@ starts by asking the session to save its work, with this message (you can change
 Once the session has the message (from these, or **Compact Now** in its menu), Context Guard
 finishes the job:
 
-1. Every 10 seconds while the session is idle, Haiku reads what it did after the message and decides
-   whether it has finished saving. A question to you, or a session still waiting on a push or CI,
-   holds it; so does a session that ignored the message.
+1. Every 10 seconds while no turn is running, Haiku reads what the session did after the message and
+   decides whether it has finished saving. A question to you, or a session still waiting on a push
+   or CI, holds it; so does a session that ignored the message.
 2. Once it's ready, the session is compacted, as `/compact` does it. Text in the prompt box holds it.
-3. When the compaction is done and the session is idle, **continue now** goes in as your words. If
+   So do agents or commands it left running in the background, since it may still act on what they
+   bring back: its menu line says what it's waiting for. After 10 minutes, a popup asks whether to
+   keep waiting or compact now, which leaves that work running. **Compact Now** in its menu doesn't
+   wait.
+3. When the compaction is done and no turn is running, **continue now** goes in as your words. If
    you typed or sent something first, it's left to you.
 
 A notice says when it needs you, when it compacts and how it went. After a session compacts, it's
@@ -95,7 +99,7 @@ Claude Code's own hooks:
 | Hook | What it does |
 |---|---|
 | `PostToolBatch` | Runs after each step (about 7 ms). It reads the new part of the transcript for the context size, asks at 300k, and adds a waiting save message to the session's next step. |
-| `Stop` (`asyncRewake`) | Stays in the background after every turn, until the next turn replaces it (up to 12 hours). When you click Compact or Compact Now, or the session reaches 500k, it exits 2, which wakes the idle session with the save message. |
+| `Stop` (`asyncRewake`) | Stays in the background after every turn, until the next turn replaces it (up to 12 hours). When you click Compact or Compact Now, or the session reaches 500k, it exits 2, which wakes the session with the save message once no turn is running. |
 | `SessionStart`, `SessionEnd`, `StopFailure` | Note compactions, `/clear`, exits and failed turns. |
 
 Nothing outside a session can run `/compact` in it, so compacting after the save message is done by a
@@ -103,12 +107,16 @@ Nothing outside a session can run `/compact` in it, so compacting after the save
 holds no rules. Every 10 seconds it runs `context-guard mod tick` with the session's id, its running
 subagents and whether the prompt box has text. The program reads the transcript and answers with one
 step: ask Haiku (with the prompt to send), compact, send the continue message, or nothing. The mod
-does it and reports back with `context-guard mod report`.
+does it and reports back with `context-guard mod report`. It also runs `context-guard mod turn` as
+each turn of the conversation starts and ends.
 
 - **Delivery:** a save message goes out exactly once, by whichever path comes first. It counts as sent
   only once it shows up in the transcript.
 - **Mid-turn:** a session is never woken in the middle of a turn. A wake there would land inside a
-  tool result, where the model treats it as a prompt injection.
+  tool result, where the model treats it as a prompt injection. Between turns a wake starts a new
+  turn, even with agents or commands running in the background. Claude Code's session list says
+  `busy` both mid-turn and while background agents run, so the mod's turn records tell the two apart.
+  Without them (an older mod, or none), `busy` counts as mid-turn.
 - **Which sessions:** only interactive terminal sessions are guarded. Subagents, `claude -p` and SDK
   runs are left alone.
 
@@ -118,6 +126,7 @@ does it and reports back with `context-guard mod report`.
 | `~/.claude/context-guard/sessions/<id>.json` | the hook and `context-guard mod`: each session's size, where its save message stands, and how compacting is going |
 | `~/.claude/context-guard/answers/<id>.json` | the app and `context-guard answer`: your answer to a popup |
 | `~/.claude/context-guard/muted/<pid>-<start>.json` | the app and `context-guard watch`: a tab you stopped watching, by its Claude process |
+| `~/.claude/context-guard/turns/<id>.json` | `context-guard mod turn`: whether the session's latest turn is running, and since when |
 
 The hook program also works from a terminal. `install.sh` doesn't put it on your PATH, so give it a
 short name first:

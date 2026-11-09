@@ -31,6 +31,8 @@ public enum FollowUpText {
         case .working: return "Still saving" + reason(f)
         case .needsYou: return "Needs you before compacting" + reason(f)
         case .draft: return "Compacts once the prompt box is empty"
+        case .background where f.manual == true: return "Done saving · compacting without waiting for \(waitingOn(f.background).phrase)"
+        case .background: return "Done saving · compacts once \(waitingOn(f.background).phrase) \(waitingOn(f.background).finishes)"
         case .compacting: return "Compacting…"
         case .continuing: return "Compacted\(sizes(f)) · sends \(message) when it's idle"
         case .done: return "Compacted\(sizes(f)) and sent \(message)"
@@ -48,6 +50,10 @@ public enum FollowUpText {
         case .needsYou:
             // It waits on you, so it stays up longer.
             return Notice(symbol: "questionmark.bubble.fill", tone: .warning, title: "Needs you before compacting", reason: sentence(f.note), seconds: 20)
+        case .background:
+            let what = waitingOn(f.background)
+            return Notice(symbol: "hourglass", tone: .accent, title: "Done saving, waiting to compact",
+                          reason: "Compacts once \(what.phrase) \(what.finishes). Compact Now in its menu doesn't wait.", seconds: 12)
         case .compacting:
             return Notice(symbol: "arrow.down.right.and.arrow.up.left.circle.fill", tone: .accent, title: "Compacting", reason: nil, seconds: 8)
         case .done:
@@ -60,6 +66,19 @@ public enum FollowUpText {
             return Notice(symbol: "xmark.octagon.fill", tone: .danger, title: "Couldn't compact by itself", reason: sentence(f.note), seconds: 20)
         case .checking, .working, .draft, .continuing, .stopped:
             return nil
+        }
+    }
+
+    /// What a session left running in the background, as a phrase ("its background agent"), the
+    /// verb that goes with it ("finishes", or "finish" for several) and the pronoun for it ("it", "them").
+    public static func waitingOn(_ work: BackgroundWork?) -> (phrase: String, finishes: String, it: String) {
+        let agents = work?.agents ?? 0
+        let shells = work?.shells ?? false
+        switch (agents, shells) {
+        case (1, false): return ("its background agent", "finishes", "it")
+        case (let n, false) where n > 1: return ("its \(n) background agents", "finish", "them")
+        case (0, true): return ("its background command", "finishes", "it")
+        default: return ("its background work", "finishes", "it")
         }
     }
 

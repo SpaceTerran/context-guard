@@ -27,8 +27,23 @@ final class CompactorTests: XCTestCase {
         Conversation(text: text, mark: mark, userPrompts: 0, after: nonce)
     }
 
-    func idle(_ c: Conversation? = nil, draft: Bool = false, agents: Int = 0, size: UInt64 = 5_000) -> SessionLook {
-        SessionLook(idle: true, quiet: true, agents: agents, draft: draft, conversation: c ?? conversation(), transcriptSize: size)
+    /// Between turns and quiet; `background` is work it left running.
+    func idle(_ c: Conversation? = nil, draft: Bool = false, size: UInt64 = 5_000, background: BackgroundWork? = nil) -> SessionLook {
+        SessionLook(activity: background.map { .background($0) } ?? .idle, quiet: true, draft: draft,
+                    conversation: c ?? conversation(), transcriptSize: size)
+    }
+
+    /// Between turns, with agents or a shell command still running in the background.
+    func background(_ c: Conversation? = nil, agents: Int = 0, shells: Bool = false) -> SessionLook {
+        idle(c, background: BackgroundWork(agents: agents, shells: shells))
+    }
+
+    /// Walks a session to Haiku's "ready".
+    func ready() -> SessionState {
+        var s = askedToSave()
+        _ = tick(&s, idle())
+        _ = judged(&s, #"{"verdict":"ready","reason":"pushed"}"#)
+        return s
     }
 
     // Each step saves the state and the next one reads it back, as each `context-guard mod` run does:
@@ -119,15 +134,14 @@ final class CompactorTests: XCTestCase {
 
     // MARK: Judging
 
-    func testHaikuIsAskedOnlyOnceTheSessionIsIdleQuietAndAlone() {
+    func testHaikuIsAskedOnlyBetweenTurnsOnceTheTranscriptIsQuiet() {
         var s = askedToSave()
         var look = idle()
-        look.idle = false
-        XCTAssertEqual(tick(&s, look), .none)
+        look.activity = .busy
+        XCTAssertEqual(tick(&s, look), .none, "a turn is running")
         look = idle()
         look.quiet = false
         XCTAssertEqual(tick(&s, look), .none)
-        XCTAssertEqual(tick(&s, idle(agents: 1)), .none, "a subagent is still running")
         var other = idle()
         other.conversation?.after = "cg-other"
         XCTAssertEqual(tick(&s, other), .none, "a conversation read for another save message")
@@ -255,6 +269,145 @@ final class CompactorTests: XCTestCase {
         XCTAssertEqual(s, before)
     }
 
+    // MARK: Background work
+
+    func testBackgroundWorkDoesNotKeepHaikuFromJudging() {
+        var s = askedToSave()
+        guard case .judge = tick(&s, background(agents: 2)) else { return XCTFail("expected a judge") }
+    }
+
+    func testReadyWaitsForBackgroundWorkAndSaysWhat() {
+        var s = ready()
+        XCTAssertEqual(tick(&s, background(agents: 2)), .none)
+        XCTAssertEqual(s.followUp?.stage, .background)
+        XCTAssertEqual(s.followUp?.background, BackgroundWork(agents: 2))
+        XCTAssertEqual(s.followUp?.backgroundSince, now)
+        XCTAssertNil(s.followUp?.backgroundAskedAt)
+
+        let since = now
+        now += 60
+        XCTAssertEqual(tick(&s, background(agents: 1, shells: true)), .none)
+        XCTAssertEqual(s.followUp?.background, BackgroundWork(agents: 1, shells: true), "what it waits on now")
+        XCTAssertEqual(s.followUp?.backgroundSince, since, "the wait counts from when it began")
+        XCTAssertEqual(s.followUp?.stageAt, since)
+
+        XCTAssertEqual(tick(&s, idle(size: 9_000)), .compact(nonce: nonce), "the work finished")
+        XCTAssertEqual(s.followUp?.stage, .compacting)
+        XCTAssertNil(s.followUp?.background)
+        XCTAssertNil(s.followUp?.backgroundSince)
+        XCTAssertEqual(s.followUp?.compactFrom, 9_000)
+    }
+
+    func testAShellCommandHoldsItToo() {
+        var s = ready()
+        XCTAssertEqual(tick(&s, background(shells: true)), .none)
+        XCTAssertEqual(s.followUp?.stage, .background)
+        XCTAssertEqual(s.followUp?.background, BackgroundWork(shells: true))
+    }
+
+    func testWhatTheWorkBroughtBackIsJudged() {
+        var s = ready()
+        _ = tick(&s, background(agents: 1))
+        // The agent finished and its result started a turn: the conversation moved.
+        guard case .judge(_, let mark, _) = tick(&s, idle(conversation("Claude: the agent found a bug", mark: 2_000))) else {
+            return XCTFail("a new line means a new verdict")
+        }
+        XCTAssertEqual(mark, 2_000)
+        XCTAssertEqual(s.followUp?.stage, .checking)
+    }
+
+    func testANewVerdictKeepsCountingTheWait() {
+        var s = ready()
+        _ = tick(&s, background(agents: 2))
+        let since = now
+        now += 120
+        // One agent reported back while the other runs on: judged again, ready again.
+        let moved = conversation("Claude: one is back; saved.", mark: 2_000)
+        guard case .judge = tick(&s, background(moved, agents: 1)) else { return XCTFail("expected a judge") }
+        _ = judged(&s, #"{"verdict":"ready","reason":"saved"}"#, mark: 2_000)
+        XCTAssertEqual(tick(&s, background(moved, agents: 1)), .none)
+        XCTAssertEqual(s.followUp?.stage, .background)
+        XCTAssertEqual(s.followUp?.backgroundSince, since)
+    }
+
+    func testAfterTenMinutesItAsksYouOnce() {
+        var s = ready()
+        _ = tick(&s, background(agents: 1))
+        now += Compactor.backgroundAsk - 1
+        _ = tick(&s, background(agents: 1))
+        XCTAssertNil(s.followUp?.backgroundAskedAt)
+        now += 1
+        _ = tick(&s, background(agents: 1))
+        XCTAssertEqual(s.followUp?.backgroundAskedAt, now)
+        let asked = now
+        now += 300
+        XCTAssertEqual(tick(&s, background(agents: 1)), .none, "asking doesn't compact")
+        XCTAssertEqual(s.followUp?.backgroundAskedAt, asked, "asked once")
+    }
+
+    func testAWaitThatEndsIsCountedAfreshNextTime() {
+        var s = ready()
+        _ = tick(&s, background(agents: 1))
+        now += Compactor.backgroundAsk
+        _ = tick(&s, background(agents: 1))
+        XCTAssertNotNil(s.followUp?.backgroundAskedAt)
+        // It finished, then the session started more work before compacting.
+        var look = idle()
+        look.quiet = false
+        _ = tick(&s, look)
+        XCTAssertNil(s.followUp?.backgroundSince)
+        XCTAssertNil(s.followUp?.backgroundAskedAt)
+        XCTAssertEqual(s.followUp?.stage, .checking)
+        _ = tick(&s, background(agents: 1))
+        XCTAssertEqual(s.followUp?.backgroundSince, now)
+        XCTAssertNil(s.followUp?.backgroundAskedAt)
+    }
+
+    func testCompactNowDoesNotWaitForBackgroundWork() {
+        var s = askedToSave()
+        s.sendReason = .manual
+        _ = tick(&s, idle())
+        _ = judged(&s, #"{"verdict":"ready","reason":"pushed"}"#)
+        XCTAssertEqual(tick(&s, background(agents: 3)), .compact(nonce: nonce))
+    }
+
+    func testCompactNowDuringTheWaitCompactsWithoutAskingItToSaveAgain() {
+        var s = ready()
+        _ = tick(&s, background(agents: 1))
+        let before = s
+        Engine.apply(Answer(cycle: s.cycle, action: .yes, source: .menu, at: now), to: &s)
+        XCTAssertEqual(s.followUp?.manual, true)
+        XCTAssertEqual(s.phase, .sent, "no second save message")
+        XCTAssertEqual(s.sentNonce, before.sentNonce)
+        XCTAssertEqual(s.sentAt, before.sentAt)
+        XCTAssertEqual(tick(&s, background(agents: 1)), .compact(nonce: nonce))
+    }
+
+    func testCompactNowWhileCheckingMakesItYours() {
+        var s = askedToSave()
+        _ = tick(&s, idle())
+        Engine.apply(Answer(cycle: s.cycle, action: .yes, source: .popup, at: now), to: &s)
+        XCTAssertEqual(s.followUp?.manual, true)
+        XCTAssertEqual(s.phase, .sent)
+        _ = judged(&s, #"{"verdict":"ready","reason":"pushed"}"#)
+        XCTAssertEqual(tick(&s, background(shells: true)), .compact(nonce: nonce))
+    }
+
+    func testCompactNowOnASaveMessageNotYetSeenIsLeftAlone() {
+        var s = askedToSave()
+        s.confirmedAt = nil
+        let before = s
+        Engine.apply(Answer(cycle: s.cycle, action: .yes, source: .menu, at: now), to: &s)
+        XCTAssertEqual(s.phase, before.phase)
+        XCTAssertNil(s.followUp)
+    }
+
+    func testTheContinueMessageGoesOutWithBackgroundWorkRunning() {
+        var s = compacting()
+        Engine.compactionStarted(&s, now: now)
+        XCTAssertEqual(tick(&s, background(agents: 1)), .continue(nonce: nonce, text: "continue now"))
+    }
+
     // MARK: Compacting
 
     func testOurCompactionMovesOnToTheContinueMessage() {
@@ -265,7 +418,7 @@ final class CompactorTests: XCTestCase {
         XCTAssertEqual(s.followUp?.tokensBefore, 310_000)
 
         var busy = idle()
-        busy.idle = false
+        busy.activity = .busy
         XCTAssertEqual(tick(&s, busy), .none, "never interrupts the compaction")
         XCTAssertEqual(tick(&s, idle()), .continue(nonce: nonce, text: "continue now"))
         XCTAssertEqual(s.followUp?.stage, .done)
@@ -479,6 +632,9 @@ final class CompactorTests: XCTestCase {
         f.tokensAfter = 24_000
         f.continuedAt = now.addingTimeInterval(7)
         f.continueFailures = 1
+        f.background = BackgroundWork(agents: 2, shells: true)
+        f.backgroundSince = now.addingTimeInterval(8)
+        f.backgroundAskedAt = now.addingTimeInterval(9)
         XCTAssertEqual(try FileIO.decoder().decode(FollowUp.self, from: FileIO.encoder().encode(f)), f)
     }
 

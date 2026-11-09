@@ -13,7 +13,7 @@ struct CLI {
                                                  answer a session's question (id or id prefix)
       context-guard watch <session> on|off       watch a session's tab, or stop watching it
       context-guard on | off                     turn Context Guard on or off
-      context-guard mod tick | report            for the Context Guard mod (JSON on stdin and stdout)
+      context-guard mod tick | report | turn     for the Context Guard mod (JSON on stdin and stdout)
     """
 
     static func main() {
@@ -82,7 +82,7 @@ struct CLI {
 
     // MARK: mod
 
-    /// The mod's two calls. Reads one JSON object on stdin, prints one on stdout; never fails loudly.
+    /// The mod's calls. Reads one JSON object on stdin, prints one on stdout; never fails loudly.
     static func runMod(paths: Paths, args: [String]) -> Never {
         signal(SIGALRM) { _ in _exit(0) }
         alarm(10)
@@ -97,6 +97,10 @@ struct CLI {
         case "report":
             guard let report = try? decoder.decode(ModReport.self, from: data) else { emit(["again": false]) }
             out = ["again": runner.report(report)]
+        case "turn":
+            guard let turn = try? decoder.decode(ModTurn.self, from: data) else { emit([:]) }
+            runner.turn(turn)
+            out = [:]
         default:
             fail(usage)
         }
@@ -153,9 +157,19 @@ struct CLI {
             let guarded = s.state.guarded ? "" : " (not guarded)"
             let muted = s.muted ? " (not watching)" : ""
             let waiter = s.waiterAlive ? " · waiting in background" : ""
-            let follow = s.state.followUp.map { " · compacting: \($0.stage.rawValue)\($0.note.map { " (\($0))" } ?? "")" } ?? ""
+            let follow = s.state.followUp.map { " · compacting: \($0.stage.rawValue)\(followUpDetail($0).map { " (\($0))" } ?? "")" } ?? ""
             print("\(s.id.prefix(8))  \(Format.tokens(s.state.tokens).padding(toLength: 6, withPad: " ", startingAt: 0)) \(s.effectivePhase.rawValue.padding(toLength: 9, withPad: " ", startingAt: 0)) \(s.title)\(guarded)\(muted)\(waiter)\(follow)")
         }
+    }
+
+    /// Why a follow-up stands where it does: what it waits on, or Haiku's reason.
+    static func followUpDetail(_ f: FollowUp) -> String? {
+        guard f.stage == .background else { return f.note }
+        let what = FollowUpText.waitingOn(f.background)
+        let minutes = f.backgroundSince.map { max(0, Int(Date().timeIntervalSince($0) / 60)) }
+        let waited = minutes.map { $0 == 1 ? ", 1 min so far" : ", \($0) min so far" } ?? ""
+        let asked = f.backgroundAskedAt != nil ? "; asked you whether to compact anyway" : ""
+        return "waiting for \(what.phrase)\(waited)\(asked)"
     }
 
     struct StatusRow: Encodable {

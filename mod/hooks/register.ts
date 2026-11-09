@@ -4,7 +4,8 @@
 // follows is decided by its program, `context-guard mod`, which reads the transcript and holds the
 // rules: ask Haiku whether the session has finished saving, compact it, then send the continue
 // message. Every 10 seconds this module asks the program for the next step, does it, and reports
-// what happened. It keeps no rules of its own.
+// what happened. It also tells the program when each turn of the conversation starts and ends. It
+// keeps no rules of its own.
 import type { EngineInterface, Register } from 'claude-code'
 
 /** How often the program is asked for the next step. */
@@ -15,6 +16,8 @@ const NOT_INSTALLED_WAIT_MS = 60_000
 const MAX_STEPS = 4
 /** Longer than the program's own 10-second limit. */
 const PROGRAM_TIMEOUT_MS = 15_000
+/** A turn waits for its start to be noted, so this is short. */
+const NOTE_TIMEOUT_MS = 5_000
 
 /**
  * Runs `context-guard mod <command>` (the command is `$0`): the installed program, or the one
@@ -42,6 +45,7 @@ type Outcome = {
 }
 
 // The module's own, so a reload starts them over.
+let guarding = false
 let busy = false
 let waitUntil = 0
 let judging: AbortController | undefined
@@ -50,8 +54,34 @@ export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     // Only a session a person works in: not `claude -p`, the SDK or another program's helper.
-    if (e.isInteractive && e.surface === 'terminal') $.clock.every(EVERY_MS, () => run($))
+    guarding = e.isInteractive && e.surface === 'terminal'
+    if (guarding) $.clock.every(EVERY_MS, () => run($))
     return started
+  })
+
+  // Claude Code's registry says "busy" both while a turn runs and while agents it started run in
+  // the background between turns. Woken mid-turn, a session ignores the message, so the program
+  // needs to know which. A turn's start is noted before it runs; its end, after.
+  on('prompt.submit', async ($, e, next) => {
+    // A prompt typed while nothing runs: the turn counts from Enter, as the settings hooks that
+    // run before its start can take a while. Typed during a turn, it joins that one.
+    const starts = guarding && e.turnId === undefined && e.command === undefined
+    if (starts) await note($, true)
+    const entered = await next(e)
+    if (starts && entered.drop !== undefined) await note($, false)
+    return entered
+  })
+
+  on('turn.start', async ($, e, next) => {
+    // An agent's turns are its own; only the conversation's count.
+    if (guarding && e.agentId === undefined) await note($, true)
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const done = await next(e)
+    if (guarding && e.agentId === undefined) await note($, false)
+    return done
   })
 
   // `/clear` ends the conversation, not the process, so the timer goes on: each step reads the
@@ -148,6 +178,15 @@ async function send($: EngineInterface, text: string): Promise<Outcome | undefin
   }
 }
 
+/** Tells the program a turn of the conversation started or ended. Never stops the turn. */
+async function note($: EngineInterface, active: boolean): Promise<void> {
+  try {
+    await program($, 'turn', { sessionId: await $.session.id(), active }, NOTE_TIMEOUT_MS)
+  } catch (err) {
+    $.ui.log(`Context Guard: ${describe(err)}`, { to: 'debug' })
+  }
+}
+
 /** Whether anything is typed in the prompt box; undefined when it can't be read. */
 async function hasDraft($: EngineInterface): Promise<boolean | undefined> {
   try {
@@ -160,12 +199,13 @@ async function hasDraft($: EngineInterface): Promise<boolean | undefined> {
 /** Runs `context-guard mod <command>` with `input` as JSON and returns its JSON answer. */
 async function program(
   $: EngineInterface,
-  command: 'tick' | 'report',
+  command: 'tick' | 'report' | 'turn',
   input: object,
+  timeoutMs = PROGRAM_TIMEOUT_MS,
 ): Promise<Record<string, unknown> | undefined> {
   const r = await $.process.run(['/bin/sh', '-c', RUN, command], {
     stdin: JSON.stringify(input),
-    timeoutMs: PROGRAM_TIMEOUT_MS,
+    timeoutMs,
     // The session's folder may be gone (a removed worktree), and the program doesn't need it.
     cwd: '/',
   })

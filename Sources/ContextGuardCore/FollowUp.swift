@@ -13,6 +13,9 @@ public struct FollowUp: Codable, Equatable, Sendable {
         case needsYou
         /// Ready, but there's text in the prompt box.
         case draft
+        /// Ready, but the session left work running in the background (an agent, a shell command).
+        /// An automatic follow-up waits for it; Compact Now doesn't.
+        case background
         case compacting
         /// Compacted; the continue message goes out once the session is idle.
         case continuing
@@ -69,6 +72,13 @@ public struct FollowUp: Codable, Equatable, Sendable {
     public var continuedAt: Date?
     public var continueFailures = 0
 
+    /// What it's waiting on in the `background` stage.
+    public var background: BackgroundWork?
+    /// When it was first ready but held by background work. Cleared once that work is done.
+    public var backgroundSince: Date?
+    /// When it had waited `Compactor.backgroundAsk` and the app asked you whether to compact anyway.
+    public var backgroundAskedAt: Date?
+
     public init(nonce: String, manual: Bool = false, now: Date) {
         self.nonce = nonce
         self.manual = manual ? true : nil
@@ -80,7 +90,7 @@ public struct FollowUp: Codable, Equatable, Sendable {
     public var isActive: Bool { ![.done, .tookOver, .stopped, .failed].contains(stage) }
 
     /// Still waiting for the session to be ready.
-    public var isBeforeCompacting: Bool { [.checking, .working, .needsYou, .draft].contains(stage) }
+    public var isBeforeCompacting: Bool { [.checking, .working, .needsYou, .draft, .background].contains(stage) }
 
     // Missing keys fall back to defaults, so a file from another build still reads.
     public init(from decoder: Decoder) throws {
@@ -106,6 +116,9 @@ public struct FollowUp: Codable, Equatable, Sendable {
         tokensAfter = try c.decodeIfPresent(Int.self, forKey: .tokensAfter)
         continuedAt = try c.decodeIfPresent(Date.self, forKey: .continuedAt)
         continueFailures = try c.decodeIfPresent(Int.self, forKey: .continueFailures) ?? 0
+        background = try? c.decodeIfPresent(BackgroundWork.self, forKey: .background)
+        backgroundSince = try c.decodeIfPresent(Date.self, forKey: .backgroundSince)
+        backgroundAskedAt = try c.decodeIfPresent(Date.self, forKey: .backgroundAskedAt)
     }
 }
 
@@ -152,12 +165,10 @@ public struct ModReport: Codable, Equatable, Sendable {
 
 /// The session as it is right now, gathered for one tick.
 public struct SessionLook: Equatable, Sendable {
-    /// Its Claude process is running this conversation and is between turns.
-    public var idle = false
+    /// Where its Claude process stands, for this conversation (`busy` when it runs another one).
+    public var activity: SessionActivity = .busy
     /// Nothing written to the transcript in the last second, so a finished turn's last lines are in.
     public var quiet = false
-    /// Subagents still running.
-    public var agents = 0
     /// Text in the prompt box.
     public var draft = false
     /// The conversation after the save message (read only when a verdict depends on it).
@@ -167,18 +178,20 @@ public struct SessionLook: Equatable, Sendable {
     public var transcriptSize: UInt64?
     public var lastWrite: Date?
 
-    public init(idle: Bool = false, quiet: Bool = false, agents: Int = 0, draft: Bool = false,
+    public init(activity: SessionActivity = .busy, quiet: Bool = false, draft: Bool = false,
                 conversation: Conversation? = nil, promptSinceCompacting: Bool = false,
                 transcriptSize: UInt64? = nil, lastWrite: Date? = nil) {
-        self.idle = idle
+        self.activity = activity
         self.quiet = quiet
-        self.agents = agents
         self.draft = draft
         self.conversation = conversation
         self.promptSinceCompacting = promptSinceCompacting
         self.transcriptSize = transcriptSize
         self.lastWrite = lastWrite
     }
+
+    /// Between turns: a wake or the continue message starts a new turn, and compacting works.
+    public var idle: Bool { activity.isBetweenTurns }
 }
 
 /// The follow-up rules. Pure functions over `SessionState`, like `Engine`.
@@ -196,6 +209,8 @@ public enum Compactor {
     static let maxContinueFailures = 3
     /// Compacting this long with no compaction seen, and idle: it never happened (the mod reloaded).
     static let compactStall: TimeInterval = 600
+    /// Ready but held by background work this long: the app asks whether to compact anyway.
+    public static let backgroundAsk: TimeInterval = 600
     /// A save message confirmed longer ago than this wasn't followed when it arrived (no mod then,
     /// or Context Guard before this feature): it's left alone rather than compacted out of the blue.
     static let startWindow: TimeInterval = 600
@@ -274,10 +289,17 @@ public enum Compactor {
             f.continuedAt = now
             return .continue(nonce: f.nonce, text: config.continueMessage)
 
-        case .checking, .working, .needsYou, .draft:
+        case .checking, .working, .needsYou, .draft, .background:
             if let asked = f.judgeAskedAt, now.timeIntervalSince(asked) < judgeAbandoned { return .none }
             f.judgeAskedAt = nil
-            guard look.idle, look.agents == 0, look.quiet,
+            if look.activity == .idle, f.backgroundSince != nil {
+                // The background work finished: what it brought back is judged like anything else.
+                f.background = nil
+                f.backgroundSince = nil
+                f.backgroundAskedAt = nil
+                if f.stage == .background { set(&f, .checking, now: now) }
+            }
+            guard look.idle, look.quiet,
                   let conversation = look.conversation, conversation.after == f.nonce, conversation.mark > 0 else { return .none }
 
             if let verdict = f.verdict, f.verdictMark == conversation.mark {
@@ -285,6 +307,18 @@ public enum Compactor {
                 case .ready:
                     if look.draft {
                         if f.stage != .draft { set(&f, .draft, now: now) }
+                        return .none
+                    }
+                    // Work it left running in the background holds an automatic follow-up: the
+                    // session may still act on what comes back. Compact Now doesn't wait for it.
+                    if let work = look.activity.background, f.manual != true {
+                        if f.stage != .background { set(&f, .background, now: now) }
+                        f.background = work
+                        let since = f.backgroundSince ?? now
+                        f.backgroundSince = since
+                        if f.backgroundAskedAt == nil, now.timeIntervalSince(since) >= backgroundAsk {
+                            f.backgroundAskedAt = now
+                        }
                         return .none
                     }
                     guard f.compactAttempts < maxCompactAttempts else {

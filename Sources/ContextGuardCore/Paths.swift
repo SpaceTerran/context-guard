@@ -33,17 +33,20 @@ public struct Paths: Sendable, Equatable {
     public var answersDir: URL { root.appendingPathComponent("answers", isDirectory: true) }
     /// One file per Claude process you stopped watching (`Mute`).
     public var mutedDir: URL { root.appendingPathComponent("muted", isDirectory: true) }
+    /// Each session's latest turn start or end, from the mod (`TurnRecord`).
+    public var turnsDir: URL { root.appendingPathComponent("turns", isDirectory: true) }
 
     public func stateFile(_ id: String) -> URL { sessionsDir.appendingPathComponent("\(id).json") }
     public func lockFile(_ id: String) -> URL { sessionsDir.appendingPathComponent("\(id).lock") }
     public func answerFile(_ id: String) -> URL { answersDir.appendingPathComponent("\(id).json") }
+    public func turnFile(_ id: String) -> URL { turnsDir.appendingPathComponent("\(id).json") }
     public func muteFile(pid: Int32, start: ProcessStart) -> URL {
         mutedDir.appendingPathComponent("\(pid)-\(start.seconds).json")
     }
 
     public func ensureDirectories() throws {
         let fm = FileManager.default
-        for dir in [root, sessionsDir, answersDir, mutedDir] {
+        for dir in [root, sessionsDir, answersDir, mutedDir, turnsDir] {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
     }
