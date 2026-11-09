@@ -34,8 +34,8 @@ final class CompactorTests: XCTestCase {
     }
 
     /// Between turns, with agents or a shell command still running in the background.
-    func background(_ c: Conversation? = nil, agents: Int = 0, shells: Bool = false) -> SessionLook {
-        idle(c, background: BackgroundWork(agents: agents, shells: shells))
+    func background(_ c: Conversation? = nil, agents: Int = 0, shells: Bool = false, size: UInt64 = 5_000) -> SessionLook {
+        idle(c, size: size, background: BackgroundWork(agents: agents, shells: shells))
     }
 
     /// Walks a session to Haiku's "ready".
@@ -276,110 +276,43 @@ final class CompactorTests: XCTestCase {
         guard case .judge = tick(&s, background(agents: 2)) else { return XCTFail("expected a judge") }
     }
 
-    func testReadyWaitsForBackgroundWorkAndSaysWhat() {
+    /// Work it left running doesn't hold it: it keeps running through the compaction, and what it
+    /// brings back reaches the compacted session.
+    func testReadyCompactsWithBackgroundAgentsRunning() {
         var s = ready()
-        XCTAssertEqual(tick(&s, background(agents: 2)), .none)
-        XCTAssertEqual(s.followUp?.stage, .background)
-        XCTAssertEqual(s.followUp?.background, BackgroundWork(agents: 2))
-        XCTAssertEqual(s.followUp?.backgroundSince, now)
-        XCTAssertNil(s.followUp?.backgroundAskedAt)
-
-        let since = now
-        now += 60
-        XCTAssertEqual(tick(&s, background(agents: 1, shells: true)), .none)
-        XCTAssertEqual(s.followUp?.background, BackgroundWork(agents: 1, shells: true), "what it waits on now")
-        XCTAssertEqual(s.followUp?.backgroundSince, since, "the wait counts from when it began")
-        XCTAssertEqual(s.followUp?.stageAt, since)
-
-        XCTAssertEqual(tick(&s, idle(size: 9_000)), .compact(nonce: nonce), "the work finished")
+        XCTAssertEqual(tick(&s, background(agents: 2, size: 9_000)), .compact(nonce: nonce))
         XCTAssertEqual(s.followUp?.stage, .compacting)
-        XCTAssertNil(s.followUp?.background)
-        XCTAssertNil(s.followUp?.backgroundSince)
         XCTAssertEqual(s.followUp?.compactFrom, 9_000)
     }
 
-    func testAShellCommandHoldsItToo() {
+    func testReadyCompactsWithABackgroundCommandRunning() {
         var s = ready()
-        XCTAssertEqual(tick(&s, background(shells: true)), .none)
-        XCTAssertEqual(s.followUp?.stage, .background)
-        XCTAssertEqual(s.followUp?.background, BackgroundWork(shells: true))
+        XCTAssertEqual(tick(&s, background(shells: true)), .compact(nonce: nonce))
     }
 
-    func testWhatTheWorkBroughtBackIsJudged() {
-        var s = ready()
-        _ = tick(&s, background(agents: 1))
-        // The agent finished and its result started a turn: the conversation moved.
-        guard case .judge(_, let mark, _) = tick(&s, idle(conversation("Claude: the agent found a bug", mark: 2_000))) else {
-            return XCTFail("a new line means a new verdict")
-        }
-        XCTAssertEqual(mark, 2_000)
-        XCTAssertEqual(s.followUp?.stage, .checking)
-    }
-
-    func testANewVerdictKeepsCountingTheWait() {
-        var s = ready()
-        _ = tick(&s, background(agents: 2))
-        let since = now
-        now += 120
-        // One agent reported back while the other runs on: judged again, ready again.
-        let moved = conversation("Claude: one is back; saved.", mark: 2_000)
-        guard case .judge = tick(&s, background(moved, agents: 1)) else { return XCTFail("expected a judge") }
-        _ = judged(&s, #"{"verdict":"ready","reason":"saved"}"#, mark: 2_000)
-        XCTAssertEqual(tick(&s, background(moved, agents: 1)), .none)
-        XCTAssertEqual(s.followUp?.stage, .background)
-        XCTAssertEqual(s.followUp?.backgroundSince, since)
-    }
-
-    func testAfterTenMinutesItAsksYouOnce() {
-        var s = ready()
-        _ = tick(&s, background(agents: 1))
-        now += Compactor.backgroundAsk - 1
-        _ = tick(&s, background(agents: 1))
-        XCTAssertNil(s.followUp?.backgroundAskedAt)
-        now += 1
-        _ = tick(&s, background(agents: 1))
-        XCTAssertEqual(s.followUp?.backgroundAskedAt, now)
-        let asked = now
-        now += 300
-        XCTAssertEqual(tick(&s, background(agents: 1)), .none, "asking doesn't compact")
-        XCTAssertEqual(s.followUp?.backgroundAskedAt, asked, "asked once")
-    }
-
-    func testAWaitThatEndsIsCountedAfreshNextTime() {
-        var s = ready()
-        _ = tick(&s, background(agents: 1))
-        now += Compactor.backgroundAsk
-        _ = tick(&s, background(agents: 1))
-        XCTAssertNotNil(s.followUp?.backgroundAskedAt)
-        // It finished, then the session started more work before compacting.
-        var look = idle()
-        look.quiet = false
-        _ = tick(&s, look)
-        XCTAssertNil(s.followUp?.backgroundSince)
-        XCTAssertNil(s.followUp?.backgroundAskedAt)
-        XCTAssertEqual(s.followUp?.stage, .checking)
-        _ = tick(&s, background(agents: 1))
-        XCTAssertEqual(s.followUp?.backgroundSince, now)
-        XCTAssertNil(s.followUp?.backgroundAskedAt)
-    }
-
-    func testCompactNowDoesNotWaitForBackgroundWork() {
+    /// A session that says it can't be ready until its agent is back is held by its own words.
+    func testASessionWaitingOnItsAgentIsHeldUntilItSaysReady() {
         var s = askedToSave()
-        s.sendReason = .manual
-        _ = tick(&s, idle())
-        _ = judged(&s, #"{"verdict":"ready","reason":"pushed"}"#)
-        XCTAssertEqual(tick(&s, background(agents: 3)), .compact(nonce: nonce))
+        _ = tick(&s, background(agents: 1))
+        _ = judged(&s, #"{"verdict":"working","reason":"waiting for its agent's review"}"#)
+        XCTAssertEqual(tick(&s, background(agents: 1)), .none)
+        XCTAssertEqual(s.followUp?.stage, .working)
+        // The agent reported back and the session finished saving: the conversation moved.
+        let moved = conversation("Claude: the review is in and committed. Ready.", mark: 2_000)
+        guard case .judge(_, let mark, _) = tick(&s, idle(moved)) else { return XCTFail("a new line means a new verdict") }
+        _ = judged(&s, #"{"verdict":"ready","reason":"committed"}"#, mark: mark)
+        XCTAssertEqual(tick(&s, idle(moved)), .compact(nonce: nonce))
     }
 
-    func testCompactNowDuringTheWaitCompactsWithoutAskingItToSaveAgain() {
+    /// Earlier builds held a ready session in a "background" stage. Read from such a file, it's
+    /// checking again and compacts at the next tick.
+    func testAFollowUpHeldByAnEarlierBuildCompacts() throws {
         var s = ready()
-        _ = tick(&s, background(agents: 1))
-        let before = s
-        Engine.apply(Answer(cycle: s.cycle, action: .yes, source: .menu, at: now), to: &s)
-        XCTAssertEqual(s.followUp?.manual, true)
-        XCTAssertEqual(s.phase, .sent, "no second save message")
-        XCTAssertEqual(s.sentNonce, before.sentNonce)
-        XCTAssertEqual(s.sentAt, before.sentAt)
+        let data = try FileIO.encoder().encode(s)
+        let text = String(decoding: data, as: UTF8.self).replacingOccurrences(of: #""stage" : "checking""#, with: #""stage" : "background""#)
+        XCTAssertTrue(text.contains(#""stage" : "background""#))
+        s = try FileIO.decoder().decode(SessionState.self, from: Data(text.utf8))
+        XCTAssertEqual(s.followUp?.stage, .checking)
         XCTAssertEqual(tick(&s, background(agents: 1)), .compact(nonce: nonce))
     }
 
@@ -632,9 +565,6 @@ final class CompactorTests: XCTestCase {
         f.tokensAfter = 24_000
         f.continuedAt = now.addingTimeInterval(7)
         f.continueFailures = 1
-        f.background = BackgroundWork(agents: 2, shells: true)
-        f.backgroundSince = now.addingTimeInterval(8)
-        f.backgroundAskedAt = now.addingTimeInterval(9)
         XCTAssertEqual(try FileIO.decoder().decode(FollowUp.self, from: FileIO.encoder().encode(f)), f)
     }
 

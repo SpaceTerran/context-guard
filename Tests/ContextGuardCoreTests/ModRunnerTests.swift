@@ -127,32 +127,31 @@ final class ModRunnerTests: HookTestCase {
         XCTAssertEqual(n, nonce)
     }
 
-    func testBackgroundWorkHoldsItUntilItFinishes() throws {
+    /// Agents it left running don't hold it: they keep running through the compaction, and what
+    /// they bring back reaches the compacted session.
+    func testBackgroundAgentsDoNotHoldIt() throws {
         let nonce = try readyWithAgentsRunning()
-        XCTAssertEqual(tick(agents: 2), .none)
-        XCTAssertEqual(state?.followUp?.stage, .background)
-        XCTAssertEqual(state?.followUp?.background, BackgroundWork(agents: 2))
-        XCTAssertNotNil(state?.followUp?.backgroundSince)
-
-        setStatus("shell")
-        XCTAssertEqual(tick(), .none)
-        XCTAssertEqual(state?.followUp?.background, BackgroundWork(shells: true), "now a background command")
-
-        setStatus("idle")
-        XCTAssertEqual(tick(), .compact(nonce: nonce))
-        XCTAssertNil(state?.followUp?.background)
+        XCTAssertEqual(tick(agents: 2), .compact(nonce: nonce))
+        XCTAssertEqual(state?.followUp?.stage, .compacting)
     }
 
-    func testCompactNowDuringTheWaitCompactsAtTheNextTick() throws {
+    /// Nor does a command or monitor running in the background (Claude Code's status `shell`).
+    func testABackgroundCommandDoesNotHoldIt() throws {
+        let nonce = try askToSave()
+        try turnEnded()
+        setStatus("shell")
+        guard case .judge(_, let mark, _) = tick() else { return XCTFail("a background command doesn't keep Haiku from judging") }
+        XCTAssertTrue(report(.judged, nonce: nonce, mark: mark, text: #"{"verdict":"ready","reason":"pushed"}"#))
+        XCTAssertEqual(tick(), .compact(nonce: nonce))
+    }
+
+    /// After compacting, the continue message goes out between turns, background work or not.
+    func testTheContinueMessageGoesOutWithBackgroundWorkRunning() throws {
         let nonce = try readyWithAgentsRunning()
-        XCTAssertEqual(tick(agents: 2), .none)
-        let sentAt = state?.sentAt
-        // No background Stop hook needs to pick the answer up: the mod's tick applies it.
-        try answer(.yes, from: .menu)
         XCTAssertEqual(tick(agents: 2), .compact(nonce: nonce))
-        XCTAssertEqual(state?.followUp?.manual, true)
-        XCTAssertEqual(state?.phase, .sent, "not asked to save again")
-        XCTAssertEqual(state?.sentAt, sentAt)
+        XCTAssertFalse(report(.compacted, nonce: nonce))
+        XCTAssertEqual(tick(agents: 2), .continue(nonce: nonce, text: Config.defaultContinueMessage))
+        XCTAssertEqual(state?.followUp?.stage, .done)
     }
 
     func testTurnRecordsNeedNoLockAndLeaveTheStateAlone() throws {

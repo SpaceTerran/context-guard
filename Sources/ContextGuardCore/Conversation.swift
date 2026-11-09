@@ -226,8 +226,10 @@ public enum JudgePrompt {
 
         The session has finished its turn and is waiting.\(idle) Is it ready for its conversation to be compacted now?
 
-        - ready: it acted on the message and has finished saving what it needed to (committing, pushing, writing notes, checking in), and its last message reports that or says it's ready. It isn't waiting on anything it started.
-        - working: it is partway through saving, or says it is waiting for something it started (a push, a build, CI, a background task) before it's ready.
+        - ready: it acted on the message and has finished saving what it needed to (committing, pushing, writing notes, checking in), and its last message reports that or says it's ready.
+        - working: it is partway through saving, or says it can't be ready until something it started (a push, a build, CI, a background task) finishes.
+
+        Agents, commands or monitors still running in the background don't make it working by themselves: they keep running through the compaction, and what they bring back reaches the session afterwards. Only the session saying it must wait for one before it's ready does.
         - needs_user: its last message asks the user a question, asks for a decision or approval, or says it is blocked on them. Also when it declined or ignored the message, for example because it doubted the message came from the user: only the user can settle that.
 
         If the user asked for more work after the message, it is ready only once that work is done too.

@@ -5,8 +5,6 @@
 #   live-test/ui-demo.sh phase <A|B|C|D> <phase> [tokens]   change a staged session (as the hook would)
 #   live-test/ui-demo.sh followup <A|B|C|D> <stage> [note] [compacted]  set where compacting stands after
 #                                             the save message (continuing, done and tookOver are always compacted)
-#   live-test/ui-demo.sh followup <A|B|C|D> background [minutes]  done saving, held by two background
-#                                             agents for that long (default 1); from 10, the app asks you
 #   live-test/ui-demo.sh watch <A|B|C|D> on|off             watch a staged session's tab, or stop
 #   live-test/ui-demo.sh settings             open Settings (from the menu, through accessibility)
 #   live-test/ui-demo.sh tab <General|When to Ask|Messages>  show a Settings tab (pressed through accessibility)
@@ -108,18 +106,10 @@ case "$cmd" in
     f="$home/sessions/00000000-0000-4000-8000-00000000000$(( $(printf '%d' "'$key") - 64 )).json"
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     case "$stage" in continuing|done|tookOver) compacted=compacted ;; esac
-    wait="{}"
-    if [ "$stage" = background ]; then
-      minutes="${note:-1}"; note=""
-      since="$(date -u -v-"${minutes}"M +%Y-%m-%dT%H:%M:%SZ)"
-      wait="$(jq -n --arg since "$since" --arg now "$now" --argjson m "$minutes" \
-        '{verdict: "ready", background: {agents: 2, shells: false}, backgroundSince: $since}
-         + (if $m >= 10 then {backgroundAskedAt: $now} else {} end)')"
-    fi
-    jq --arg s "$stage" --arg n "$note" --arg c "$compacted" --arg now "$now" --argjson w "$wait" '.followUp = {
+    jq --arg s "$stage" --arg n "$note" --arg c "$compacted" --arg now "$now" '.followUp = {
         nonce: (.sentNonce // ("cg-demo-" + .name)), stage: $s, startedAt: $now, stageAt: $now,
         tokensBefore: .tokens, tokensAfter: 24100} + (if $n != "" then {note: $n} else {} end)
-        + (if $c != "" then {compactedAt: $now} else {} end) + $w' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+        + (if $c != "" then {compactedAt: $now} else {} end)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
     ;;
   watch)
     key="${2:?A|B|C|D}"

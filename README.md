@@ -33,12 +33,13 @@ finishes the job:
    decides whether it has finished saving. A question to you, or a session still waiting on a push
    or CI, holds it; so does a session that ignored the message.
 2. Once it's ready, the session is compacted, as `/compact` does it. Text in the prompt box holds it.
-   So do agents or commands it left running in the background, since it may still act on what they
-   bring back: its menu line says what it's waiting for. After 10 minutes, a popup asks whether to
-   keep waiting or compact now, which leaves that work running. **Compact Now** in its menu doesn't
-   wait.
 3. When the compaction is done and no turn is running, **continue now** goes in as your words. If
    you typed or sent something first, it's left to you.
+
+Agents, commands and monitors the session left running in the background don't hold any of this.
+They keep running through the compaction, and what they bring back reaches the compacted session,
+which carries on from what it saved. A session that can't be ready until one of them finishes says
+so, and Haiku holds it until it's done.
 
 A notice says when it needs you, when it compacts and how it went. After a session compacts, it's
 asked again the next time it reaches 300k.

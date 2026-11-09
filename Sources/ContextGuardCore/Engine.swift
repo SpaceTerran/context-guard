@@ -96,7 +96,8 @@ public enum Engine {
             guard !inFlight else { return }
             if var f = s.followUp, f.isActive, s.phase == .sent, s.sentNonce == f.nonce {
                 // It already has this save message, so it isn't asked again. Before compacting,
-                // Compact Now makes the follow-up yours: it stops waiting on background work.
+                // Compact Now makes the follow-up yours: turning Context Guard off or not watching
+                // the tab no longer stops it.
                 if f.isBeforeCompacting, f.manual != true {
                     f.manual = true
                     s.followUp = f
