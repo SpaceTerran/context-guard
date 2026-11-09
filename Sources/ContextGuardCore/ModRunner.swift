@@ -15,6 +15,17 @@ public struct ModFacts: Codable, Equatable, Sendable {
     }
 }
 
+/// A main-conversation turn starting or ending, as the mod hears it (`turn.start`, `turn.complete`).
+public struct ModTurn: Codable, Equatable, Sendable {
+    public var sessionId: String
+    public var active: Bool
+
+    public init(sessionId: String, active: Bool) {
+        self.sessionId = sessionId
+        self.active = active
+    }
+}
+
 /// Runs the mod's `tick` and `report` against the state files, under the same lock as the hooks.
 /// Every failure ends in `.none` / no change.
 public struct ModRunner: Sendable {
@@ -39,13 +50,16 @@ public struct ModRunner: Sendable {
         guard Compactor.startableNonce(snap, now: now) != nil || (snap.followUp?.isActive ?? false) else { return .none }
 
         // Gathered before taking the lock: reading the conversation can take a moment.
-        var look = SessionLook(agents: facts.agents ?? 0, draft: facts.draft ?? false)
+        var look = SessionLook(draft: facts.draft ?? false)
         if let pid = snap.claudePid, probe.isRunning(pid, startedAt: snap.claudeStart) {
-            let entry = registry.entry(pid: pid)
-            if let entry {
-                look.idle = entry.sessionId == id && RegistryEntry.isIdle(entry)
-            } else {
-                look.idle = !registry.isAvailable
+            if let entry = registry.entry(pid: pid) {
+                // After /clear or /resume this process runs a different conversation.
+                if entry.sessionId == id {
+                    look.activity = SessionActivity.of(entry, turn: TurnRecord.load(id, paths), processStart: snap.claudeStart,
+                                                       agents: facts.agents ?? 0, now: now)
+                }
+            } else if !registry.isAvailable {
+                look.activity = .idle
             }
         }
         if let path = snap.transcriptPath, let attrs = try? FileManager.default.attributesOfItem(atPath: path) {
@@ -64,6 +78,9 @@ public struct ModRunner: Sendable {
         defer { lock.release() }
         guard var s = SessionState.load(id, paths) else { return .none }
         let before = s
+        // Compact Now on a follow-up already under way is applied here too, so it doesn't wait for
+        // the session's next hook event when no background Stop hook is waiting.
+        Engine.apply(Answer.load(id, paths), to: &s)
         let action = Compactor.tick(&s, config: Config.load(paths), watched: !Mute.isMuted(s, paths), look: look, now: now)
         if s != before {
             s.updatedAt = now
@@ -71,6 +88,13 @@ public struct ModRunner: Sendable {
             guard (try? s.save(paths)) != nil else { return .none }
         }
         return action
+    }
+
+    /// Records a main-conversation turn starting or ending. The mod awaits this at a turn's start,
+    /// so the record is in before the turn runs. It takes no lock (`TurnRecord`).
+    public func turn(_ t: ModTurn) {
+        guard Paths.isValidSessionID(t.sessionId), let s = SessionState.load(t.sessionId, paths), s.guarded else { return }
+        try? TurnRecord(active: t.active, at: clock()).save(for: t.sessionId, paths)
     }
 
     /// Returns whether the mod should tick again right away.

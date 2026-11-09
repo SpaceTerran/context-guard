@@ -65,15 +65,6 @@ public struct RegistryEntry: Equatable, Sendable {
 
     /// A terminal session started from the CLI (not an SDK, background or automated one).
     public var isInteractiveCLI: Bool { entrypoint == "cli" && kind == "interactive" }
-
-    /// Whether a wake would start a new turn. Woken mid-turn (`busy`, or `waiting` on a permission
-    /// prompt), Claude Code appends the message to a tool result under its "not a message from the
-    /// user" banner, and models ignore it as a prompt injection (seen live with Opus). A Claude Code
-    /// that reports no status counts as idle.
-    public static func isIdle(_ entry: RegistryEntry?) -> Bool {
-        guard let status = entry?.status else { return true }
-        return status == "idle"
-    }
 }
 
 public protocol RegistryReading: Sendable {

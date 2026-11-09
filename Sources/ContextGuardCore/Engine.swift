@@ -94,6 +94,15 @@ public enum Engine {
         case .yes:
             let inFlight = s.phase == .queued || (s.phase == .sent && s.confirmedAt == nil)
             guard !inFlight else { return }
+            if var f = s.followUp, f.isActive, s.phase == .sent, s.sentNonce == f.nonce {
+                // It already has this save message, so it isn't asked again. Before compacting,
+                // Compact Now makes the follow-up yours: it stops waiting on background work.
+                if f.isBeforeCompacting, f.manual != true {
+                    f.manual = true
+                    s.followUp = f
+                }
+                return
+            }
             // Answering the question (the popup, or the CLI as the popup would) is a yes. Compact Now
             // in the menu is always a request of its own, even while a question is open.
             let reason: SendReason = s.phase == .asking && answer.source != .menu ? .yes : .manual

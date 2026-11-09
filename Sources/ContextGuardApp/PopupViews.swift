@@ -141,6 +141,71 @@ struct QuestionView: View {
     }
 }
 
+/// After a session has waited `Compactor.backgroundAsk` on work it left running in the background:
+/// compact it now, or keep waiting. It closes by itself once that work finishes.
+struct WaitQuestionView: View {
+    let model: AppModel
+    let sessionID: String
+
+    var body: some View {
+        if let info = model.session(sessionID), let f = info.state.followUp {
+            content(info, f)
+        }
+    }
+
+    private func content(_ info: SessionInfo, _ f: FollowUp) -> some View {
+        let what = FollowUpText.waitingOn(f.background)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                AppBadge(size: 38, symbol: "hourglass", color: Theme.color(.accent))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Still waiting to compact")
+                        .font(Theme.font(14, .bold))
+                        .foregroundStyle(Theme.heading)
+                    Text(info.title)
+                        .font(Theme.font(13))
+                        .foregroundStyle(Theme.text)
+                        .lineLimit(1)
+                    if !info.subtitle.isEmpty {
+                        Text(info.subtitle)
+                            .font(Theme.font(12))
+                            .foregroundStyle(Theme.muted)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: 0)
+                CloseButton(help: "Keep waiting (Compact Now in its menu still compacts it)") { model.keepWaiting(sessionID) }
+            }
+            // The wait goes on while the question is up, so the minutes count on.
+            TimelineView(.periodic(from: .now, by: 15)) { context in
+                Text("It's done saving, and has waited \(waited(f, now: context.date)) for \(what.phrase) to finish. Compacting now leaves \(what.it) running.")
+                    .font(Theme.font(12))
+                    .foregroundStyle(Theme.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button("Keep Waiting") { model.keepWaiting(sessionID) }
+                    .buttonStyle(BrandButtonStyle(kind: .secondary))
+                    .help("Compact once \(what.phrase) \(what.finishes)")
+                Button("Compact Now") { model.compactWithoutWaiting(sessionID, from: .popup) }
+                    .buttonStyle(BrandButtonStyle(kind: .primary))
+                    .keyboardShortcut(.defaultAction)
+                    .help("Compact without waiting, then send \u{201C}\(model.config.continueMessage)\u{201D}")
+            }
+        }
+        .panelCard()
+    }
+
+    /// "12 minutes": how long it has waited on the background work, in whole minutes.
+    private func waited(_ f: FollowUp, now: Date) -> String {
+        let since = f.backgroundSince ?? now.addingTimeInterval(-Compactor.backgroundAsk)
+        let minutes = max(Int(Compactor.backgroundAsk / 60), Int(now.timeIntervalSince(since) / 60))
+        return "\(minutes) minutes"
+    }
+}
+
 /// A short message that closes by itself: an automatic send, a compaction, turning off.
 struct NoticeView: View {
     let symbol: String

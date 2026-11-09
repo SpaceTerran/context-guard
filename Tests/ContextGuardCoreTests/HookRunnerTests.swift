@@ -160,6 +160,47 @@ final class HookRunnerTests: HookTestCase {
         XCTAssertEqual(state?.sentVia, .wake)
     }
 
+    func testYesWakesASessionWithACommandRunningInTheBackground() throws {
+        transcript.append(Line.context(310_000))
+        guard case .wait(let token) = runner.handle(event("Stop")) else { return XCTFail("expected a waiter") }
+        let result = startWaiter(token: token)
+        setStatus("shell")
+        try answer(.yes)
+        let out = try XCTUnwrap(result.wait(5))
+        XCTAssertEqual(out.exitCode, 2, "between turns: the wake starts a new one")
+        XCTAssertEqual(state?.sentVia, .wake)
+    }
+
+    func testYesWakesASessionWhoseAgentsRunBetweenTurns() throws {
+        transcript.append(Line.context(310_000))
+        guard case .wait(let token) = runner.handle(event("Stop")) else { return XCTFail("expected a waiter") }
+        mod.turn(ModTurn(sessionId: sid, active: false))
+        clock.advance(3)
+        setStatus("busy")
+        let result = startWaiter(token: token)
+        try answer(.yes)
+        let out = try XCTUnwrap(result.wait(5))
+        XCTAssertEqual(out.exitCode, 2)
+        XCTAssertEqual(state?.sentVia, .wake)
+    }
+
+    func testYesWaitsOutATurnThatStartedWhileAgentsRun() throws {
+        transcript.append(Line.context(310_000))
+        guard case .wait(let token) = runner.handle(event("Stop")) else { return XCTFail("expected a waiter") }
+        // A background agent's result started a new turn.
+        mod.turn(ModTurn(sessionId: sid, active: true))
+        clock.advance(3)
+        setStatus("busy")
+        let result = startWaiter(token: token)
+        try answer(.yes)
+        usleep(400_000)
+        XCTAssertNil(result.value, "a wake now would land inside a tool result")
+        mod.turn(ModTurn(sessionId: sid, active: false))
+        clock.advance(3)
+        let out = try XCTUnwrap(result.wait(5))
+        XCTAssertEqual(out.exitCode, 2, "the turn ended; its agents still run")
+    }
+
     func testTheNewestWaiterWins() {
         transcript.append(Line.context(310_000))
         guard case .wait(let first) = runner.handle(event("Stop")) else { return XCTFail() }
@@ -293,6 +334,28 @@ final class HookRunnerTests: HookTestCase {
 
         registry.set(RegistryEntry(pid: claude, sessionId: "someone-else", kind: "interactive", entrypoint: "cli"))
         XCTAssertEqual(SessionCatalog.load(paths, registry: registry, probe: probe).first?.isLive, false)
+    }
+
+    func testCatalogTellsATurnFromBackgroundWork() throws {
+        transcript.append(Line.context(120_000))
+        _ = runner.handle(event("Stop"))
+        setStatus("busy")
+        XCTAssertEqual(SessionCatalog.load(paths, registry: registry, probe: probe).first?.activity, .busy)
+        try TurnRecord(active: false, at: Date().addingTimeInterval(-10)).save(for: sid, paths)
+        let info = try XCTUnwrap(SessionCatalog.load(paths, registry: registry, probe: probe).first)
+        XCTAssertEqual(info.activity, .background(BackgroundWork()))
+        XCTAssertTrue(info.isIdle, "a wake starts a new turn")
+    }
+
+    func testPruningRemovesTheTurnRecordToo() throws {
+        transcript.append(Line.context(120_000))
+        _ = runner.handle(event("Stop"))
+        mod.turn(ModTurn(sessionId: sid, active: false))
+        probe.set(claude, nil)
+        let sessions = SessionCatalog.load(paths, registry: registry, probe: probe)
+        SessionCatalog.prune(paths, sessions: sessions, olderThan: 60, now: Date().addingTimeInterval(3_600), probe: probe)
+        XCTAssertNil(state)
+        XCTAssertNil(TurnRecord.load(sid, paths))
     }
 }
 

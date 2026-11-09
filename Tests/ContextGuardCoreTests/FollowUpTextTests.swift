@@ -21,6 +21,7 @@ final class FollowUpTextTests: XCTestCase {
         XCTAssertEqual(line(followUp(.working, note: "Waiting on CI for the opened PR.")), "Still saving: Waiting on CI for the opened PR")
         XCTAssertEqual(line(followUp(.needsYou, note: "Asked whether to merge")), "Needs you before compacting: Asked whether to merge")
         XCTAssertEqual(line(followUp(.draft)), "Compacts once the prompt box is empty")
+        XCTAssertEqual(line(followUp(.background)), "Done saving · compacts once its background work finishes")
         XCTAssertEqual(line(followUp(.compacting)), "Compacting…")
         XCTAssertEqual(line(followUp(.continuing)), "Compacted 312k → 24k · sends “continue now” when it's idle")
         XCTAssertEqual(line(followUp(.done)), "Compacted 312k → 24k and sent “continue now”")
@@ -54,7 +55,7 @@ final class FollowUpTextTests: XCTestCase {
 
     func testOnlyWhatYouShouldKnowRaisesANotice() {
         let raising = FollowUp.Stage.allCases.filter { FollowUpText.notice(followUp($0), continueMessage: "go") != nil }
-        XCTAssertEqual(raising, [.needsYou, .compacting, .done, .tookOver, .failed])
+        XCTAssertEqual(raising, [.needsYou, .background, .compacting, .done, .tookOver, .failed])
         let done = FollowUpText.notice(followUp(.done), continueMessage: "continue now")
         XCTAssertEqual(done?.title, "Compacted 312k → 24k")
         XCTAssertEqual(done?.reason, "Then sent “continue now”")
@@ -65,6 +66,27 @@ final class FollowUpTextTests: XCTestCase {
         XCTAssertGreaterThan(needs?.seconds ?? 0, 8, "it waits on you, so it stays up longer")
     }
 
+    func testItSaysWhatItWaitsOn() {
+        func waiting(_ work: BackgroundWork?) -> String { "\(FollowUpText.waitingOn(work).phrase) \(FollowUpText.waitingOn(work).finishes)" }
+        XCTAssertEqual(waiting(BackgroundWork(agents: 1)), "its background agent finishes")
+        XCTAssertEqual(waiting(BackgroundWork(agents: 3)), "its 3 background agents finish")
+        XCTAssertEqual(waiting(BackgroundWork(shells: true)), "its background command finishes")
+        XCTAssertEqual(waiting(BackgroundWork(agents: 1, shells: true)), "its background work finishes")
+        XCTAssertEqual(waiting(BackgroundWork()), "its background work finishes", "work the mod can't count")
+        XCTAssertEqual(waiting(nil), "its background work finishes")
+        XCTAssertEqual(FollowUpText.waitingOn(BackgroundWork(agents: 3)).it, "them")
+        XCTAssertEqual(FollowUpText.waitingOn(BackgroundWork(agents: 1)).it, "it")
+
+        var f = followUp(.background)
+        f.background = BackgroundWork(agents: 2)
+        XCTAssertEqual(line(f), "Done saving · compacts once its 2 background agents finish")
+        let n = FollowUpText.notice(f, continueMessage: "go")
+        XCTAssertEqual(n?.title, "Done saving, waiting to compact")
+        XCTAssertEqual(n?.reason, "Compacts once its 2 background agents finish. Compact Now in its menu doesn't wait.")
+        f.manual = true
+        XCTAssertEqual(line(f), "Done saving · compacting without waiting for its 2 background agents")
+    }
+
     func testEachNoticeIsColoredByWhatItMeans() {
         func tone(_ stage: FollowUp.Stage, compacted: Bool = false) -> FollowUpText.Tone? {
             var f = followUp(stage, note: "x")
@@ -72,6 +94,7 @@ final class FollowUpTextTests: XCTestCase {
             return FollowUpText.notice(f, continueMessage: "go")?.tone
         }
         XCTAssertEqual(tone(.needsYou), .warning)
+        XCTAssertEqual(tone(.background), .accent)
         XCTAssertEqual(tone(.compacting), .accent)
         XCTAssertEqual(tone(.done, compacted: true), .success)
         XCTAssertEqual(tone(.tookOver, compacted: true), .success)

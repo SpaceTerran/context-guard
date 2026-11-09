@@ -3,7 +3,27 @@ import XCTest
 
 /// The whole follow-up through the hooks and the mod's two calls, against real files.
 final class ModRunnerTests: HookTestCase {
-    func tick(draft: Bool = false) -> ModAction { mod.tick(ModFacts(sessionId: sid, agents: 0, draft: draft)) }
+    func tick(draft: Bool = false, agents: Int = 0) -> ModAction { mod.tick(ModFacts(sessionId: sid, agents: agents, draft: draft)) }
+
+    /// The mod notes the conversation's turn ending, and a few seconds pass.
+    func turnEnded() throws {
+        mod.turn(ModTurn(sessionId: sid, active: false))
+        clock.advance(3)
+        try settle()
+    }
+
+    /// Asks to save, then Haiku calls it ready while agents it started run on in the background.
+    func readyWithAgentsRunning() throws -> String {
+        let nonce = try askToSave()
+        try turnEnded()
+        setStatus("busy")
+        guard case .judge(_, let mark, _) = tick(agents: 2) else {
+            XCTFail("background work doesn't keep Haiku from judging")
+            return nonce
+        }
+        XCTAssertTrue(report(.judged, nonce: nonce, mark: mark, text: #"{"verdict":"ready","reason":"pushed"}"#))
+        return nonce
+    }
 
     func report(_ kind: ModReport.Kind, nonce: String, mark: UInt64? = nil, text: String? = nil) -> Bool {
         mod.report(ModReport(sessionId: sid, nonce: nonce, kind: kind, mark: mark, text: text))
@@ -95,6 +115,8 @@ final class ModRunnerTests: HookTestCase {
         let nonce = try askToSave()
         setStatus("busy")
         XCTAssertEqual(tick(), .none)
+        mod.turn(ModTurn(sessionId: sid, active: true))
+        XCTAssertEqual(tick(), .none, "the mod says a turn is running")
         setStatus("waiting")
         XCTAssertEqual(tick(), .none, "a permission prompt is up")
         setStatus("idle")
@@ -105,9 +127,47 @@ final class ModRunnerTests: HookTestCase {
         XCTAssertEqual(n, nonce)
     }
 
-    func testRunningSubagentsHoldIt() throws {
+    func testBackgroundWorkHoldsItUntilItFinishes() throws {
+        let nonce = try readyWithAgentsRunning()
+        XCTAssertEqual(tick(agents: 2), .none)
+        XCTAssertEqual(state?.followUp?.stage, .background)
+        XCTAssertEqual(state?.followUp?.background, BackgroundWork(agents: 2))
+        XCTAssertNotNil(state?.followUp?.backgroundSince)
+
+        setStatus("shell")
+        XCTAssertEqual(tick(), .none)
+        XCTAssertEqual(state?.followUp?.background, BackgroundWork(shells: true), "now a background command")
+
+        setStatus("idle")
+        XCTAssertEqual(tick(), .compact(nonce: nonce))
+        XCTAssertNil(state?.followUp?.background)
+    }
+
+    func testCompactNowDuringTheWaitCompactsAtTheNextTick() throws {
+        let nonce = try readyWithAgentsRunning()
+        XCTAssertEqual(tick(agents: 2), .none)
+        let sentAt = state?.sentAt
+        // No background Stop hook needs to pick the answer up: the mod's tick applies it.
+        try answer(.yes, from: .menu)
+        XCTAssertEqual(tick(agents: 2), .compact(nonce: nonce))
+        XCTAssertEqual(state?.followUp?.manual, true)
+        XCTAssertEqual(state?.phase, .sent, "not asked to save again")
+        XCTAssertEqual(state?.sentAt, sentAt)
+    }
+
+    func testTurnRecordsNeedNoLockAndLeaveTheStateAlone() throws {
         _ = try askToSave()
-        XCTAssertEqual(mod.tick(ModFacts(sessionId: sid, agents: 2, draft: false)), .none)
+        let before = try Data(contentsOf: paths.stateFile(sid))
+        // A hook reading a long transcript holds the lock.
+        let lock = try XCTUnwrap(FileLock.acquire(paths.lockFile(sid), timeout: 1))
+        defer { lock.release() }
+        mod.turn(ModTurn(sessionId: sid, active: true))
+        XCTAssertEqual(TurnRecord.load(sid, paths)?.active, true)
+        XCTAssertEqual(try Data(contentsOf: paths.stateFile(sid)), before)
+
+        mod.turn(ModTurn(sessionId: "not-a-known-session", active: true))
+        mod.turn(ModTurn(sessionId: "../../etc", active: true))
+        XCTAssertNil(TurnRecord.load("not-a-known-session", paths))
     }
 
     func testADraftHoldsTheCompaction() throws {
