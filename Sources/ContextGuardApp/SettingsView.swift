@@ -54,12 +54,18 @@ struct SettingsView: View {
     @State private var autoYes: Int
     @State private var message: String
     @State private var continueMessage: String
+    /// Whether each card's changes are on disk, for its header.
+    @State private var thresholdsSaved = SaveStatus.unchanged
+    @State private var messageSaved = SaveStatus.unchanged
+    @State private var continueSaved = SaveStatus.unchanged
     @State private var login = LoginItem.state
     @State private var loginError: String?
     private let hooksInstalled: Bool
     private let modInstalled: Bool
 
     static let width: CGFloat = 600
+    /// Both message boxes: five lines before they scroll.
+    static let editorHeight: CGFloat = 112
 
     init(model: AppModel) {
         self.model = model
@@ -97,9 +103,9 @@ struct SettingsView: View {
         .tint(Theme.primary)
         .onChange(of: askK) { saveThresholds() }
         .onChange(of: laterK) { saveThresholds() }
-        .onChange(of: autoYes) { update { $0.autoYesSeconds = autoYes } }
-        .onChange(of: message) { update { $0.message = message } }
-        .onChange(of: continueMessage) { update { $0.continueMessage = continueMessage } }
+        .onChange(of: autoYes) { thresholdsSaved = update { $0.autoYesSeconds = autoYes } }
+        .onChange(of: message) { messageSaved = update { $0.message = message } }
+        .onChange(of: continueMessage) { continueSaved = update { $0.continueMessage = continueMessage } }
     }
 
     @ViewBuilder
@@ -181,6 +187,9 @@ struct SettingsView: View {
                 Rule()
                 NumberField(label: "If you choose Wait, compact at", value: $laterK, unit: "k tokens", step: 50, range: 50...10_000,
                             invalid: laterK < 1 || laterK <= askK)
+            } accessory: {
+                // Thresholds that don't make sense aren't saved; the note under the card says why.
+                SaveStatusLabel(status: thresholdProblem.map(SaveStatus.notSaved) ?? thresholdsSaved)
             }
             if let thresholdProblem {
                 Note(thresholdProblem, color: Theme.danger)
@@ -210,7 +219,7 @@ struct SettingsView: View {
 
     private func saveThresholds() {
         guard thresholdProblem == nil else { return }
-        update {
+        thresholdsSaved = update {
             $0.askAt = askK * 1_000
             $0.laterAt = laterK * 1_000
         }
@@ -220,34 +229,49 @@ struct SettingsView: View {
 
     private var messages: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Card(title: "Before compacting, send") {
-                VStack(alignment: .leading, spacing: 10) {
-                    BrandTextEditor(label: "Before compacting, send", text: $message)
-                    HStack(alignment: .center) {
-                        Note("Asks the session to save its work first.")
-                        Button("Restore Default") { message = Config.defaultMessage }
-                            .buttonStyle(BrandButtonStyle(kind: .ghost, height: 28))
-                            .disabled(message == Config.defaultMessage)
-                    }
-                }
-                .padding(16)
-            }
-            Card(title: "After compacting, send") {
-                BrandTextField(label: "After compacting, send", text: $continueMessage, prompt: Config.defaultContinueMessage)
-                    .padding(16)
-            }
-            .padding(.top, 10)
-            Note("Both go to the session as your words. Haiku reads what the session does after the first one; once it has saved and is idle, Context Guard compacts it, then sends the second. If you type in the session first, it leaves the rest to you.")
+            messageCard("Before compacting, send", text: $message, original: Config.defaultMessage,
+                        about: "Asks the session to save its work first.", what: "save message", status: messageSaved)
+            messageCard("After compacting, send", text: $continueMessage, original: Config.defaultContinueMessage,
+                        about: "Tells the session to carry on.", what: "continue message", status: continueSaved)
+                .padding(.top, 10)
+            Note("Changes save as you type. Both go to the session as your words. Haiku reads what the session does after the first one; once it has saved and is idle, Context Guard compacts it, then sends the second. If you type in the session first, it leaves the rest to you.")
                 .padding(.horizontal, 2)
+        }
+    }
+
+    /// A message box, what it's for (or why it isn't saved) and Restore Default.
+    private func messageCard(_ title: String, text: Binding<String>, original: String, about: String,
+                             what: String, status: SaveStatus) -> some View {
+        Card(title: title) {
+            VStack(alignment: .leading, spacing: 10) {
+                BrandTextEditor(label: title, text: text, height: Self.editorHeight)
+                HStack(alignment: .center) {
+                    if case .notSaved(let problem) = status {
+                        Note("Not saved: \(problem)", color: Theme.danger)
+                    } else if text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Note("Empty, so it sends the default.", color: Theme.warning)
+                    } else {
+                        Note(about)
+                    }
+                    Button("Restore Default") { text.wrappedValue = original }
+                        .buttonStyle(BrandButtonStyle(kind: .ghost, height: 28))
+                        .disabled(text.wrappedValue == original)
+                        .help("Put back the default \(what)")
+                }
+            }
+            .padding(16)
+        } accessory: {
+            SaveStatusLabel(status: status)
         }
     }
 
     // MARK: Saving
 
-    private func update(_ change: (inout Config) -> Void) {
+    /// Changes the settings and saves them at once, and says whether that worked.
+    private func update(_ change: (inout Config) -> Void) -> SaveStatus {
         var c = model.config
         change(&c)
-        model.save(c)
+        return model.save(c).map(SaveStatus.notSaved) ?? .saved(Date())
     }
 
     private func setLogin(_ on: Bool) {
@@ -258,6 +282,33 @@ struct SettingsView: View {
             loginError = "Couldn't change it: \(error.localizedDescription)"
         }
         login = LoginItem.state
+    }
+}
+
+/// Where a card's changes stand, shown in its header: Settings saves as you type, and this is how
+/// you can tell.
+enum SaveStatus: Equatable {
+    /// Nothing changed since Settings opened: the card shows what's on disk.
+    case unchanged
+    /// Changed here, and the file read back holds it.
+    case saved(Date)
+    /// Changed here but not on disk, and why.
+    case notSaved(String)
+}
+
+struct SaveStatusLabel: View {
+    let status: SaveStatus
+
+    var body: some View {
+        switch status {
+        case .unchanged:
+            StatusLabel(text: "Saved", symbol: "checkmark.circle", color: Theme.muted, size: 12)
+        case .saved(let at):
+            StatusLabel(text: "Saved \(at.formatted(date: .omitted, time: .shortened))", symbol: "checkmark.circle.fill",
+                        color: Theme.success, size: 12)
+        case .notSaved:
+            StatusLabel(text: "Not saved", symbol: "exclamationmark.triangle.fill", color: Theme.danger, size: 12)
+        }
     }
 }
 

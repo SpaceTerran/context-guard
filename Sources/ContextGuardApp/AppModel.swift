@@ -235,9 +235,13 @@ final class AppModel {
             detail: "Turn it back on from the gauge in the menu bar."))
     }
 
-    func save(_ c: Config) {
-        do { try c.normalized.save(paths) } catch { NSSound.beep() }
+    /// Saves the settings and reads them back. nil once the file holds them; otherwise why not.
+    @discardableResult
+    func save(_ c: Config) -> String? {
+        let problem = c.saveConfirmed(paths)
+        if problem != nil { NSSound.beep() }
         refresh()
+        return problem
     }
 
     /// ✕ on a popup: hide it for this cycle. The menu can show it again.

@@ -79,4 +79,21 @@ public struct Config: Codable, Equatable, Sendable {
         try paths.ensureDirectories()
         try FileIO.writeJSON(self, to: paths.configFile)
     }
+
+    /// Saves the settings, normalized, and reads the file back. nil once the file holds them;
+    /// otherwise why not, for Settings to show.
+    public func saveConfirmed(_ paths: Paths) -> String? {
+        let saved = normalized
+        do {
+            try saved.save(paths)
+            // Dates are written in whole seconds, so compare with what the file can hold.
+            let expected = try FileIO.decoder().decode(Config.self, from: FileIO.encoder().encode(saved))
+            guard FileIO.readJSON(Config.self, from: paths.configFile) == expected else {
+                return "the settings file reads back differently."
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
 }

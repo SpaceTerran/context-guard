@@ -213,6 +213,34 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(c.message, Config.defaultMessage)
     }
 
+    /// Settings says "Saved" only when the file reads back with the change in it.
+    func testSavingSettingsReadsThemBack() throws {
+        let dir = TempDir()
+        let paths = Paths(root: dir.file("home"), claudeDir: dir.file("claude"))
+        var c = Config()
+        c.message = "Save your work.\nThen reply Ready."
+        c.continueMessage = "  "
+        // A time with a fraction of a second: the file keeps whole seconds, which still counts as saved.
+        c.setEnabled(true, now: Date(timeIntervalSince1970: 1_790_000_000.75))
+        XCTAssertNil(c.saveConfirmed(paths))
+        let back = Config.load(paths)
+        XCTAssertEqual(back.message, "Save your work.\nThen reply Ready.")
+        XCTAssertEqual(back.continueMessage, Config.defaultContinueMessage, "an empty message saves as the default")
+    }
+
+    func testSavingSettingsSaysWhyItCouldNot() throws {
+        let dir = TempDir()
+        let paths = Paths(root: dir.file("home"), claudeDir: dir.file("claude"))
+        XCTAssertNil(Config().saveConfirmed(paths))
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: paths.root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: paths.root.path) }
+        var c = Config()
+        c.continueMessage = "go on"
+        let problem = try XCTUnwrap(c.saveConfirmed(paths))
+        XCTAssertFalse(problem.isEmpty)
+        XCTAssertEqual(Config.load(paths).continueMessage, Config.defaultContinueMessage, "the file is unchanged")
+    }
+
     func testConfigWithMissingKeysUsesDefaults() throws {
         let c = try JSONDecoder().decode(Config.self, from: Data(#"{"enabled":false,"askAt":"oops"}"#.utf8))
         XCTAssertFalse(c.enabled)

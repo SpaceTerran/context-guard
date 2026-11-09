@@ -192,7 +192,7 @@ struct WaitQuestionView: View {
                 Button("Compact Now") { model.compactWithoutWaiting(sessionID, from: .popup) }
                     .buttonStyle(BrandButtonStyle(kind: .primary))
                     .keyboardShortcut(.defaultAction)
-                    .help("Compact without waiting, then send \u{201C}\(model.config.continueMessage)\u{201D}")
+                    .help("Compact without waiting, then send \(FollowUpText.quoted(model.config.continueMessage))")
             }
         }
         .panelCard()

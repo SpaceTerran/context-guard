@@ -30,6 +30,20 @@ final class FollowUpTextTests: XCTestCase {
         XCTAssertEqual(line(followUp(.failed, note: "Haiku didn't answer (timed out)")), "Couldn't compact by itself: Haiku didn't answer (timed out)")
     }
 
+    /// Menus don't truncate, so a long or several-line continue message is quoted by its start.
+    func testALongContinueMessageIsQuotedByItsStart() {
+        XCTAssertEqual(FollowUpText.quoted("continue now"), "“continue now”")
+        XCTAssertEqual(FollowUpText.quoted("  continue now\n"), "“continue now”")
+        XCTAssertEqual(FollowUpText.quoted("Carry on from NOTES.md. Start with the first open item."), "“Carry on from NOTES.md…”")
+        XCTAssertEqual(FollowUpText.quoted("Resume the work on the migration branch"), "“Resume the work on the…”", "cut at a word")
+        XCTAssertEqual(FollowUpText.quoted("Before I go on:\nread NOTES.md"), "“Before I go on…”", "first line only")
+        XCTAssertEqual(FollowUpText.quoted(String(repeating: "x", count: 40)), "“\(String(repeating: "x", count: 23))…”")
+        let long = "Carry on from NOTES.md. Start with the first open item.\nDon't redo what it lists as done."
+        XCTAssertEqual(FollowUpText.line(followUp(.done), continueMessage: long, now: now),
+                       "Compacted 312k → 24k and sent “Carry on from NOTES.md…”")
+        XCTAssertEqual(FollowUpText.notice(followUp(.done), continueMessage: long)?.reason, "Then sent “Carry on from NOTES.md…”")
+    }
+
     /// Compacting worked and only the continue message failed: it says so, not "couldn't compact".
     func testAContinueThatFailedAfterCompactingSaysItCompacted() {
         var f = followUp(.failed, note: "something is typed in the prompt box")

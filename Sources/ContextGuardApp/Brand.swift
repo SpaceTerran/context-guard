@@ -3,10 +3,18 @@ import SwiftUI
 // The app's controls: flat surfaces, 1 px borders, radius 6 on controls and 8 on panels, and the
 // same hover, focus and disabled look on every control.
 
-/// A panel of rows under a caps header, like the brand's component cards.
-struct Card<Content: View>: View {
+/// A panel of rows under a caps header, like the brand's component cards. The header can carry a
+/// status on its right, such as whether the card's changes are saved.
+struct Card<Content: View, Accessory: View>: View {
     let title: String
-    @ViewBuilder var content: Content
+    let content: Content
+    let accessory: Accessory
+
+    init(title: String, @ViewBuilder content: () -> Content, @ViewBuilder accessory: () -> Accessory) {
+        self.title = title
+        self.content = content()
+        self.accessory = accessory()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -14,14 +22,23 @@ struct Card<Content: View>: View {
                 .font(Theme.font(11, .bold))
                 .tracking(1.1)
                 .foregroundStyle(Theme.muted)
-                .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .accessibilityAddTraits(.isHeader)
+                // An overlay, so the header is as tall with a status as without one.
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .trailing) { accessory }
+                .padding(.horizontal, 16)
             Rule()
             content
         }
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.panel))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.panel).strokeBorder(Theme.border, lineWidth: 1))
+    }
+}
+
+extension Card where Accessory == EmptyView {
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.init(title: title, content: content, accessory: { EmptyView() })
     }
 }
 
@@ -76,13 +93,14 @@ struct StatusLabel: View {
     let text: String
     let symbol: String
     let color: Color
+    var size: CGFloat = 13
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: size - 1, weight: .semibold))
                 .accessibilityHidden(true)
-            Text(text).font(Theme.font(13))
+            Text(text).font(Theme.font(size))
         }
         .foregroundStyle(color)
     }
