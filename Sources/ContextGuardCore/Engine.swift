@@ -181,16 +181,23 @@ public enum Engine {
     public static func noteStop(_ s: inout SessionState) {
         guard s.phase == .sent, s.confirmedAt == nil else { return }
         s.stopsSinceSent += 1
-        if s.stopsSinceSent >= 2, s.resendCount < 1 {
-            let resends = s.resendCount + 1
-            let reason = s.sendReason
-            let timedOut = s.askTimedOut
-            clearSend(&s)
-            s.phase = .queued
-            s.sendReason = reason
-            s.askTimedOut = timedOut
-            s.resendCount = resends
-        }
+        if s.stopsSinceSent >= 2 { requeueUnconfirmed(&s) }
+    }
+
+    /// The save message was handed over but never showed up: queue it once more, for the same
+    /// reason. Only once per cycle. Returns whether it was queued again.
+    @discardableResult
+    public static func requeueUnconfirmed(_ s: inout SessionState) -> Bool {
+        guard s.phase == .sent, s.confirmedAt == nil, s.resendCount < 1 else { return false }
+        let resends = s.resendCount + 1
+        let reason = s.sendReason
+        let timedOut = s.askTimedOut
+        clearSend(&s)
+        s.phase = .queued
+        s.sendReason = reason
+        s.askTimedOut = timedOut
+        s.resendCount = resends
+        return true
     }
 
     /// If a send is due, mark it sent and return the text to hand Claude Code.

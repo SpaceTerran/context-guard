@@ -95,6 +95,8 @@ public struct HookRunner: Sendable {
 
         let now = clock()
         var s = SessionState.load(input.sessionId, paths) ?? SessionState(sessionId: input.sessionId, now: now)
+        // Another tool's session is never the hooks' to touch.
+        guard s.hostKind == .claude else { return .silent }
         s.updatedAt = now
         s.lastEvent = input.event
         if let cwd = input.cwd, !cwd.isEmpty { s.cwd = cwd }
