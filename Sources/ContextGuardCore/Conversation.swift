@@ -50,8 +50,8 @@ public enum ConversationReader {
             start = size - maxRead
             atLineStart = false
         }
-        guard let data = TranscriptReader.readRange(handle, from: start, to: size) else { return nil }
-        let complete = TranscriptReader.completeLines(data, startsAtLineBoundary: atLineStart)
+        guard let data = JSONLTail.readRange(handle, from: start, to: size) else { return nil }
+        let complete = JSONLTail.completeLines(data, startsAtLineBoundary: atLineStart)
         let base = start - UInt64(data.startIndex)
         let markerBytes = marker.map { Data($0.utf8) }
 

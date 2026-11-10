@@ -25,6 +25,12 @@ public enum DeliveryChannel: String, Codable, Sendable {
     case step
     /// Woke the idle session from the background Stop hook.
     case wake
+
+    // It's only shown, so a channel from a newer build reads as a wake rather than failing the
+    // whole state file.
+    public init(from decoder: Decoder) throws {
+        self = DeliveryChannel(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .wake
+    }
 }
 
 public struct Compaction: Codable, Equatable, Sendable {
@@ -73,6 +79,9 @@ public struct SessionState: Codable, Equatable, Sendable {
 
     public var schemaVersion: Int = SessionState.schema
     public var sessionId: String
+    /// The tool it runs in (`SessionHost`), as the file has it. Claude Code sessions leave it out,
+    /// so their files read and write exactly as they did before there was a second tool.
+    public var host: String?
     public var cwd: String?
     public var transcriptPath: String?
     public var title: String?
@@ -129,9 +138,17 @@ public struct SessionState: Codable, Equatable, Sendable {
     public var endedAt: Date?
     public var endReason: String?
 
-    public init(sessionId: String, now: Date) {
+    public init(sessionId: String, host: SessionHost = .claude, now: Date) {
         self.sessionId = sessionId
+        self.host = host == .claude ? nil : host.rawValue
         self.updatedAt = now
+    }
+
+    /// The tool it runs in. nil for one a newer build wrote that this build doesn't know: nothing
+    /// here acts on that session.
+    public var hostKind: SessionHost? {
+        guard let host else { return .claude }
+        return SessionHost(rawValue: host)
     }
 
     public static func load(_ id: String, _ paths: Paths) -> SessionState? {

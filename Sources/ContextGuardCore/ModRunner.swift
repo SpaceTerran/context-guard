@@ -44,7 +44,8 @@ public struct ModRunner: Sendable {
 
     public func tick(_ facts: ModFacts) -> ModAction {
         let id = facts.sessionId
-        guard Paths.isValidSessionID(id), let snap = SessionState.load(id, paths), snap.guarded, !snap.ended else { return .none }
+        guard Paths.isValidSessionID(id), let snap = SessionState.load(id, paths), snap.hostKind == .claude,
+              snap.guarded, !snap.ended else { return .none }
         let now = clock()
         // The common case, every ten seconds in every session: nothing to follow.
         guard Compactor.startableNonce(snap, now: now) != nil || (snap.followUp?.isActive ?? false) else { return .none }
@@ -93,7 +94,8 @@ public struct ModRunner: Sendable {
     /// Records a main-conversation turn starting or ending. The mod awaits this at a turn's start,
     /// so the record is in before the turn runs. It takes no lock (`TurnRecord`).
     public func turn(_ t: ModTurn) {
-        guard Paths.isValidSessionID(t.sessionId), let s = SessionState.load(t.sessionId, paths), s.guarded else { return }
+        guard Paths.isValidSessionID(t.sessionId), let s = SessionState.load(t.sessionId, paths), s.hostKind == .claude,
+              s.guarded else { return }
         try? TurnRecord(active: t.active, at: clock()).save(for: t.sessionId, paths)
     }
 
@@ -101,7 +103,7 @@ public struct ModRunner: Sendable {
     public func report(_ r: ModReport) -> Bool {
         guard Paths.isValidSessionID(r.sessionId), let lock = FileLock.acquire(paths.lockFile(r.sessionId), timeout: 2) else { return false }
         defer { lock.release() }
-        guard var s = SessionState.load(r.sessionId, paths) else { return false }
+        guard var s = SessionState.load(r.sessionId, paths), s.hostKind == .claude else { return false }
         let now = clock()
         let before = s
         let again = Compactor.apply(r, to: &s, now: now)
