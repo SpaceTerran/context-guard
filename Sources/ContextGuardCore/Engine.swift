@@ -200,6 +200,32 @@ public enum Engine {
         return true
     }
 
+    /// How long a session sits idle and unchanged after a send before the message counts as lost.
+    static let lostAfter: TimeInterval = 30
+
+    /// A send that never arrived, for a tool with no Stop to count: sent, not confirmed, and the
+    /// session has sat idle and quiet for `lostAfter` with no turn started since. Queued once more.
+    @discardableResult
+    public static func deliveryLost(_ s: inout SessionState, idleFor: TimeInterval, turnSinceSend: Bool, now: Date) -> Bool {
+        guard s.phase == .sent, s.confirmedAt == nil, let sent = s.sentAt, !turnSinceSend,
+              now.timeIntervalSince(sent) >= lostAfter, idleFor >= lostAfter else { return false }
+        return requeueUnconfirmed(&s)
+    }
+
+    /// The tool refused the message outright, so it never reached the session: back to queued,
+    /// without using up the one resend.
+    public static func unclaim(_ s: inout SessionState) {
+        guard s.phase == .sent, s.confirmedAt == nil else { return }
+        let reason = s.sendReason
+        let timedOut = s.askTimedOut
+        let resends = s.resendCount
+        clearSend(&s)
+        s.phase = .queued
+        s.sendReason = reason
+        s.askTimedOut = timedOut
+        s.resendCount = resends
+    }
+
     /// If a send is due, mark it sent and return the text to hand Claude Code.
     public static func claimDelivery(_ s: inout SessionState, via channel: DeliveryChannel, config: Config, nonce: String, now: Date) -> String? {
         guard s.guarded, s.phase == .queued else { return nil }

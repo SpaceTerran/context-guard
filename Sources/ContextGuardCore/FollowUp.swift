@@ -130,6 +130,8 @@ public enum ModAction: Equatable, Sendable {
 public struct ModReport: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case judged, judgeFailed, compacted, compactSkipped, compactFailed, continueFailed
+        /// You stopped the compaction (Esc) before it finished.
+        case compactInterrupted
     }
 
     public var sessionId: String
@@ -376,6 +378,12 @@ public enum Compactor {
             // A turn that started in the meantime changes the conversation, so it's judged again.
             set(&f, .checking, now: now)
             f.note = r.kind == .compactSkipped ? "a hook stopped the compaction" : "compacting failed: \(r.error ?? "no reason given")"
+            return false
+
+        case .compactInterrupted:
+            // Yours to decide: a ready verdict still on file mustn't compact it again.
+            guard f.stage == .compacting else { return false }
+            stop(&f, "you stopped the compaction", now: now)
             return false
 
         case .continueFailed:

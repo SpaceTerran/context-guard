@@ -331,3 +331,69 @@ final class WordingTests: XCTestCase {
         XCTAssertEqual(h.note, "Haiku didn't answer (timed out)")
     }
 }
+
+final class DeliveryRecoveryTests: XCTestCase {
+    let now = Date()
+    let config = Config()
+
+    func sent(at: Date) -> SessionState {
+        var s = SessionState.guarded(160_000, phase: .queued, cycle: 1)
+        s.sendReason = .manual
+        _ = Engine.claimDelivery(&s, via: .wake, config: config, nonce: "cg-1", now: at)
+        return s
+    }
+
+    func testARefusedSendGoesBackToQueuedAndKeepsItsResend() {
+        var s = sent(at: now)
+        Engine.unclaim(&s)
+        XCTAssertEqual(s.phase, .queued)
+        XCTAssertEqual(s.sendReason, .manual)
+        XCTAssertEqual(s.resendCount, 0)
+        XCTAssertNil(s.sentNonce)
+        _ = Engine.claimDelivery(&s, via: .wake, config: config, nonce: "cg-2", now: now)
+        XCTAssertTrue(Engine.requeueUnconfirmed(&s), "the resend is still there")
+    }
+
+    func testAConfirmedSendIsNeverUnclaimed() {
+        var s = sent(at: now)
+        s.confirmedAt = now
+        Engine.unclaim(&s)
+        XCTAssertEqual(s.phase, .sent)
+    }
+
+    func testASendThatNeverArrivedIsQueuedOnceMore() {
+        var s = sent(at: now.addingTimeInterval(-31))
+        XCTAssertFalse(Engine.deliveryLost(&s, idleFor: 29, turnSinceSend: false, now: now), "not idle long enough")
+        XCTAssertFalse(Engine.deliveryLost(&s, idleFor: 31, turnSinceSend: true, now: now), "a turn started: it may be on its way")
+        XCTAssertTrue(Engine.deliveryLost(&s, idleFor: 31, turnSinceSend: false, now: now))
+        XCTAssertEqual(s.phase, .queued)
+        XCTAssertEqual(s.resendCount, 1)
+
+        _ = Engine.claimDelivery(&s, via: .wake, config: config, nonce: "cg-2", now: now.addingTimeInterval(-40))
+        XCTAssertFalse(Engine.deliveryLost(&s, idleFor: 40, turnSinceSend: false, now: now), "only once")
+    }
+
+    func testAJustSentMessageIsNotLost() {
+        var s = sent(at: now.addingTimeInterval(-5))
+        XCTAssertFalse(Engine.deliveryLost(&s, idleFor: 600, turnSinceSend: false, now: now))
+        XCTAssertEqual(s.phase, .sent)
+    }
+
+    func testStoppingTheCompactionStopsTheFollowUp() {
+        var s = SessionState.guarded(160_000, phase: .sent, cycle: 1)
+        s.sentNonce = "cg-1"
+        var f = FollowUp(nonce: "cg-1", now: now)
+        f.stage = .compacting
+        f.verdict = .ready
+        s.followUp = f
+        XCTAssertFalse(Compactor.apply(ModReport(sessionId: "s1", nonce: "cg-1", kind: .compactInterrupted), to: &s, now: now))
+        XCTAssertEqual(s.followUp?.stage, .stopped)
+        XCTAssertEqual(s.followUp?.note, "you stopped the compaction")
+        XCTAssertFalse(s.followUp?.isActive ?? true)
+
+        var later = s
+        later.followUp?.stage = .continuing
+        XCTAssertFalse(Compactor.apply(ModReport(sessionId: "s1", nonce: "cg-1", kind: .compactInterrupted), to: &later, now: now))
+        XCTAssertEqual(later.followUp?.stage, .continuing, "only while compacting")
+    }
+}
