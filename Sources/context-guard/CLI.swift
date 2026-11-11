@@ -1,6 +1,10 @@
 import ContextGuardCodexLink
 import ContextGuardCore
+#if canImport(Darwin)
 import Darwin
+#elseif os(Windows)
+import WinSDK
+#endif
 import Foundation
 
 @main
@@ -20,7 +24,9 @@ struct CLI {
     """
 
     static func main() {
+        #if !os(Windows)
         signal(SIGPIPE, SIG_IGN)
+        #endif
         let args = Array(CommandLine.arguments.dropFirst())
         let env = ProcessInfo.processInfo.environment
         let paths = Paths.fromEnvironment(env)
@@ -54,13 +60,12 @@ struct CLI {
     /// Never noisy: every failure exits 0 with nothing printed. Exit 2 only to wake a session.
     static func runHook(paths: Paths, env: [String: String]) -> Never {
         // A hook that hangs shows up as an error in every session; the configured timeout is 5 s.
-        signal(SIGALRM) { _ in _exit(0) }
-        alarm(4)
+        Watchdog.start(seconds: 4)
         // Always read all of stdin, or Claude Code reports a broken pipe.
         let data = FileHandle.standardInput.readDataToEndOfFile()
         guard let input = HookInput.parse(data) else { exit(0) }
         // Stop can fire a moment before the final response line is written.
-        if input.event == HookEvent.stop.rawValue { usleep(400_000) }
+        if input.event == HookEvent.stop.rawValue { Thread.sleep(forTimeInterval: 0.4) }
 
         let runner = HookRunner(paths: paths, claudePid: env["CG_CLAUDE_PID"].flatMap { Int32($0) }, environment: env)
         switch runner.handle(input) {
@@ -76,7 +81,7 @@ struct CLI {
             FileHandle.standardError.write(Data(text.utf8))
             exit(2)
         case .wait(let token):
-            alarm(0)
+            Watchdog.cancel()
             let maxDuration = env["CONTEXT_GUARD_WAITER_MAX"].flatMap(TimeInterval.init) ?? (12 * 3600 - 300)
             let poll = env["CONTEXT_GUARD_WAITER_POLL"].flatMap(TimeInterval.init) ?? 2
             let result = runner.runWaiter(sessionId: input.sessionId, token: token, maxDuration: maxDuration, poll: poll)
@@ -118,18 +123,26 @@ struct CLI {
         let connector = CodexSocketConnector(socketPath: CodexSocketConnector.defaultSocketPath(env))
         let link = CodexLink(paths: paths, connector: connector, options: options, log: log)
         // Stopped, it says so in codex-link.json first; one that doesn't stop in time just exits.
+        let stopping: @Sendable () -> Void = {
+            link.stop()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) { exit(0) }
+        }
+        #if os(Windows)
+        let stops = CodexLinkStop.Listener(root: paths.root, stopping)
+        #else
         var stops: [DispatchSourceSignal] = []
         for sig in [SIGTERM, SIGINT] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
-            source.setEventHandler {
-                link.stop()
-                DispatchQueue.global().asyncAfter(deadline: .now() + 5) { exit(0) }
-            }
+            source.setEventHandler(handler: stopping)
             source.resume()
             stops.append(source)
         }
+        #endif
         link.run()
+        #if os(Windows)
+        stops?.stopped()
+        #endif
         withExtendedLifetime((lock, stops)) {}
         exit(0)
     }
@@ -138,8 +151,7 @@ struct CLI {
 
     /// The mod's calls. Reads one JSON object on stdin, prints one on stdout; never fails loudly.
     static func runMod(paths: Paths, args: [String]) -> Never {
-        signal(SIGALRM) { _ in _exit(0) }
-        alarm(10)
+        Watchdog.start(seconds: 10)
         let data = FileHandle.standardInput.readDataToEndOfFile()
         let decoder = JSONDecoder()
         let runner = ModRunner(paths: paths)
@@ -276,4 +288,45 @@ struct CLI {
         FileHandle.standardError.write(Data((message + "\n").utf8))
         exit(1)
     }
+}
+
+/// Ends the program after `seconds` unless cancelled first. On the Mac `SIGALRM`; on Windows, which
+/// has no alarm, a thread that sleeps that long.
+enum Watchdog {
+    #if os(Windows)
+    private final class Armed: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = true
+        var isOn: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+        func off() {
+            lock.lock()
+            value = false
+            lock.unlock()
+        }
+    }
+
+    nonisolated(unsafe) private static var armed: Armed?
+
+    static func start(seconds: UInt32) {
+        let a = Armed()
+        armed = a
+        Thread.detachNewThread {
+            Thread.sleep(forTimeInterval: TimeInterval(seconds))
+            if a.isOn { _exit(0) }
+        }
+    }
+
+    static func cancel() { armed?.off() }
+    #else
+    static func start(seconds: UInt32) {
+        signal(SIGALRM) { _ in _exit(0) }
+        alarm(seconds)
+    }
+
+    static func cancel() { alarm(0) }
+    #endif
 }

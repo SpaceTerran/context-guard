@@ -22,51 +22,30 @@ public enum FileIO {
 
     /// Writes to a temporary file and renames it into place, so readers never see half a file.
     public static func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
-        let data = try encoder().encode(value)
-        try data.write(to: url, options: [.atomic])
+        try replace(url, with: try encoder().encode(value))
     }
-}
 
-/// An exclusive `flock` on a per-session lock file. Released on `release()` or deinit.
-public final class FileLock {
-    private var fd: Int32
+    /// How long a save keeps trying while another program holds the file (Windows).
+    static let busyFor: TimeInterval = 0.5
 
-    private init(fd: Int32) { self.fd = fd }
-
-    /// Tries without blocking until `timeout` passes; nil if the lock stays busy.
-    public static func acquire(_ url: URL, timeout: TimeInterval) -> FileLock? {
-        let fd = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { return nil }
-        let deadline = Date().addingTimeInterval(timeout)
+    /// `data` renamed into place. On Windows the rename fails while another program has the file
+    /// open without sharing delete (antivirus, the search indexer), so it tries again for a moment.
+    /// Context Guard's own readers never hold it that way.
+    static func replace(_ url: URL, with data: Data) throws {
+        #if os(Windows)
+        let deadline = Date().addingTimeInterval(busyFor)
+        var pause: TimeInterval = 0.002
         while true {
-            if flock(fd, LOCK_EX | LOCK_NB) == 0 { return FileLock(fd: fd) }
-            if errno != EWOULDBLOCK && errno != EINTR { break }
-            if Date() >= deadline { break }
-            usleep(5_000)
-        }
-        close(fd)
-        return nil
-    }
-
-    /// Waits as long as it takes, asleep. nil only if the lock file can't be opened.
-    public static func wait(_ url: URL) -> FileLock? {
-        let fd = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { return nil }
-        while flock(fd, LOCK_EX) != 0 {
-            guard errno == EINTR else {
-                close(fd)
-                return nil
+            do {
+                try data.write(to: url, options: [.atomic])
+                return
+            } catch let error as CocoaError where error.code == .fileWriteNoPermission && Date() < deadline {
+                Thread.sleep(forTimeInterval: pause)
+                pause = min(pause * 2, 0.064)
             }
         }
-        return FileLock(fd: fd)
+        #else
+        try data.write(to: url, options: [.atomic])
+        #endif
     }
-
-    public func release() {
-        guard fd >= 0 else { return }
-        flock(fd, LOCK_UN)
-        close(fd)
-        fd = -1
-    }
-
-    deinit { release() }
 }

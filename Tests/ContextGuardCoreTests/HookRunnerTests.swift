@@ -53,7 +53,7 @@ final class HookRunnerTests: HookTestCase {
         XCTAssertEqual(state?.waiterToken, token)
 
         let result = startWaiter(token: token)
-        usleep(150_000)
+        Thread.sleep(forTimeInterval: 0.15)
         XCTAssertNil(result.value, "still waiting for an answer")
         try answer(.yes)
         let out = try XCTUnwrap(result.wait(5))
@@ -72,7 +72,7 @@ final class HookRunnerTests: HookTestCase {
         XCTAssertEqual(state?.phase, .watching)
 
         let result = startWaiter(token: token)
-        usleep(150_000)
+        Thread.sleep(forTimeInterval: 0.15)
         XCTAssertNil(result.value, "nothing to send yet")
         try answer(.yes, from: .menu)
         let out = try XCTUnwrap(result.wait(5))
@@ -110,7 +110,7 @@ final class HookRunnerTests: HookTestCase {
         guard case .wait(let token) = runner.handle(event("Stop")) else { return XCTFail("expected a waiter") }
         let result = startWaiter(token: token)
         try answer(.later)
-        usleep(300_000)
+        Thread.sleep(forTimeInterval: 0.3)
         XCTAssertEqual(state?.phase, .later)
         XCTAssertNil(result.value, "keeps waiting in case of Compact Now")
 
@@ -132,13 +132,13 @@ final class HookRunnerTests: HookTestCase {
         // You type again: the old waiter is still alive while the new turn runs.
         setStatus("busy")
         try answer(.yes)
-        usleep(400_000)
+        Thread.sleep(forTimeInterval: 0.4)
         XCTAssertNil(result.value, "a wake now would land inside a tool result")
         XCTAssertEqual(state?.phase, .queued, "the waiter records the answer")
 
         guard case .addContext = runner.handle(event("PostToolBatch")) else { return XCTFail("expected the step delivery") }
         XCTAssertEqual(state?.sentVia, .step)
-        usleep(200_000)
+        Thread.sleep(forTimeInterval: 0.2)
         XCTAssertNil(result.value, "sent, so nothing to wake; it stays until the turn's Stop replaces it")
         setStatus("idle")
         guard case .wait = runner.handle(event("Stop")) else { return XCTFail("expected a fresh waiter") }
@@ -151,7 +151,7 @@ final class HookRunnerTests: HookTestCase {
         let result = startWaiter(token: token)
         setStatus("waiting")
         try answer(.yes)
-        usleep(400_000)
+        Thread.sleep(forTimeInterval: 0.4)
         XCTAssertNil(result.value, "blocked on a permission prompt is still mid-turn")
         // Esc ends the turn without a Stop event.
         setStatus("idle")
@@ -193,7 +193,7 @@ final class HookRunnerTests: HookTestCase {
         setStatus("busy")
         let result = startWaiter(token: token)
         try answer(.yes)
-        usleep(400_000)
+        Thread.sleep(forTimeInterval: 0.4)
         XCTAssertNil(result.value, "a wake now would land inside a tool result")
         mod.turn(ModTurn(sessionId: sid, active: false))
         clock.advance(3)

@@ -36,11 +36,9 @@ public enum ConversationReader {
 
     /// `read` for any log, with `parse` turning one of its lines into conversation entries.
     static func read(path: String, from: UInt64?, after marker: String?, limit: Int, parse: (Data) -> Parsed?) -> Conversation? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        guard let handle = SharedFile.openForReading(path) else { return nil }
         defer { try? handle.close() }
-        var st = stat()
-        guard fstat(handle.fileDescriptor, &st) == 0 else { return nil }
-        let size = UInt64(max(0, st.st_size))
+        guard let size = SharedFile.identity(handle)?.size else { return nil }
 
         var start: UInt64
         var atLineStart: Bool

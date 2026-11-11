@@ -1,5 +1,4 @@
-import CryptoKit
-import Darwin
+import ContextGuardCore
 import Foundation
 
 /// One WebSocket frame (RFC 6455 §5.2).
@@ -129,9 +128,8 @@ public final class WebSocketClient: @unchecked Sendable {
 
     /// Opens the WebSocket: `GET /`, checks the 101 reply and its accept key.
     public static func open(_ stream: SocketStream, host: String = "localhost", timeout: TimeInterval = 5) throws -> WebSocketClient {
-        var keyBytes = [UInt8](repeating: 0, count: 16)
-        arc4random_buf(&keyBytes, 16)
-        let key = Data(keyBytes).base64EncodedString()
+        var random = SystemRandomNumberGenerator()
+        let key = Data((0..<16).map { _ in UInt8.random(in: 0...255, using: &random) }).base64EncodedString()
         let client = WebSocketClient(stream: stream)
         stream.setTimeouts(read: timeout, write: timeout)
         try stream.write(try request(path: path, host: host, key: key))
@@ -146,7 +144,7 @@ public final class WebSocketClient: @unchecked Sendable {
             let chunk: Data
             do {
                 chunk = try stream.read(max: 4096)
-            } catch CodexLinkError.io(let e) where e == EAGAIN || e == EWOULDBLOCK {
+            } catch let error as CodexLinkError where error.isTimeout {
                 throw CodexLinkError.handshake("no reply")
             }
             guard !chunk.isEmpty else { throw CodexLinkError.handshake("the connection closed") }
@@ -171,7 +169,7 @@ public final class WebSocketClient: @unchecked Sendable {
     }
 
     static func acceptValue(for key: String) -> String {
-        Data(Insecure.SHA1.hash(data: Data((key + guid).utf8))).base64EncodedString()
+        Data(Digest.sha1(Data((key + guid).utf8))).base64EncodedString()
     }
 
     static func check(response head: String, key: String) throws {
@@ -202,8 +200,8 @@ public final class WebSocketClient: @unchecked Sendable {
         writeLock.lock()
         defer { writeLock.unlock() }
         guard !closeSent else { throw CodexLinkError.closed("the connection is closing") }
-        var mask = [UInt8](repeating: 0, count: 4)
-        arc4random_buf(&mask, 4)
+        var random = SystemRandomNumberGenerator()
+        let mask = (0..<4).map { _ in UInt8.random(in: 0...255, using: &random) }
         try stream.write(frame.encoded(mask: mask))
         if frame.opcode == WebSocketFrame.close { closeSent = true }
     }

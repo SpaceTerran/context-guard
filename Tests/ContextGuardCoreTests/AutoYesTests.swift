@@ -196,7 +196,7 @@ final class AutoYesHookTests: HookTestCase {
         XCTAssertEqual(state?.phase, .asking)
 
         let result = startWaiter(token: token)
-        usleep(300_000)
+        Thread.sleep(forTimeInterval: 0.3)
         XCTAssertNil(result.value, "still counting down")
         let out = try XCTUnwrap(result.wait(5))
         XCTAssertEqual(out.exitCode, 2)
@@ -211,7 +211,7 @@ final class AutoYesHookTests: HookTestCase {
         guard case .wait(let token) = runner.handle(event("Stop")) else { return XCTFail("expected a waiter") }
         let result = startWaiter(token: token)
         try watch(false)
-        usleep(1_500_000)
+        Thread.sleep(forTimeInterval: 1.5)
         XCTAssertNil(result.value, "no countdown once unwatched; it stays for Compact Now")
         XCTAssertEqual(state?.phase, .watching, "the question went away without waiting for a turn")
 

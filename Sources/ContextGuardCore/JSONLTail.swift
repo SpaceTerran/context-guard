@@ -23,13 +23,12 @@ public enum JSONLTail {
     ///   - found: whether a backward read has looked far enough back.
     static func read<Result>(path: String, cursor: TranscriptCursor?, empty: Result,
                              scan: ([Data], inout Result) -> Void, found: (Result) -> Bool) -> Read<Result> {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return Read(result: empty) }
+        guard let handle = SharedFile.openForReading(path) else { return Read(result: empty) }
         defer { try? handle.close() }
 
-        var st = stat()
-        guard fstat(handle.fileDescriptor, &st) == 0 else { return Read(result: empty) }
-        let inode = UInt64(st.st_ino)
-        let size = UInt64(max(0, st.st_size))
+        guard let file = SharedFile.identity(handle) else { return Read(result: empty) }
+        let inode = file.id
+        let size = file.size
 
         if let cursor, cursor.inode == inode, cursor.offset <= size, size - cursor.offset <= UInt64(maxIncrement) {
             // Incremental: the lines appended since last time.

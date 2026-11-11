@@ -154,8 +154,9 @@ public struct HookRunner: Sendable {
             } else if Engine.wantsWaiter(s) {
                 let token = UUID().uuidString
                 s.waiterToken = token
-                s.waiterPid = getpid()
-                s.waiterStart = probe.identity(of: getpid())?.start
+                let me = ProcessInfo.processInfo.processIdentifier
+                s.waiterPid = me
+                s.waiterStart = probe.identity(of: me)?.start
                 s.waiterSince = now
                 outcome = .wait(token: token)
             }
@@ -177,11 +178,14 @@ public struct HookRunner: Sendable {
         s.claudeStart = id.start
         let entry = registry.entry(pid: pid)
         if let name = entry?.name, !name.isEmpty { s.name = name }
+        // Run from a terminal. Windows has no controlling terminal: there Claude Code's own mark says
+        // so (`cli`; Claude Desktop's sessions say `claude-desktop`, SDK ones `sdk-…`).
+        let inTerminal = id.hasTTY ?? (environment["CLAUDE_CODE_ENTRYPOINT"] == "cli")
         if let entry {
-            s.guarded = id.hasTTY && entry.isInteractiveCLI && entry.sessionId == s.sessionId
+            s.guarded = inTerminal && entry.isInteractiveCLI && entry.sessionId == s.sessionId
         } else {
             // No registry entry: only trust the fallback if Claude Code stopped keeping a registry.
-            s.guarded = id.hasTTY && !registry.isAvailable && environment["CLAUDE_CODE_ENTRYPOINT"] == "cli"
+            s.guarded = inTerminal && !registry.isAvailable && environment["CLAUDE_CODE_ENTRYPOINT"] == "cli"
         }
     }
 
@@ -199,10 +203,12 @@ public struct HookRunner: Sendable {
     public func runWaiter(sessionId: String, token: String, maxDuration: TimeInterval, poll: TimeInterval = 2) -> WaiterResult {
         let done = WaiterResult(exitCode: 0, text: nil)
         let deadline = clock().addingTimeInterval(maxDuration)
-        let watcher = DirectoryWatcher(paths.answersDir)
+        let changed = DispatchSemaphore(value: 0)
+        let watcher = FolderWatcher(paths.answersDir) { changed.signal() }
+        defer { withExtendedLifetime(watcher) {} }
 
         while true {
-            watcher.wait(timeout: poll)
+            _ = changed.wait(timeout: .now() + poll)
             if clock() >= deadline {
                 releaseWaiter(sessionId: sessionId, token: token)
                 return done
@@ -281,26 +287,4 @@ public struct HookRunner: Sendable {
         s.waiterToken = nil
         try? s.save(paths)
     }
-}
-
-/// Wakes a waiting thread when a folder's contents change (an answer file renamed into place).
-final class DirectoryWatcher: @unchecked Sendable {
-    private let semaphore = DispatchSemaphore(value: 0)
-    private var source: DispatchSourceFileSystemObject?
-
-    init(_ url: URL) {
-        let fd = open(url.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete, .extend, .attrib], queue: .global(qos: .utility))
-        src.setEventHandler { [semaphore] in semaphore.signal() }
-        src.setCancelHandler { close(fd) }
-        src.resume()
-        source = src
-    }
-
-    func wait(timeout: TimeInterval) {
-        _ = semaphore.wait(timeout: .now() + timeout)
-    }
-
-    deinit { source?.cancel() }
 }

@@ -252,8 +252,15 @@ final class EngineTests: XCTestCase {
         let dir = TempDir()
         let paths = Paths(root: dir.file("home"), claudeDir: dir.file("claude"))
         XCTAssertNil(Config().saveConfirmed(paths))
+        #if os(Windows)
+        // NTFS ignores a read-only folder; a program holding the file open (without sharing delete)
+        // blocks the save instead, for longer than a save keeps trying.
+        let holder = try XCTUnwrap(FileHandle(forReadingAtPath: paths.configFile.path))
+        defer { try? holder.close() }
+        #else
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: paths.root.path)
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: paths.root.path) }
+        #endif
         var c = Config()
         c.continueMessage = "go on"
         let problem = try XCTUnwrap(c.saveConfirmed(paths))

@@ -171,7 +171,7 @@ class HookTestCase: XCTestCase {
         paths = Paths(root: dir.file("home"), claudeDir: dir.file("claude"))
         transcript = Transcript(dir)
         probe.set(claude, ProcessIdentity(start: start, hasTTY: true))
-        probe.set(getpid(), ProcessIdentity(start: ProcessStart(seconds: 1, microseconds: 1), hasTTY: false))
+        probe.set(ProcessInfo.processInfo.processIdentifier, ProcessIdentity(start: ProcessStart(seconds: 1, microseconds: 1), hasTTY: false))
         registry.set(RegistryEntry(pid: claude, sessionId: sid, kind: "interactive", entrypoint: "cli", name: "code-a6", status: "idle", cwd: "/Users/x/code"))
     }
 

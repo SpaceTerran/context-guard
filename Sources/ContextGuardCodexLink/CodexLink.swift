@@ -98,9 +98,9 @@ public final class CodexLink: @unchecked Sendable {
     public func run() {
         try? paths.ensureDirectories()
         try? FileManager.default.createDirectory(at: judgeFolder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let watch = FolderWatch(paths.answersDir) { [weak self] in self?.poke() }
+        let watch = FolderWatcher(paths.answersDir) { [weak self] in self?.poke() }
         defer { withExtendedLifetime(watch) {} }
-        log.write("started (pid \(getpid()))\(onlyCwd.map { ", only sessions in \($0)" } ?? "")")
+        log.write("started (pid \(ProcessInfo.processInfo.processIdentifier))\(onlyCwd.map { ", only sessions in \($0)" } ?? "")")
         var failures = 0
         // Since when the app server has been there, as far as the link knows: since it first saw it,
         // or since its last connection ended (the server may be a new one).
@@ -309,8 +309,7 @@ public final class CodexLink: @unchecked Sendable {
     func wanted(_ cwd: String?) -> Bool {
         guard let onlyCwd else { return true }
         guard let cwd, !cwd.isEmpty else { return false }
-        let r = CodexAttachment.resolved(cwd)
-        return r == onlyCwd || r.hasPrefix(onlyCwd.hasSuffix("/") ? onlyCwd : onlyCwd + "/")
+        return PathRules.isSameOrInside(CodexAttachment.resolved(cwd), onlyCwd)
     }
 
     /// Codex's settings for a folder, read again once a minute.
@@ -625,7 +624,7 @@ public final class CodexLink: @unchecked Sendable {
             return
         }
         lastStatusAt = now
-        let status = CodexLinkStatus(at: now, connected: connected && !stopped, pid: getpid(), serverVersion: serverVersion,
+        let status = CodexLinkStatus(at: now, connected: connected && !stopped, pid: ProcessInfo.processInfo.processIdentifier, serverVersion: serverVersion,
                                      judgeModel: judgeModel, observeOnly: observeOnly, lastError: lastError, stopped: stopped)
         lock.unlock()
         try? status.save(paths)
@@ -676,22 +675,4 @@ public final class CodexLinkLog: @unchecked Sendable {
             try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         }
     }
-}
-
-/// Calls back when a folder's contents change (an answer file renamed into place).
-final class FolderWatch: @unchecked Sendable {
-    private var source: DispatchSourceFileSystemObject?
-
-    init(_ url: URL, _ changed: @escaping @Sendable () -> Void) {
-        let fd = open(url.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete, .extend, .attrib],
-                                                            queue: .global(qos: .utility))
-        src.setEventHandler(handler: changed)
-        src.setCancelHandler { close(fd) }
-        src.resume()
-        source = src
-    }
-
-    deinit { source?.cancel() }
 }
