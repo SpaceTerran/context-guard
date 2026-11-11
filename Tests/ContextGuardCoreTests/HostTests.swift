@@ -250,7 +250,8 @@ final class ThresholdTests: XCTestCase {
     func testWaitStaysBelowWhereCodexCompactsByItself() {
         // Its default: 90% of the model's window, of which the session reports 95%.
         XCTAssertEqual(CodexFacts(window: 258_400).compactsItselfAt, 244_800)
-        let late = Config(codexAskPercent: 85, codexLaterPercent: 90).normalized
+        // Settings can't save 90% (`normalized` stops at 84%), but a session's own limits still cap it.
+        let late = Config(codexAskPercent: 85, codexLaterPercent: 90)
         let r = late.resolved(for: codex(window: 258_400))
         XCTAssertEqual(r.laterAt, 244_800 - 25_840, "90% would be too close to 244.8k")
         // A low limit of your own wins, with room for the save to finish first.
@@ -287,8 +288,21 @@ final class ThresholdTests: XCTestCase {
         XCTAssertEqual(c.codexAskPercent, 10)
         XCTAssertEqual(c.codexLaterPercent, 15)
         let high = Config(codexAskPercent: 99, codexLaterPercent: 150).normalized
-        XCTAssertEqual(high.codexAskPercent, 85)
-        XCTAssertEqual(high.codexLaterPercent, 90)
+        XCTAssertEqual(high.codexAskPercent, 79)
+        XCTAssertEqual(high.codexLaterPercent, 84)
+        // The highest Wait that can be saved is never cut short in a typical window.
+        let most = Config(codexLaterPercent: 84).normalized.codexThresholds()
+        XCTAssertEqual(most.laterAt, Config.typicalCodexWindow * 84 / 100)
+        XCTAssertLessThanOrEqual(most.laterAt, CodexFacts(window: Config.typicalCodexWindow).compactsItselfAt! - Config.typicalCodexWindow / 10)
+    }
+
+    func testSettingsExampleIsATypicalCodexSession() {
+        let t = Config().codexThresholds()
+        XCTAssertEqual(Format.tokens(t.askAt), "155k")
+        XCTAssertEqual(Format.tokens(t.laterAt), "206k")
+        let big = Config().codexThresholds(window: 475_000)
+        XCTAssertEqual(big.askAt, 285_000)
+        XCTAssertEqual(big.laterAt, 380_000)
     }
 
     func testASettingsFileWithoutThemReadsTheDefaults() throws {

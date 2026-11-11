@@ -40,6 +40,20 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
 
     public var host: SessionHost { state.hostKind ?? .claude }
 
+    /// A size as this session's tool counts it: tokens for Claude Code, and for Codex the share of
+    /// the session's own window first ("62% (160k)"), as Codex shows context in percent. Rounds
+    /// down, like `Format.tokens`.
+    public func size(_ tokens: Int) -> String {
+        guard host == .codex, let window = state.codex?.window, window > 0 else { return Format.tokens(tokens) }
+        return "\(tokens * 100 / window)% (\(Format.tokens(tokens)))"
+    }
+
+    /// The same, short enough for a button: "80%" for Codex, "500k" for Claude Code.
+    public func shortSize(_ tokens: Int) -> String {
+        guard host == .codex, let window = state.codex?.window, window > 0 else { return Format.tokens(tokens) }
+        return "\(tokens * 100 / window)%"
+    }
+
     /// "Yes" reaches the session right away, even while it sits idle: a background Stop hook is
     /// waiting (Claude Code), or the link can send it a prompt now (Codex).
     public var reachableNow: Bool {

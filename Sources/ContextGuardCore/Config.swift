@@ -10,6 +10,13 @@ public struct Config: Codable, Equatable, Sendable {
     public static let defaultContinueMessage = "continue now"
     public static let defaultCodexAskPercent = 60
     public static let defaultCodexLaterPercent = 80
+    /// Codex compacts by itself at about 95% of a session's window (90% of the model's), and Wait
+    /// keeps a tenth of the window as room for the save, so Wait goes up to 84%. Asking comes at
+    /// least 5 points before it.
+    public static let codexLaterPercentRange = 15...84
+    public static let codexAskPercentRange = 10...79
+    /// Most Codex models' window, as sessions report it: the example Settings shows.
+    public static let typicalCodexWindow = 258_400
 
     public var schemaVersion: Int = Config.schema
     public var enabled: Bool = true
@@ -73,8 +80,9 @@ public struct Config: Codable, Equatable, Sendable {
         if c.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { c.message = Config.defaultMessage }
         c.autoYesSeconds = min(max(0, c.autoYesSeconds), 3_600)
         if c.continueMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { c.continueMessage = Config.defaultContinueMessage }
-        c.codexAskPercent = min(max(10, c.codexAskPercent), 85)
-        c.codexLaterPercent = min(max(c.codexAskPercent + 5, c.codexLaterPercent), 90)
+        let ask = Config.codexAskPercentRange, later = Config.codexLaterPercentRange
+        c.codexAskPercent = min(max(ask.lowerBound, c.codexAskPercent), ask.upperBound)
+        c.codexLaterPercent = min(max(c.codexAskPercent + 5, c.codexLaterPercent), later.upperBound)
         return c
     }
 
@@ -96,6 +104,15 @@ public struct Config: Codable, Equatable, Sendable {
         c.askAt = max(1_000, min(c.askAt, c.laterAt - window / 20))
         c.laterAt = max(c.laterAt, c.askAt + 1_000)
         return c
+    }
+
+    /// Where a Codex session with this window would ask and, told to wait, compact (Settings'
+    /// example).
+    public func codexThresholds(window: Int = Config.typicalCodexWindow) -> (askAt: Int, laterAt: Int) {
+        var s = SessionState(sessionId: "example", host: .codex, now: Date(timeIntervalSince1970: 0))
+        s.codex = CodexFacts(window: window)
+        let r = resolved(for: s)
+        return (r.askAt, r.laterAt)
     }
 
     /// Turn Context Guard on or off. Turning it on restarts every question's countdown.

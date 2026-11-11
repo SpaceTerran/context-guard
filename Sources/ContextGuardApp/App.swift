@@ -48,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.setActivationPolicy(.accessory)
         model.start()
+        #if DEBUG
+        Snapshots.start(model: model)
+        #endif
     }
 
     /// Opening the app again (Finder, Spotlight, `open`) shows Settings.
