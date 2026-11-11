@@ -120,6 +120,113 @@ final class CodexLinkTests: XCTestCase {
         XCTAssertTrue(daemon.calls("thread/queue/start").isEmpty, "both started by themselves")
     }
 
+    // MARK: - Into a running turn
+
+    let runningTurn = "01a1c7f2-0000-7000-8000-000000000001"
+
+    /// A long turn of yours passes 60% (160k) and you said Yes while it runs.
+    func yesWhileATurnRuns() throws {
+        try configure()
+        log.append(CodexLine.turn("one", reply: "ok", tokens: 100_000))
+        log.append(CodexLine.taskStarted(at: "2026-11-11T00:20:00.000Z"), CodexLine.prompt("Refactor the billing API"),
+                   CodexLine.toolCall(), CodexLine.tokens(160_000))
+        daemon.startTurn(id, turnId: runningTurn)
+        try pass()
+        XCTAssertEqual(state?.phase, .asking)
+        try answerYes()
+    }
+
+    func testTheSaveMessageGoesIntoTheRunningTurn() throws {
+        try yesWhileATurnRuns()
+        try pass()
+        let nonce = try XCTUnwrap(state?.sentNonce)
+        let steer = try XCTUnwrap(daemon.calls("turn/steer").first)
+        XCTAssertEqual(steer["threadId"]?.string, id)
+        XCTAssertEqual(steer["expectedTurnId"]?.string, runningTurn)
+        XCTAssertEqual(steer["clientUserMessageId"]?.string, CodexClientID.make(nonce: nonce, kind: "save"))
+        let text = try XCTUnwrap(steer["input"]?[0]?["text"]?.string)
+        XCTAssertEqual(text, "\(Config.defaultMessage) [\(nonce)]")
+        XCTAssertTrue(queued.isEmpty, "not left for after the turn")
+        XCTAssertEqual(state?.phase, .sent)
+        XCTAssertEqual(state?.sentVia, .step)
+        try pass()
+        XCTAssertEqual(daemon.calls("turn/steer").count, 1, "once")
+
+        // Codex takes it at its next step and saves; the turn ends, then the judge and the compaction.
+        log.append(CodexLine.prompt(text, clientId: CodexClientID.make(nonce: nonce, kind: "save")))
+        try pass()
+        XCTAssertNotNil(state?.confirmedAt)
+        try finishSaving()
+        daemon.endTurn(id)
+        try pass()
+        XCTAssertEqual(daemon.calls("thread/start").count, 1)
+        let question = try XCTUnwrap(daemon.calls("turn/start").first?["input"]?[0]?["text"]?.string)
+        XCTAssertTrue(question.contains("Pushed and saved. Ready for compaction."))
+        XCTAssertEqual(daemon.calls("thread/compact/start").map { $0["threadId"]?.string }, [id])
+        XCTAssertEqual(state?.followUp?.nonce, nonce)
+    }
+
+    func testATurnThatEndsAsItGoesOutGetsItAsTheNextPrompt() throws {
+        try yesWhileATurnRuns()
+        // The turn ends between the link's look and the send.
+        daemon.onCall = { [daemon, id] method, _ in
+            if method == "thread/turns/list" { daemon.endTurn(id) }
+        }
+        try pass()
+        XCTAssertTrue(daemon.calls("turn/steer").isEmpty)
+        let nonce = try XCTUnwrap(state?.sentNonce)
+        XCTAssertEqual(queued.map(\.clientId), [CodexClientID.make(nonce: nonce, kind: "save")])
+        XCTAssertEqual(state?.phase, .sent)
+    }
+
+    func testOneTheTurnRefusesGoesInWhenItEnds() throws {
+        try yesWhileATurnRuns()
+        daemon.failing["turn/steer"] = .rpc(code: -32600, message: "this turn can't be steered")
+        try pass()
+        XCTAssertEqual(state?.phase, .queued)
+        XCTAssertEqual(state?.resendCount, 0)
+        XCTAssertFalse(link.currentNoSteer, "only that turn")
+        try pass()
+        XCTAssertEqual(daemon.calls("turn/steer").count, 1, "not into that turn again")
+        XCTAssertTrue(queued.isEmpty)
+
+        log.append(CodexLine.reply("Refactored."), CodexLine.tokens(170_000), CodexLine.taskComplete())
+        daemon.endTurn(id)
+        try pass()
+        XCTAssertEqual(queued.count, 1, "as the next prompt")
+        XCTAssertEqual(state?.phase, .sent)
+    }
+
+    func testACodexWithoutSteeringWaitsForEachTurnToEnd() throws {
+        try yesWhileATurnRuns()
+        daemon.failing["turn/steer"] = .rpc(code: -32600, message: "Invalid request: unknown variant `turn/steer`, expected one of …")
+        try pass()
+        XCTAssertTrue(link.currentNoSteer)
+        XCTAssertNil(link.currentObserveOnly, "everything else still works")
+        XCTAssertEqual(state?.phase, .queued)
+
+        // A new turn: still not into it.
+        log.append(CodexLine.taskComplete(), CodexLine.taskStarted(at: "2026-11-11T00:30:00.000Z"),
+                   CodexLine.prompt("and the tests"), CodexLine.toolCall())
+        daemon.startTurn(id, turnId: "01a1c7f2-0000-7000-8000-000000000002")
+        try pass()
+        XCTAssertEqual(daemon.calls("thread/turns/list").count, 1)
+        XCTAssertEqual(daemon.calls("turn/steer").count, 1)
+
+        log.append(CodexLine.taskComplete())
+        daemon.endTurn(id)
+        try pass()
+        XCTAssertEqual(queued.count, 1, "between turns, as before")
+    }
+
+    func testAMessageOfOursLeftInTheQueueIsTakenOutFirst() throws {
+        try yesWhileATurnRuns()
+        let old = daemon.queueItem(id, clientId: CodexClientID.make(nonce: "cg-0000000001", kind: "save"))
+        try pass()
+        XCTAssertEqual(daemon.calls("thread/queue/delete").map { $0["queuedSubmissionId"]?.string }, [old])
+        XCTAssertEqual(daemon.steeredInto(id).count, 1)
+    }
+
     // MARK: - Codex holding its queue (after Esc)
 
     /// At 160k, you said Yes, with Codex holding its queue.

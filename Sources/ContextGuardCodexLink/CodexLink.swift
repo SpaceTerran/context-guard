@@ -66,6 +66,8 @@ public final class CodexLink: @unchecked Sendable {
     private var serverVersion: String?
     private var judgeModel: String?
     private var observeOnly: String?
+    /// This Codex can't send into a running turn: the save message waits for each turn to end.
+    private var noSteer = false
     private var lastError: String?
     private var lastStatusAt: Date?
     private var lastTerminalAt: Date?
@@ -150,6 +152,7 @@ public final class CodexLink: @unchecked Sendable {
         connected = true
         serverVersion = agent
         observeOnly = nil
+        noSteer = false
         lastError = nil
         lock.unlock()
         let model = (try? daemon.models(timeout: options.callTimeout)).flatMap(CodexJudge.pickModel)
@@ -257,13 +260,15 @@ public final class CodexLink: @unchecked Sendable {
         }
         let attached = CodexAttachment.attached(threads: infos, terminals: terms)
         let actOnNothing = currentObserveOnly != nil
+        let canSteer = !currentNoSteer
         for info in infos {
             let facts = config(for: info.cwd, daemon, now: now)
             schedule(CodexThreadLook(
                 threadId: info.id, path: info.path, cwd: info.cwd, name: info.name, status: info.status,
                 flags: info.flags, ephemeral: info.ephemeral,
                 attached: actOnNothing ? false : attached[info.id],
-                autoCompactAt: facts.autoCompactLimit, postTurnCompactPercent: facts.postTurnCompactPercent), daemon)
+                autoCompactAt: facts.autoCompactLimit, postTurnCompactPercent: facts.postTurnCompactPercent,
+                canSteer: canSteer), daemon)
         }
         // Closed while the link was away, or the app server restarted: they close after a while.
         let loaded = Set(ids)
@@ -375,17 +380,39 @@ public final class CodexLink: @unchecked Sendable {
 
         case .deliver(let nonce, let text):
             clearOurQueue(id, daemon)
-            let clientId = CodexClientID.make(nonce: nonce, kind: "save")
+            queueSaveMessage(id, nonce: nonce, text: text, daemon)
+            return false
+
+        case .steer(let nonce, let text):
+            clearOurQueue(id, daemon)
+            let turn: String?
             do {
-                try daemon.addToQueue(threadId: id, text: text, clientId: clientId, timeout: t)
-                log.write("\(short(id)): sent the save message (\(nonce))")
-                startIfHeld(id, clientId: clientId, daemon)
+                turn = try daemon.runningTurnId(threadId: id, timeout: t)
             } catch let e as CodexLinkError where e.isRefusal {
-                noteMissing(e, "thread/queue/add")
-                runner.refused(threadId: id, nonce: nonce)
-                log.write("\(short(id)): Codex refused the save message: \(e)")
+                noteNoSteer(e, "thread/turns/list")
+                runner.refused(threadId: id, nonce: nonce, midTurn: true)
+                log.write("\(short(id)): couldn't find the running turn, so the save message waits for it to end: \(e)")
+                return false
             } catch {
-                // It may have gone in: the rollout shows it, or it's sent again later.
+                // Nothing went out: it's tried again on the next look.
+                runner.refused(threadId: id, nonce: nonce)
+                log.write("\(short(id)): looking for the running turn: \(describe(error))")
+                return false
+            }
+            // The turn ended a moment ago: it goes in as the next prompt instead.
+            guard let turn else {
+                queueSaveMessage(id, nonce: nonce, text: text, daemon)
+                return false
+            }
+            do {
+                try daemon.steer(threadId: id, turnId: turn, text: text, clientId: CodexClientID.make(nonce: nonce, kind: "save"), timeout: t)
+                log.write("\(short(id)): sent the save message into the running turn (\(nonce))")
+            } catch let e as CodexLinkError where e.isRefusal {
+                noteNoSteer(e, "turn/steer")
+                runner.refused(threadId: id, nonce: nonce, midTurn: true)
+                log.write("\(short(id)): Codex wouldn't take the save message mid-turn, so it goes in when the turn ends: \(e)")
+            } catch {
+                // It may have gone in: the rollout shows it, or it's sent again once the turn ends.
                 log.write("\(short(id)): sending the save message: \(describe(error))")
             }
             return false
@@ -450,6 +477,24 @@ public final class CodexLink: @unchecked Sendable {
         }
     }
 
+    /// The save message as your next prompt: it starts at once between turns, or once the turn
+    /// running ends.
+    func queueSaveMessage(_ id: String, nonce: String, text: String, _ daemon: CodexDaemon) {
+        let clientId = CodexClientID.make(nonce: nonce, kind: "save")
+        do {
+            try daemon.addToQueue(threadId: id, text: text, clientId: clientId, timeout: options.callTimeout)
+            log.write("\(short(id)): sent the save message (\(nonce))")
+            startIfHeld(id, clientId: clientId, daemon)
+        } catch let e as CodexLinkError where e.isRefusal {
+            noteMissing(e, "thread/queue/add")
+            runner.refused(threadId: id, nonce: nonce)
+            log.write("\(short(id)): Codex refused the save message: \(e)")
+        } catch {
+            // It may have gone in: the rollout shows it, or it's sent again later.
+            log.write("\(short(id)): sending the save message: \(describe(error))")
+        }
+    }
+
     /// Takes Context Guard's own messages still waiting in a session's queue out of it (one stuck
     /// after you stopped a turn), so a newer one isn't followed by an old one.
     func clearOurQueue(_ id: String, _ daemon: CodexDaemon) {
@@ -495,6 +540,23 @@ public final class CodexLink: @unchecked Sendable {
             log.write("only watching from now on: this Codex has no \(method)")
             writeStatus(now: clock(), force: true)
         }
+    }
+
+    /// A Codex without what sending into a running turn takes: from now on the save message waits
+    /// for each turn to end.
+    func noteNoSteer(_ error: CodexLinkError, _ method: String) {
+        guard error.isMissingMethod else { return }
+        lock.lock()
+        let first = !noSteer
+        noSteer = true
+        lock.unlock()
+        if first { log.write("this Codex has no \(method): the save message waits for each turn to end") }
+    }
+
+    var currentNoSteer: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return noSteer
     }
 
     var currentObserveOnly: String? {

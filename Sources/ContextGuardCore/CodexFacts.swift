@@ -33,6 +33,9 @@ public struct CodexFacts: Codable, Equatable, Sendable {
     public var unloadedAt: Date?
     /// A terminal has it open, as far as the link can tell.
     public var attached: Bool?
+    /// The running turn (by when it started) that wouldn't take the save message: it goes in
+    /// once that turn ends instead.
+    public var steerRefused: Date?
 
     public init(window: Int? = nil, autoCompactAt: Int? = nil, postTurnCompactPercent: Int? = nil,
                 model: String? = nil, originator: String? = nil,
@@ -66,6 +69,7 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         loaded = try? c.decode(Bool.self, forKey: .loaded)
         unloadedAt = try? c.decode(Date.self, forKey: .unloadedAt)
         attached = try? c.decode(Bool.self, forKey: .attached)
+        steerRefused = try? c.decode(Date.self, forKey: .steerRefused)
     }
 
     /// The lowest point where Codex compacts by itself, as far as is known. By default it compacts

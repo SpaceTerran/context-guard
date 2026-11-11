@@ -146,7 +146,7 @@ final class AppModel {
         case .later:
             return config.enabled ? "Compacts by itself at \(later)" : "Waiting for \(later): paused while off"
         case .queued:
-            if !info.isIdle { return "Asking it to save \(info.host.whenBusy)" }
+            if !info.isIdle { return "Asking it to save at its next step" }
             return info.reachableNow ? "Asking it to save…" : "Asks it to save \(info.host.whenOutOfReach)"
         case .sent:
             guard info.state.confirmedAt != nil else { return "Asking it to save…" }
@@ -358,8 +358,7 @@ final class AppModel {
 /// What a question popup shows.
 enum QuestionProgress: Equatable {
     case question
-    /// Busy: the hook adds it after the session's next step (Claude Code), or the link sends it
-    /// when the turn ends (Codex).
+    /// Busy: it goes in at the session's next step (the hook for Claude Code, the link for Codex).
     case nextStep
     /// Idle and reachable now (a waiter, or the link): going out now.
     case waking

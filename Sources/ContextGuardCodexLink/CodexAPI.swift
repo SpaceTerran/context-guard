@@ -170,6 +170,26 @@ extension CodexDaemon {
         ], timeout: timeout)
     }
 
+    /// The turn running now, from the newest one in the thread. nil between turns.
+    public func runningTurnId(threadId: String, timeout: TimeInterval) throws -> String? {
+        let result = try call("thread/turns/list", [
+            "threadId": .string(threadId), "limit": 1, "sortDirection": "desc", "itemsView": "notLoaded",
+        ], timeout: timeout)
+        guard let newest = result["data"]?.array?.first, newest["status"]?.string == "inProgress" else { return nil }
+        return newest["id"]?.string
+    }
+
+    /// Into the running turn, as a prompt you type while Codex works: it takes it at its next step.
+    /// Codex refuses it when `turnId` is no longer the turn running.
+    public func steer(threadId: String, turnId: String, text: String, clientId: String, timeout: TimeInterval) throws {
+        _ = try call("turn/steer", [
+            "threadId": .string(threadId),
+            "expectedTurnId": .string(turnId),
+            "input": [["type": "text", "text": .string(text), "text_elements": []]],
+            "clientUserMessageId": .string(clientId),
+        ], timeout: timeout)
+    }
+
     /// Starts a queued item now, as Codex does with the next one when a turn ends. Codex holds its
     /// queue after you stop a turn.
     public func startQueued(threadId: String, itemId: String, timeout: TimeInterval) throws {
