@@ -32,6 +32,7 @@ dir="$repo/.scratch/live/$name"
 home="$dir/home"
 
 hook_cmd() {
+  # shellcheck disable=SC2016  # $PPID is for the hook's own shell
   printf 'CONTEXT_GUARD_HOME=%q CONTEXT_GUARD_WAITER_POLL=%s CG_CLAUDE_PID=$PPID exec %q hook' "$home" "${CG_TEST_POLL:-0.5}" "$bin"
 }
 
@@ -76,6 +77,7 @@ case "$cmd" in
     }' > "$dir/settings.json"
     # Run from inside Claude Code, the inherited session variables are cleared so the test session
     # saves its transcript like a fresh terminal tab.
+    # shellcheck disable=SC2054  # `project,local` is one argument
     session=(env -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_EXECPATH
       -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ATTENDED
       -u CLAUDE_CODE_SESSION_ID -u CLAUDE_EFFORT -u CLAUDE_PID
