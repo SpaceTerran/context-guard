@@ -35,11 +35,20 @@ public enum Engine {
             s.confirmedAt = now
             s.confirmedOffset = r.from
         }
-        // Context fell far below the ask threshold without a compaction record (rewind, /clear-like
-        // resets): treat it as a fresh start. Small dips (idle tool-result clearing) don't re-arm.
-        if s.phase != .watching, s.tokens < config.askAt / 2 {
+        // Context fell far below where this cycle began without a compaction record (rewind,
+        // /clear-like resets): treat it as a fresh start. Small dips (idle tool-result clearing) don't re-arm.
+        if s.phase != .watching, s.tokens < rearmBelow(s, config: config) {
             rearm(&s)
         }
+    }
+
+    /// Below this size a session that isn't watching has been reset: half of where its cycle began.
+    /// That's the ask threshold, except for Compact Now below it, which began where it was sent.
+    static func rearmBelow(_ s: SessionState, config: Config) -> Int {
+        guard s.sendReason == .manual else { return config.askAt / 2 }
+        // Not sent yet: your request of a moment ago, and nothing has fallen.
+        guard let sent = s.sentTokens else { return 0 }
+        return min(config.askAt, sent) / 2
     }
 
     /// A compaction happened: note what it interrupted and start over.

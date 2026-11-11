@@ -171,6 +171,39 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertEqual(state?.followUp?.stage, .done)
     }
 
+    func testCompactNowOnASmallSessionGoesAllTheWayThrough() throws {
+        // 24k is 9% of the window, far under the question at 60%: Compact Now still compacts it.
+        try configure()
+        log.append(CodexLine.turn("Say hi", reply: "Hi.", tokens: 24_000))
+        try settle()
+        tick()
+        XCTAssertEqual(state?.phase, .watching)
+        try answer(.yes, from: .menu)
+        guard case .deliver(let nonce, let text) = tick() else { return XCTFail("expected the save message") }
+        status = "active"
+        log.append(CodexLine.taskStarted(), CodexLine.prompt(text))
+        tick()
+        XCTAssertEqual(state?.phase, .sent, "the send is kept")
+        XCTAssertNotNil(state?.confirmedAt)
+
+        log.append(CodexLine.reply("Nothing to save. Ready."), CodexLine.tokens(25_500), CodexLine.taskComplete())
+        status = "idle"
+        try settle()
+        guard case .judge(let n, let mark, _) = tick() else { return XCTFail("expected the judge to be asked") }
+        XCTAssertEqual(n, nonce)
+        XCTAssertTrue(runner.report(ModReport(sessionId: id, nonce: nonce, kind: .judged, mark: mark,
+                                              text: #"{"verdict":"ready","reason":"nothing to save"}"#)))
+        XCTAssertEqual(tick(), .compact(nonce: nonce))
+
+        status = "active"
+        log.append([CodexLine.taskStarted()] + CodexLine.compacted() + [CodexLine.tokens(9_000), CodexLine.taskComplete()])
+        tick()
+        XCTAssertEqual(state?.followUp?.stage, .continuing)
+        status = "idle"
+        try settle()
+        XCTAssertEqual(tick(), .continue(nonce: nonce, text: "continue now"))
+    }
+
     func testTheSizeAfterACompactionWrittenLater() throws {
         let nonce = try askAndSend()
         log.append(CodexLine.reply("Ready."), CodexLine.taskComplete())
