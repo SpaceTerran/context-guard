@@ -48,6 +48,19 @@ public final class FileLock {
         return nil
     }
 
+    /// Waits as long as it takes, asleep. nil only if the lock file can't be opened.
+    public static func wait(_ url: URL) -> FileLock? {
+        let fd = open(url.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return nil }
+        while flock(fd, LOCK_EX) != 0 {
+            guard errno == EINTR else {
+                close(fd)
+                return nil
+            }
+        }
+        return FileLock(fd: fd)
+    }
+
     public func release() {
         guard fd >= 0 else { return }
         flock(fd, LOCK_UN)
