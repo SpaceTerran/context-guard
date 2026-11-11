@@ -47,7 +47,8 @@ public enum StatusText {
     static func linkState(_ link: CodexLinkStatus?, now: Date) -> String {
         guard let link else { return "not running" }
         let age = now.timeIntervalSince(link.at)
-        guard age <= CodexLinkStatus.stale else { return "not running (last heard from \(ago(age)))" }
+        guard !link.stopped else { return "not running (stopped \(ago(age)))" }
+        guard link.isRunning(now: now) else { return "not running (last heard from \(ago(age)))" }
         var parts: [String] = []
         if link.connected {
             parts.append("connected" + (link.serverVersion.map { " to \(codexVersion($0))" } ?? ""))

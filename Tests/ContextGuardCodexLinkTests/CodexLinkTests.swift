@@ -435,6 +435,7 @@ final class CodexLinkLoopTests: XCTestCase {
         XCTAssertEqual(status?.judgeModel, "gpt-6-luna", "the smallest offered, whatever the list's order")
         XCTAssertEqual(status?.serverVersion, "codex-tui/0.167.1 (Mac OS 27.2.0; arm64)")
         XCTAssertEqual(status?.connected, false, "let go when stopped")
+        XCTAssertEqual(status?.stopped, true)
         XCTAssertNil(status?.lastError, "closing it isn't an error")
         XCTAssertTrue(daemon.closed)
         XCTAssertEqual(daemon.calls.first?.method, "initialize")
@@ -474,6 +475,15 @@ final class CodexLinkLoopTests: XCTestCase {
         }
         XCTAssertTrue(reached, "disconnected with no Codex terminal")
         XCTAssertEqual(connector.connects, 1, "and waits for one before connecting again")
+    }
+
+    func testStoppingSaysSoAtOnce() {
+        // The process may end before run() gets back to writing: stop() itself writes.
+        let link = CodexLink(paths: paths, connector: FakeConnector(daemon), terminals: codex)
+        link.stop()
+        let status = CodexLinkStatus.load(paths)
+        XCTAssertEqual(status?.stopped, true)
+        XCTAssertEqual(status?.isRunning(now: Date()), false)
     }
 
     func testAnEventFromAnOldConnectionIsIgnored() {

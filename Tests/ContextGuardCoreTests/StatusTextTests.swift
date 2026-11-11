@@ -59,6 +59,8 @@ final class StatusTextTests: XCTestCase {
         XCTAssertEqual(StatusText.linkState(nil, now: now), "not running")
         XCTAssertEqual(StatusText.linkState(CodexLinkStatus(at: now.addingTimeInterval(-300), connected: true), now: now),
                        "not running (last heard from 5 min ago)")
+        XCTAssertEqual(StatusText.linkState(CodexLinkStatus(at: now.addingTimeInterval(-3), connected: false, stopped: true), now: now),
+                       "not running (stopped 3 s ago)")
         XCTAssertEqual(StatusText.linkState(CodexLinkStatus(at: now, connected: false, lastError: "couldn't connect (Connection refused)"), now: now),
                        "waiting for Codex · last error: couldn't connect (Connection refused)")
         XCTAssertEqual(StatusText.linkState(CodexLinkStatus(at: now, connected: true, observeOnly: "this Codex has no thread/queue/add"), now: now),

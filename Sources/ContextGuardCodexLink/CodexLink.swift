@@ -128,10 +128,13 @@ public final class CodexLink: @unchecked Sendable {
         log.write("stopped")
     }
 
+    /// Says so in `codex-link.json` at once, so nothing waits for the file to go stale, even if the
+    /// process ends before `run()` returns.
     public func stop() {
         lock.lock()
         stopped = true
         lock.unlock()
+        writeStatus(now: clock(), force: true)
         poke()
     }
 
@@ -536,8 +539,8 @@ public final class CodexLink: @unchecked Sendable {
             return
         }
         lastStatusAt = now
-        let status = CodexLinkStatus(at: now, connected: connected, pid: getpid(), serverVersion: serverVersion,
-                                     judgeModel: judgeModel, observeOnly: observeOnly, lastError: lastError)
+        let status = CodexLinkStatus(at: now, connected: connected && !stopped, pid: getpid(), serverVersion: serverVersion,
+                                     judgeModel: judgeModel, observeOnly: observeOnly, lastError: lastError, stopped: stopped)
         lock.unlock()
         try? status.save(paths)
     }
