@@ -389,5 +389,15 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertEqual(try info().host, .codex)
         try CodexLinkStatus(at: Date().addingTimeInterval(-60), connected: true).save(paths)
         XCTAssertFalse(try info().isLive, "a link that stopped writing is gone")
+        try CodexLinkStatus(at: Date(), connected: true, stopped: true).save(paths)
+        XCTAssertFalse(try info().isLive, "and so is one that was stopped, however recently")
+    }
+
+    func testALinkFileFromBeforeStopsWereNotedReadsAsRunning() throws {
+        try paths.ensureDirectories()
+        try Data(#"{"at":"2026-11-10T18:00:00Z","connected":true}"#.utf8).write(to: paths.codexLinkFile)
+        let status = try XCTUnwrap(CodexLinkStatus.load(paths))
+        XCTAssertFalse(status.stopped)
+        XCTAssertTrue(status.isUp(now: status.at.addingTimeInterval(5)))
     }
 }
