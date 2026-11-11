@@ -13,8 +13,9 @@ final class AppModel {
     private(set) var sessions: [SessionInfo] = []
     /// What you answered in a popup, by session id. The popup shows progress in place of its buttons.
     private(set) var replies: [String: Reply] = [:]
-    /// The Codex link is installed, has run, or has sessions: the menu and Settings show each
-    /// tool's own lines. Otherwise they read as they did before Codex.
+    /// The Codex link is installed or has run (its LaunchAgent or `codex-link.json` is there): the
+    /// menu and Settings show each tool's own lines. Otherwise they read as they did before Codex.
+    /// `install.sh --no-codex` and `--uninstall` remove both, so the views go back at once.
     private(set) var showsCodex = false
     /// How `context-guard codex` stands, and the model it judges Codex sessions with.
     private(set) var codexLink = CodexLinkStatus.State.notRunning
@@ -94,7 +95,7 @@ final class AppModel {
         let linkState = CodexLinkStatus.state(link, now: Date())
         if linkState != codexLink { codexLink = linkState }
         if link?.judgeModel != codexJudge { codexJudge = link?.judgeModel }
-        let codex = CodexLinkInstall.isInstalled || link != nil || loaded.contains { $0.host == .codex }
+        let codex = CodexLinkInstall.isInstalled || link != nil
         if codex != showsCodex { showsCodex = codex }
         if Date() > pruneAt {
             SessionCatalog.prune(paths, sessions: loaded, olderThan: 7 * 86_400)

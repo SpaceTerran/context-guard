@@ -1,10 +1,10 @@
 import Foundation
 
 /// `context-guard status` as text: the settings for each tool, the Codex link, and each running
-/// session. Without Codex in the picture it reads as it always has.
+/// session. Until the Codex link has run (no `codex-link.json`) it reads as it always has.
 public enum StatusText {
     public static func lines(config: Config, sessions: [SessionInfo], link: CodexLinkStatus?, now: Date = Date()) -> [String] {
-        let codex = link != nil || sessions.contains { $0.host == .codex }
+        let codex = link != nil
         let onOff = "Context Guard is \(config.enabled ? "on" : "off")"
         let claude = "asks at \(Format.tokens(config.askAt)) · compacts at \(Format.tokens(config.laterAt)) when told to wait"
         var out: [String] = []
