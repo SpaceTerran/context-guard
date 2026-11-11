@@ -69,6 +69,47 @@ final class CodexAPITests: XCTestCase {
         XCTAssertFalse(CodexSocketConnector(socketPath: "/etc/hosts").available())
     }
 
+    func testASocketLinkedFromCodexsHomeIsFound() throws {
+        // Codex 0.167.1: app-server-control.sock is a symlink to the socket in /private/tmp.
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cg-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let real = dir.appendingPathComponent("s").path
+        let fd = try listen(at: real)
+        defer { Darwin.close(fd) }
+        let link = dir.appendingPathComponent("app-server-control.sock").path
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
+        XCTAssertTrue(CodexSocketConnector(socketPath: real).available())
+        XCTAssertTrue(CodexSocketConnector(socketPath: link).available())
+        XCTAssertNoThrow(try SocketStream.connect(unixPath: link).close())
+
+        let toFile = dir.appendingPathComponent("to-file").path
+        try FileManager.default.createSymbolicLink(atPath: toFile, withDestinationPath: "/etc/hosts")
+        XCTAssertFalse(CodexSocketConnector(socketPath: toFile).available())
+        let dangling = dir.appendingPathComponent("dangling").path
+        try FileManager.default.createSymbolicLink(atPath: dangling, withDestinationPath: dir.appendingPathComponent("gone").path)
+        XCTAssertFalse(CodexSocketConnector(socketPath: dangling).available())
+    }
+
+    /// A listening Unix socket at `path`.
+    func listen(at path: String) throws -> Int32 {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw POSIXError(.EIO) }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
+            path.utf8CString.withUnsafeBytes { raw.copyMemory(from: $0) }
+        }
+        let bound = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard bound == 0, Darwin.listen(fd, 1) == 0 else {
+            Darwin.close(fd)
+            throw POSIXError(.EADDRINUSE)
+        }
+        return fd
+    }
+
     func testAConnectorWithNoAppServerFailsToConnect() {
         XCTAssertThrowsError(try CodexSocketConnector(socketPath: "/nonexistent/x.sock").connect(onEvent: { _ in }))
     }
