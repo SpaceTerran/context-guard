@@ -1,4 +1,5 @@
 import AppKit
+import ContextGuardCore
 import SwiftUI
 
 enum MenuBarIcon {
@@ -80,6 +81,29 @@ enum AppIcon {
             return true
         } catch {
             return false
+        }
+    }
+}
+
+extension Symbol {
+    /// The SF Symbol the Mac draws for it.
+    var systemName: String {
+        switch self {
+        case .watching: return "circle"
+        case .asking: return "questionmark.circle"
+        case .waiting: return "clock"
+        case .sending: return "paperplane"
+        case .sent: return "checkmark.circle"
+        case .skipped: return "minus.circle"
+        case .notWatching: return "eye.slash"
+        case .needsYou: return "questionmark.bubble.fill"
+        case .compacting: return "arrow.down.right.and.arrow.up.left.circle.fill"
+        case .success: return "checkmark.circle.fill"
+        case .saved: return "checkmark.circle"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .failed: return "xmark.octagon.fill"
+        case .off: return "pause.circle.fill"
+        case .saving: return "tray.and.arrow.down.fill"
         }
     }
 }

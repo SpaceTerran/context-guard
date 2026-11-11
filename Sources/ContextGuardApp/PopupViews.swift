@@ -14,19 +14,19 @@ struct QuestionView: View {
     }
 
     private func content(_ info: SessionInfo) -> some View {
-        let progress = model.questionProgress(info)
+        let progress = model.progress(info)
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 AppBadge(size: 38)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Context at \(model.sizeText(info))")
+                    Text(info.questionHeading)
                         .font(Theme.font(14, .bold))
                         .foregroundStyle(Theme.heading)
                     Text(info.title)
                         .font(Theme.font(13))
                         .foregroundStyle(Theme.text)
                         .lineLimit(1)
-                    let subtitle = model.subtitle(info)
+                    let subtitle = info.toolSubtitle
                     if !subtitle.isEmpty {
                         Text(subtitle)
                             .font(Theme.font(12))
@@ -37,8 +37,8 @@ struct QuestionView: View {
                 }
                 Spacer(minLength: 0)
                 // Hiding a question that's about to compact by itself would hide that.
-                if progress == .question, model.autoYesDeadline(info) == nil {
-                    CloseButton(help: "Hide until it asks again (the menu can show it)") { model.hideQuestion(sessionID) }
+                if progress == .question, info.autoYesDeadline(model.config, now: Date()) == nil {
+                    CloseButton(help: Words.Popup.hideHelp) { model.hideQuestion(sessionID) }
                 }
             }
             if progress == .question {
@@ -52,21 +52,20 @@ struct QuestionView: View {
 
     @ViewBuilder
     private func question(_ info: SessionInfo) -> some View {
-        let laterAt = model.thresholds(info).laterAt
-        let pastLater = info.state.tokens >= laterAt
+        let deferral = info.deferral(model.config)
         VStack(alignment: .leading, spacing: 6) {
-            Text(questionText(info))
+            Text(info.questionText)
                 .foregroundStyle(Theme.text)
                 .fixedSize(horizontal: false, vertical: true)
                 .help(model.config.message)
-            if let deadline = model.autoYesDeadline(info) {
+            if let deadline = info.autoYesDeadline(model.config, now: Date()) {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     HStack(spacing: 6) {
                         Image(systemName: "timer")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Theme.accent)
                             .accessibilityHidden(true)
-                        Text(countdownText(info, deadline: deadline, now: context.date))
+                        Text(info.countdownText(deadline: deadline, now: context.date))
                             .foregroundStyle(Theme.muted)
                     }
                 }
@@ -74,113 +73,71 @@ struct QuestionView: View {
         }
         .font(Theme.font(12))
         HStack(spacing: 8) {
-            Button("Turn Off") { model.turnOffFromPopup() }
+            Button(Words.Popup.turnOff) { model.turnOffFromPopup() }
                 .buttonStyle(BrandButtonStyle(kind: .ghost))
-                .help("Stop asking and stop compacting by itself until you turn Context Guard back on")
+                .help(Words.Popup.turnOffHelp)
             Spacer(minLength: 0)
-            if pastLater {
-                Button("Not Now") { model.answer(sessionID, .skip, from: .popup) }
-                    .buttonStyle(BrandButtonStyle(kind: .secondary))
-                    .help("Don't ask again until this session compacts")
-            } else {
-                Button("Wait until \(info.shortSize(laterAt))") { model.answer(sessionID, .later, from: .popup) }
-                    .buttonStyle(BrandButtonStyle(kind: .secondary))
-                    .help("Compact by itself when this session reaches \(info.size(laterAt))")
-            }
-            Button("Compact") { model.answer(sessionID, .yes, from: .popup) }
+            Button(info.label(for: deferral)) { model.answer(sessionID, deferral.action, from: .popup) }
+                .buttonStyle(BrandButtonStyle(kind: .secondary))
+                .help(info.help(for: deferral))
+            Button(Words.Popup.compact) { model.answer(sessionID, .yes, from: .popup) }
                 .buttonStyle(BrandButtonStyle(kind: .primary))
                 .keyboardShortcut(.defaultAction)
-                .help("Asks it to save first: \u{201C}\(model.config.message)\u{201D}")
+                .help(Words.Popup.compactHelp(model.config.message))
         }
-    }
-
-    private func countdownText(_ info: SessionInfo, deadline: Date, now: Date) -> String {
-        let left = Int(deadline.timeIntervalSince(now).rounded(.up))
-        if left > 0 { return "Compacts in \(Format.seconds(left)) unless you answer" }
-        // It goes out at the session's next step, or now if it can be reached.
-        guard info.isIdle, !info.reachableNow else { return "Starting…" }
-        return info.host == .codex ? "Starts \(info.host.whenOutOfReach)" : "Starts when this session next runs"
-    }
-
-    private func questionText(_ info: SessionInfo) -> String {
-        let base = "Compact this session? It saves its work first."
-        // Rare: no background hook is waiting (it timed out), so an idle session hears it on its next
-        // turn; a Codex session no terminal shows hears it once one does.
-        guard info.isIdle, !info.reachableNow else { return base }
-        if info.host == .codex { return base + " No terminal shows it, so it starts when one does." }
-        return base + " It's idle, so it starts when it next runs."
     }
 
     private func status(_ progress: QuestionProgress, _ info: SessionInfo) -> some View {
         HStack(spacing: 8) {
             // One fixed slot, so the text stays put as the spinner turns into a check.
             Group {
-                switch progress {
-                case .nextStep, .waking:
+                switch progress.mark {
+                case .working:
                     Spinner()
-                case .sent:
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.success)
-                case .nextRun, .scheduled:
-                    Image(systemName: "clock").foregroundStyle(Theme.muted)
-                case .question, .closed:
+                case .icon(let symbol, let tone):
+                    Image(systemName: symbol.systemName).foregroundStyle(Theme.color(tone))
+                case .none:
                     EmptyView()
                 }
             }
             .font(.system(size: 13, weight: .semibold))
             .frame(width: 18, height: 18)
-            Text(statusText(progress, info))
+            Text(progress.text(info))
                 .foregroundStyle(Theme.text)
         }
         .font(Theme.font(12))
         .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
     }
-
-    private func statusText(_ progress: QuestionProgress, _ info: SessionInfo) -> String {
-        switch progress {
-        case .nextStep: return "Asking it to save at its next step…"
-        case .waking: return "Asking it to save…"
-        case .nextRun: return "Asks it to save \(info.host.whenOutOfReach)"
-        case .sent: return "Asked it to save, then it compacts"
-        case .scheduled(let at): return "Compacts by itself at \(info.size(at))"
-        case .question, .closed: return ""
-        }
-    }
 }
 
 /// A short message that closes by itself: an automatic send, a compaction, turning off.
 struct NoticeView: View {
-    let symbol: String
-    var tone: FollowUpText.Tone = .accent
-    let title: String
-    let detail: String
-    var caption: String = ""
-    /// A reason wraps; a name and folder stays on one line, cut in the middle.
-    var captionWraps = false
+    let notice: NoticeContent
     var close: () -> Void = {}
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AppBadge(size: 38, symbol: symbol, color: Theme.color(tone))
+            AppBadge(size: 38, symbol: notice.symbol.systemName, color: Theme.color(notice.tone))
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
+                Text(notice.title)
                     .font(Theme.font(14, .bold))
                     .foregroundStyle(Theme.heading)
-                Text(detail)
+                Text(notice.detail)
                     .font(Theme.font(13))
                     .foregroundStyle(Theme.text)
                     .lineLimit(2)
-                if !caption.isEmpty {
-                    Text(caption)
+                if !notice.caption.isEmpty {
+                    Text(notice.caption)
                         .font(Theme.font(12))
                         .lineSpacing(2)
                         .foregroundStyle(Theme.muted)
-                        .lineLimit(captionWraps ? 3 : 1)
-                        .truncationMode(captionWraps ? .tail : .middle)
-                        .fixedSize(horizontal: false, vertical: captionWraps)
+                        .lineLimit(notice.captionWraps ? 3 : 1)
+                        .truncationMode(notice.captionWraps ? .tail : .middle)
+                        .fixedSize(horizontal: false, vertical: notice.captionWraps)
                 }
             }
             Spacer(minLength: 0)
-            CloseButton(help: "Close", action: close)
+            CloseButton(help: Words.Popup.close, action: close)
         }
         .panelCard()
     }

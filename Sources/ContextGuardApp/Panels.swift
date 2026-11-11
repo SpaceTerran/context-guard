@@ -1,9 +1,15 @@
 import AppKit
+import ContextGuardCore
 import SwiftUI
 
 /// Floating popups and notices, stacked under the menu bar at the top right like notifications.
+/// The shared `Presenter` says what opens and closes.
 @MainActor
-final class PanelController {
+final class PanelController: @MainActor PanelHost {
+    /// The view of a session's question popup.
+    var question: (String) -> AnyView = { _ in AnyView(EmptyView()) }
+    /// Runs the presenter's sync again.
+    var onRecheck: () -> Void = {}
     private var stack: [(key: String, panel: FloatingPanel)] = []
     private var noticeTimers: [String: Timer] = [:]
     private var resizeObservers: [String: NSObjectProtocol] = [:]
@@ -14,25 +20,29 @@ final class PanelController {
     /// More than this many at once would run off a laptop screen; the rest wait their turn.
     static let maxOpen = 5
 
-    var keys: [String] { stack.map(\.key) }
-
-    func isOpen(_ key: String) -> Bool { stack.contains { $0.key == key } }
+    var openKeys: [String] { stack.map(\.key) }
 
     var hasRoom: Bool { stack.count < Self.maxOpen }
 
-    func showQuestion(key: String, _ view: some View) {
-        guard hasRoom else { return }
-        open(key, AnyView(view))
+    /// Opens with a sound, unless five are already up.
+    func openQuestion(_ id: String) -> Bool {
+        guard hasRoom else { return false }
+        open(Presenter.questionKey(id), question(id))
+        NSSound(named: "Glass")?.play()
+        return true
     }
 
     /// A notice closes by itself after a few seconds (or with its ✕).
-    func showNotice(key: String, _ view: NoticeView, seconds: TimeInterval = 8) {
-        guard !isOpen(key) else { return }
-        var notice = view
-        notice.close = { [weak self] in self?.close(key) }
-        open(key, AnyView(notice))
-        noticeTimers[key] = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak self] _ in
+    func showNotice(_ notice: NoticeContent, key: String) {
+        open(key, AnyView(NoticeView(notice: notice) { [weak self] in self?.close(key) }))
+        noticeTimers[key] = Timer.scheduledTimer(withTimeInterval: notice.seconds, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.close(key) }
+        }
+    }
+
+    func recheck(after seconds: TimeInterval) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            MainActor.assumeIsolated { self?.onRecheck() }
         }
     }
 
@@ -48,11 +58,6 @@ final class PanelController {
         }
         layout(appearing: panel)
         panel.orderFrontRegardless()
-    }
-
-    /// Closes every panel whose key matches.
-    func close(where matches: (String) -> Bool) {
-        for key in stack.map(\.key) where matches(key) { close(key) }
     }
 
     func close(_ key: String) {

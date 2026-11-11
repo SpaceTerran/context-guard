@@ -3,8 +3,9 @@ import ContextGuardCore
 import Observation
 import SwiftUI
 
-/// Everything the menu, popups and Settings show. The hook owns the session files; the app only
-/// reads them and writes answers and settings.
+/// The Mac app's side of the shared `Presenter`: it watches Context Guard's folder, keeps copies of
+/// what the menu, popups and Settings show (so SwiftUI redraws when they change), and turns clicks
+/// into the presenter's actions, with a beep when one couldn't be saved.
 @MainActor @Observable
 final class AppModel {
     let paths: Paths
@@ -13,47 +14,36 @@ final class AppModel {
     private(set) var sessions: [SessionInfo] = []
     /// What you answered in a popup, by session id. The popup shows progress in place of its buttons.
     private(set) var replies: [String: Reply] = [:]
-    /// The Codex link is installed or has run (its LaunchAgent or `codex-link.json` is there): the
-    /// menu and Settings show each tool's own lines. Otherwise they read as they did before Codex.
-    /// `install.sh --no-codex` and `--uninstall` remove both, so the views go back at once.
+    /// The Codex link is installed or has run: the menu and Settings show each tool's own lines.
     private(set) var showsCodex = false
     /// How `context-guard codex` stands, and the model it judges Codex sessions with.
     private(set) var codexLink = CodexLinkStatus.State.notRunning
     private(set) var codexJudge: String?
 
-    struct Reply: Equatable {
-        var cycle: Int
-        var action: Answer.Action
-        var at: Date
-    }
-
-    @ObservationIgnored private let registry: FileRegistry
+    @ObservationIgnored private let presenter: Presenter
     @ObservationIgnored private var watchers: [FolderWatcher] = []
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var refreshQueued = false
-    @ObservationIgnored private var pruneAt = Date.distantPast
-    @ObservationIgnored private let startedAt = Date()
-    /// Sends and compactions already announced (and everything from before launch).
-    @ObservationIgnored private var announced: Set<String> = []
-    /// Popups closed with ✕, by session id → the cycle they were closed in.
-    @ObservationIgnored private var hidden: [String: Int] = [:]
-    /// When each open popup reached what it shows now, for closing it after a moment.
-    @ObservationIgnored private var shownSince: [String: (QuestionProgress, Date)] = [:]
     @ObservationIgnored let panels = PanelController()
     @ObservationIgnored private let settingsWindow = SettingsWindow()
 
     init(paths: Paths) {
         self.paths = paths
-        self.config = Config.load(paths)
-        self.registry = FileRegistry(dir: paths.registryDir)
+        presenter = Presenter(paths: paths, registry: FileRegistry(dir: paths.registryDir),
+                              codexLinkInstalled: { CodexLinkInstall.isInstalled })
+        config = presenter.config
+        panels.question = { [unowned self] id in AnyView(QuestionView(model: self, sessionID: id)) }
+        panels.onRecheck = { [weak self] in self?.syncPanels() }
     }
 
     // MARK: Watching
 
     func start() {
         try? paths.ensureDirectories()
-        let changed: @MainActor () -> Void = { [weak self] in self?.queueRefresh() }
-        watchers = [paths.root, paths.sessionsDir, paths.answersDir, paths.registryDir, paths.mutedDir].compactMap { FolderWatcher($0, onChange: changed) }
+        let changed: @Sendable () -> Void = { [weak self] in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.queueRefresh() } }
+        }
+        watchers = [paths.root, paths.sessionsDir, paths.answersDir, paths.registryDir, paths.mutedDir].map { FolderWatcher($0, changed) }
         // Registry status (busy/idle) and process exits don't always touch a watched folder.
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
@@ -61,16 +51,8 @@ final class AppModel {
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.panels.layout() }
         }
-        // Only announce what happens from now on.
-        sessions = SessionCatalog.load(paths, registry: registry)
-        for info in sessions { announced.formUnion(announcementKeys(info.state)) }
-        // A popup's countdown runs from when Context Guard was turned on; settings from before
-        // there was one start it now.
-        if config.enabled, config.enabledAt == nil {
-            var c = config
-            c.setEnabled(true, now: Date())
-            save(c)
-        }
+        if presenter.start() != nil { NSSound.beep() }
+        mirror()
         refresh()
     }
 
@@ -87,141 +69,82 @@ final class AppModel {
     }
 
     func refresh() {
-        let newConfig = Config.load(paths)
-        if newConfig != config { config = newConfig }
-        let loaded = SessionCatalog.load(paths, registry: registry)
-        if loaded != sessions { sessions = loaded }
-        let link = CodexLinkStatus.load(paths)
-        let linkState = CodexLinkStatus.state(link, now: Date())
-        if linkState != codexLink { codexLink = linkState }
-        if link?.judgeModel != codexJudge { codexJudge = link?.judgeModel }
-        let codex = CodexLinkInstall.isInstalled || link != nil
-        if codex != showsCodex { showsCodex = codex }
-        if Date() > pruneAt {
-            SessionCatalog.prune(paths, sessions: loaded, olderThan: 7 * 86_400)
-            pruneAt = Date().addingTimeInterval(3_600)
-        }
+        presenter.reload()
+        mirror()
         syncPanels()
+    }
+
+    /// Copies what changed, so SwiftUI only redraws for real changes.
+    private func mirror() {
+        if presenter.config != config { config = presenter.config }
+        if presenter.sessions != sessions { sessions = presenter.sessions }
+        if presenter.replies != replies { replies = presenter.replies }
+        if presenter.showsCodex != showsCodex { showsCodex = presenter.showsCodex }
+        if presenter.codexLink != codexLink { codexLink = presenter.codexLink }
+        if presenter.codexJudge != codexJudge { codexJudge = presenter.codexJudge }
+    }
+
+    private func syncPanels() {
+        presenter.sync(panels)
+        mirror()
+        panels.fitSizes()
     }
 
     // MARK: What the menu shows
 
     /// Terminal sessions that are running now, largest context first.
-    var liveSessions: [SessionInfo] { sessions.filter { $0.isLive && $0.state.guarded } }
+    var liveSessions: [SessionInfo] { Display.live(sessions) }
 
-    var hasQuestion: Bool { config.enabled && liveSessions.contains { !$0.muted && $0.effectivePhase == .asking } }
+    var hasQuestion: Bool { Display.hasQuestion(sessions, config: config) }
 
     func session(_ id: String) -> SessionInfo? { sessions.first { $0.id == id } }
 
-    func tokensText(_ info: SessionInfo) -> String {
-        info.state.awaitingCompactionRecord ? "compacted" : Format.tokens(info.state.tokens)
-    }
-
-    /// The context's size for a popup's heading: for Codex, its share of the window too.
-    func sizeText(_ info: SessionInfo) -> String {
-        info.state.awaitingCompactionRecord ? "compacted" : info.size(info.state.tokens)
-    }
-
-    /// The settings as they apply to this session: Codex's thresholds are shares of its window.
-    func thresholds(_ info: SessionInfo) -> Config { config.resolved(for: info.state) }
-
-    /// Its location line. A Codex session's starts with the tool ("Codex · ~/code"); Claude Code
-    /// sessions' read as they always have.
-    func subtitle(_ info: SessionInfo) -> String {
-        guard info.host == .codex else { return info.subtitle }
-        return info.subtitle.isEmpty ? info.host.name : "\(info.host.name) · \(info.subtitle)"
-    }
-
-    func statusText(_ info: SessionInfo) -> String {
-        let c = thresholds(info)
-        let ask = info.size(c.askAt), later = info.size(c.laterAt)
-        if info.muted, config.enabled, !isSending(info) { return "Not watching this session" }
-        switch info.effectivePhase {
-        case .watching:
-            return config.enabled ? "Asks at \(ask)" : "Not watching: Context Guard is off"
-        case .asking:
-            guard config.enabled else { return "Asks again when Context Guard is on" }
-            guard config.autoYesSeconds > 0 else { return "Waiting for your answer" }
-            return "Waiting for your answer · compacts after \(Format.seconds(config.autoYesSeconds))"
-        case .later:
-            return config.enabled ? "Compacts by itself at \(later)" : "Waiting for \(later): paused while off"
-        case .queued:
-            if !info.isIdle { return "Asking it to save at its next step" }
-            return info.reachableNow ? "Asking it to save…" : "Asks it to save \(info.host.whenOutOfReach)"
-        case .sent:
-            guard info.state.confirmedAt != nil else { return "Asking it to save…" }
-            return "Asked it to save at \(info.size(info.state.sentTokens ?? info.state.tokens))"
-        case .skipped:
-            return "Not asking again until it compacts"
-        }
-    }
-
-    /// The save message is on its way and not yet confirmed: sending again would repeat it.
-    func isSending(_ info: SessionInfo) -> Bool {
-        info.effectivePhase == .queued || (info.state.phase == .sent && info.state.confirmedAt == nil)
-    }
-
-    /// Compact Now is off while one is already under way, since it would ask the session to save
-    /// twice.
-    func canCompactNow(_ info: SessionInfo) -> Bool {
-        !isSending(info) && !(info.state.followUp?.isActive ?? false)
-    }
-
-    /// When an unanswered question sends by itself (the hook's own rule), or nil when it won't.
-    func autoYesDeadline(_ info: SessionInfo) -> Date? {
-        Engine.autoYesDeadline(info.state, config: config, watched: !info.muted, now: Date())
-    }
-
-    /// Where the session stands after its save message, for its menu.
-    func followUpText(_ info: SessionInfo) -> String? {
-        info.state.followUp.flatMap { FollowUpText.line($0, continueMessage: config.continueMessage, now: Date()) }
+    /// What a popup shows for a session, given what you answered in it.
+    func progress(_ info: SessionInfo) -> QuestionProgress {
+        QuestionProgress.of(info, config: config, reply: replies[info.id])
     }
 
     // MARK: Actions
 
     func answer(_ id: String, _ action: Answer.Action, from source: Answer.Source) {
-        guard let info = session(id), save(Answer(cycle: info.state.cycle, action: action, source: source, at: Date()), for: id) else { return }
-        replies[id] = Reply(cycle: info.state.cycle, action: action, at: Date())
+        do {
+            guard try presenter.answer(id, action, from: source) else { return }
+        } catch {
+            NSSound.beep()
+            return
+        }
         refresh()
     }
 
-    private func save(_ answer: Answer, for id: String) -> Bool {
+    func setEnabled(_ on: Bool) {
+        settled(presenter.setEnabled(on))
+    }
+
+    /// "Watch This Session" on or off.
+    func setWatched(_ id: String, _ on: Bool) {
         do {
-            try answer.save(for: id, paths)
-            return true
+            guard try presenter.setWatched(id, on) else { return }
         } catch {
             NSSound.beep()
-            return false
         }
-    }
-
-
-    func setEnabled(_ on: Bool) {
-        var c = config
-        c.setEnabled(on, now: Date())
-        save(c)
-    }
-
-    /// "Watch This Session": off stops questions, automatic sends and compacting for that tab
-    /// until it closes or this turns it back on.
-    func setWatched(_ id: String, _ on: Bool) {
-        guard let info = session(id) else { return }
-        do { try Mute.set(!on, for: info.state, paths) } catch { NSSound.beep() }
         refresh()
     }
 
     /// "Turn Off" in a popup: everything pauses, and a notice says how to turn it back on.
     func turnOffFromPopup() {
         setEnabled(false)
-        panels.showNotice(key: "notice:off:\(UUID().uuidString)", NoticeView(
-            symbol: "pause.circle.fill", tone: .muted, title: "Context Guard is off",
-            detail: "Turn it back on from the gauge in the menu bar."))
+        presenter.announceOff(panels)
     }
 
     /// Saves the settings and reads them back. nil once the file holds them; otherwise why not.
     @discardableResult
     func save(_ c: Config) -> String? {
-        let problem = c.saveConfirmed(paths)
+        settled(presenter.save(c))
+    }
+
+    /// After a save: a beep if it failed, then everything read again.
+    @discardableResult
+    private func settled(_ problem: String?) -> String? {
         if problem != nil { NSSound.beep() }
         refresh()
         return problem
@@ -229,170 +152,14 @@ final class AppModel {
 
     /// ✕ on a popup: hide it for this cycle. The menu can show it again.
     func hideQuestion(_ id: String) {
-        guard let info = session(id) else { return }
-        hidden[id] = info.state.cycle
-        panels.close("question:\(id)")
+        presenter.hideQuestion(id, panels)
         syncPanels()
     }
 
     func showQuestion(_ id: String) {
-        hidden[id] = nil
-        replies[id] = nil
+        presenter.showQuestion(id)
         syncPanels()
     }
 
     func openSettings() { settingsWindow.show(model: self) }
-
-    // MARK: Popups and notices
-
-    private func syncPanels() {
-        let live = liveSessions
-        let now = Date()
-
-        // Close popups whose question is gone or whose progress has been shown long enough.
-        for key in panels.keys where key.hasPrefix("question:") {
-            let id = String(key.dropFirst("question:".count))
-            let progress = live.first { $0.id == id }.map { questionProgress($0) } ?? .closed
-            if shownSince[id]?.0 != progress { shownSince[id] = (progress, now) }
-            let since = shownSince[id]?.1 ?? now
-            if let linger = progress.linger, now.timeIntervalSince(since) >= linger {
-                panels.close(key)
-                shownSince[id] = nil
-            } else if let linger = progress.linger {
-                DispatchQueue.main.asyncAfter(deadline: .now() + linger - now.timeIntervalSince(since) + 0.05) { [weak self] in
-                    MainActor.assumeIsolated { self?.syncPanels() }
-                }
-            }
-        }
-
-        // Open a popup for each session that just started asking.
-        for info in live where config.enabled && !info.muted && info.effectivePhase == .asking && hidden[info.id] != info.state.cycle {
-            let key = "question:\(info.id)"
-            guard !panels.isOpen(key) else { continue }
-            if let r = replies[info.id], r.cycle == info.state.cycle { continue }
-            replies[info.id] = nil
-            shownSince[info.id] = (.question, now)
-            panels.showQuestion(key: key, QuestionView(model: self, sessionID: info.id))
-            NSSound(named: "Glass")?.play()
-        }
-
-        announce(live)
-        panels.fitSizes()
-    }
-
-    /// What a popup shows for a session, given what you answered in it.
-    func questionProgress(_ info: SessionInfo) -> QuestionProgress {
-        // A question left to its countdown went out as a Yes.
-        let timedOut = info.state.askTimedOut == true && [.queued, .sent].contains(info.effectivePhase)
-        let answered = replies[info.id].flatMap { $0.cycle == info.state.cycle ? $0.action : nil } ?? (timedOut ? .yes : nil)
-        guard let action = answered else {
-            return config.enabled && !info.muted && info.effectivePhase == .asking ? .question : .closed
-        }
-        switch action {
-        case .skip: return .closed
-        case .later: return .scheduled(at: thresholds(info).laterAt)
-        case .yes:
-            switch info.effectivePhase {
-            case .queued:
-                if !info.isIdle { return .nextStep }
-                return info.reachableNow ? .waking : .nextRun
-            case .sent:
-                return info.state.confirmedAt != nil ? .sent : .waking
-            default:
-                return .closed
-            }
-        }
-    }
-
-    private func announcementKeys(_ s: SessionState) -> [String] {
-        var keys: [String] = []
-        if let nonce = s.sentNonce { keys.append("sent:\(nonce)") }
-        if let c = s.lastCompaction { keys.append("compacted:\(s.sessionId):\(c.at.timeIntervalSince1970)") }
-        if let f = s.followUp { keys.append(followUpKey(f)) }
-        return keys
-    }
-
-    private func followUpKey(_ f: FollowUp) -> String { "follow-up:\(f.nonce):\(f.stage.rawValue)" }
-
-    /// Short notices for things that happen without a question: an automatic or menu send, an
-    /// auto-compaction that came before the save message did, and the steps of compacting.
-    private func announce(_ live: [SessionInfo]) {
-        for info in live {
-            let s = info.state
-            if let f = s.followUp, !announced.contains(followUpKey(f)) {
-                announced.insert(followUpKey(f))
-                // A new stage closes what the earlier ones said: "Needs you" once it's answered,
-                // "Compacting" once it's done.
-                panels.close { $0.hasPrefix("notice:follow-up:\(f.nonce):") }
-                if let n = FollowUpText.notice(f, continueMessage: config.continueMessage) {
-                    panels.showNotice(key: "notice:\(followUpKey(f))",
-                                      NoticeView(symbol: n.symbol, tone: n.tone, title: n.title, detail: info.title,
-                                                 caption: n.reason ?? subtitle(info), captionWraps: n.reason != nil),
-                                      seconds: n.seconds)
-                }
-            }
-            if let nonce = s.sentNonce, !announced.contains("sent:\(nonce)") {
-                announced.insert("sent:\(nonce)")
-                // A popup that's still open already shows this send.
-                if !panels.isOpen("question:\(info.id)") {
-                    let title = s.sendReason == .later
-                        ? "Reached \(info.size(s.sentTokens ?? s.tokens)): saving, then compacting"
-                        : "Saving, then compacting"
-                    panels.showNotice(key: "notice:\(nonce)", NoticeView(symbol: "tray.and.arrow.down.fill", tone: .accent, title: title, detail: info.title, caption: subtitle(info)))
-                }
-            }
-            if let c = s.lastCompaction, c.at > startedAt, c.interruptedPhase != nil, c.trigger != nil {
-                let key = "compacted:\(s.sessionId):\(c.at.timeIntervalSince1970)"
-                guard !announced.contains(key) else { continue }
-                announced.insert(key)
-                guard c.trigger == "auto" else { continue }
-                let size = c.preTokens.map { " at \(info.size($0))" } ?? ""
-                panels.showNotice(key: "notice:\(key)", NoticeView(
-                    symbol: "arrow.down.right.and.arrow.up.left.circle.fill", tone: .warning,
-                    title: "Auto-compacted\(size) before it could save", detail: info.title, caption: subtitle(info)))
-            }
-        }
-    }
-}
-
-/// What a question popup shows.
-enum QuestionProgress: Equatable {
-    case question
-    /// Busy: it goes in at the session's next step (the hook for Claude Code, the link for Codex).
-    case nextStep
-    /// Idle and reachable now (a waiter, or the link): going out now.
-    case waking
-    /// Idle and out of reach: it goes out when the session next runs, or a terminal shows it.
-    case nextRun
-    case sent
-    case scheduled(at: Int)
-    case closed
-
-    /// How long the popup stays once it shows this; nil stays until something changes.
-    var linger: TimeInterval? {
-        switch self {
-        case .question: return nil
-        case .nextStep, .waking: return 45
-        case .nextRun: return 6
-        case .sent: return 2.5
-        case .scheduled: return 2.5
-        case .closed: return 0
-        }
-    }
-}
-
-/// Calls back on the main thread when a folder's entries change (files renamed into place).
-final class FolderWatcher {
-    private let source: DispatchSourceFileSystemObject
-
-    init?(_ url: URL, onChange: @escaping @MainActor () -> Void) {
-        let fd = open(url.path, O_EVTONLY)
-        guard fd >= 0 else { return nil }
-        source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete, .link], queue: .main)
-        source.setEventHandler { MainActor.assumeIsolated { onChange() } }
-        source.setCancelHandler { close(fd) }
-        source.resume()
-    }
-
-    deinit { source.cancel() }
 }
