@@ -212,13 +212,16 @@ public enum Engine {
         s.stopsSinceSent = 0
         return deliveryText(config.message, nonce: nonce, reason: s.sendReason ?? .yes,
                             askedAt: s.askedTokens ?? s.tokens, laterAt: config.laterAt,
-                            timedOutAfter: s.askTimedOut == true ? config.autoYesSeconds : nil)
+                            timedOutAfter: s.askTimedOut == true ? config.autoYesSeconds : nil, host: s.wordingHost)
     }
 
-    /// The text Claude sees. Claude Code presents a woken session's message as a background event
-    /// ("not user input"), so it says what relays it and why, then quotes the user's own words.
-    /// The tag lets the hook confirm the message reached the transcript.
-    public static func deliveryText(_ message: String, nonce: String, reason: SendReason, askedAt: Int, laterAt: Int, timedOutAfter: Int? = nil) -> String {
+    /// The text the session sees. Claude Code presents a woken session's message as a background
+    /// event ("not user input"), so it says what relays it and why, then quotes the user's own words.
+    /// Codex shows it as a prompt you typed, so it's your words as they are. The tag lets Context
+    /// Guard confirm the message reached the session's log.
+    public static func deliveryText(_ message: String, nonce: String, reason: SendReason, askedAt: Int, laterAt: Int,
+                                    timedOutAfter: Int? = nil, host: SessionHost = .claude) -> String {
+        if host == .codex { return "\(message) [\(nonce)]" }
         let relay = "Context Guard (a Claude Code hook the user installed to watch context size) is relaying a message the user chose to send"
         let why: String
         switch reason {

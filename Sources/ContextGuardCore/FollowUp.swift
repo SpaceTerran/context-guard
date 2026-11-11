@@ -249,12 +249,12 @@ public enum Compactor {
             s.followUp = f
             return .none
         }
-        let action = step(&f, config: config, look: look, now: now)
+        let action = step(&f, config: config, look: look, host: s.wordingHost, now: now)
         s.followUp = f
         return action
     }
 
-    static func step(_ f: inout FollowUp, config: Config, look: SessionLook, now: Date) -> ModAction {
+    static func step(_ f: inout FollowUp, config: Config, look: SessionLook, host: SessionHost = .claude, now: Date) -> ModAction {
         switch f.stage {
         case .compacting:
             if look.idle, now.timeIntervalSince(f.compactStartedAt ?? f.stageAt) > compactStall {
@@ -322,7 +322,7 @@ public enum Compactor {
             f.judgeAskedAt = now
             let idleFor = look.lastWrite.map { now.timeIntervalSince($0) } ?? 0
             return .judge(nonce: f.nonce, mark: conversation.mark,
-                          prompt: JudgePrompt.make(message: config.message, conversation: conversation.text, idleFor: idleFor))
+                          prompt: JudgePrompt.make(message: config.message, conversation: conversation.text, idleFor: idleFor, host: host))
 
         case .done, .tookOver, .stopped, .failed:
             return .none
@@ -339,7 +339,7 @@ public enum Compactor {
             guard f.isBeforeCompacting, let mark = r.mark else { return false }
             f.judgeAskedAt = nil
             guard let reply = JudgeReply.parse(r.text ?? "") else {
-                failJudge(&f, "its answer wasn't readable", now: now)
+                failJudge(&f, "its answer wasn't readable", host: s.wordingHost, now: now)
                 return false
             }
             f.judgeFailures = 0
@@ -360,7 +360,7 @@ public enum Compactor {
         case .judgeFailed:
             guard f.isBeforeCompacting else { return false }
             f.judgeAskedAt = nil
-            failJudge(&f, r.error ?? "no answer", now: now)
+            failJudge(&f, r.error ?? "no answer", host: s.wordingHost, now: now)
             return false
 
         case .compacted:
@@ -405,15 +405,15 @@ public enum Compactor {
         case .continuing:
             break
         default:
-            stop(&f, trigger == "auto" ? "Claude Code compacted it by itself" : "it was compacted before it was ready", now: now)
+            stop(&f, trigger == "auto" ? "\(s.wordingHost.name) compacted it by itself" : "it was compacted before it was ready", now: now)
         }
         s.followUp = f
     }
 
-    static func failJudge(_ f: inout FollowUp, _ error: String, now: Date) {
+    static func failJudge(_ f: inout FollowUp, _ error: String, host: SessionHost = .claude, now: Date) {
         f.judgeFailures += 1
         if f.judgeFailures >= maxJudgeFailures {
-            fail(&f, "Haiku didn't answer (\(error))", now: now)
+            fail(&f, "\(host.judgeName.prefix(1).uppercased() + host.judgeName.dropFirst()) didn't answer (\(error))", now: now)
             return
         }
         // 15 s, 30 s, 1 min, 2 min, 4 min, then every 5 min.

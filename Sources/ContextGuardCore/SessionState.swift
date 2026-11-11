@@ -82,6 +82,8 @@ public struct SessionState: Codable, Equatable, Sendable {
     /// The tool it runs in (`SessionHost`), as the file has it. Claude Code sessions leave it out,
     /// so their files read and write exactly as they did before there was a second tool.
     public var host: String?
+    /// Codex sessions only.
+    public var codex: CodexFacts?
     public var cwd: String?
     public var transcriptPath: String?
     public var title: String?

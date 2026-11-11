@@ -208,11 +208,11 @@ public enum ConversationReader {
 }
 
 public enum JudgePrompt {
-    /// What Haiku is asked. The session's own words decide it; Haiku never acts on it.
-    public static func make(message: String, conversation: String, idleFor: TimeInterval) -> String {
+    /// What the judge is asked. The session's own words decide it; the judge never acts on it.
+    public static func make(message: String, conversation: String, idleFor: TimeInterval, host: SessionHost = .claude) -> String {
         let idle = idleFor >= 120 ? " It has been idle for \(Int(idleFor / 60)) minutes." : ""
         return """
-        You are checking on a Claude Code session for its user. The user sent the session this message:
+        You are checking on a \(host.name) session for its user. The user sent the session this message:
 
         <message>
         \(message)
