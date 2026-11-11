@@ -46,8 +46,9 @@ enum Snapshots {
     }
 
     /// `window-<number>.png` for each visible window, the frame (title bar and all) included;
-    /// `settings-<tab>.png` for each Settings tab, drawn off screen; and `index.txt`: file, kind,
-    /// title, frame. The index is written last, so its presence means the PNGs are done.
+    /// `settings-<tab>.png` for each Settings tab, drawn off screen; `menu.txt`, the menu under the
+    /// gauge; and `index.txt`: file, kind, title, frame. The index is written last, so its presence
+    /// means the rest are done.
     static func write(model: AppModel, to dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var index: [String] = []
@@ -70,7 +71,39 @@ enum Snapshots {
                 index.append("\(name)\tSettingsView\t\(tab.title)\t\(Int(host.frame.width))x\(Int(host.frame.height))")
             }
         }
+        try? (menuLines().joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("menu.txt"), atomically: true, encoding: .utf8)
         try? (index.joined(separator: "\n") + "\n").write(to: dir.appendingPathComponent("index.txt"), atomically: true, encoding: .utf8)
+    }
+
+    /// The menu under the gauge as SwiftUI built it, an item a line and submenus indented: title,
+    /// then badge, symbol, shortcut, a check mark and whether it's dimmed. The menu isn't a window,
+    /// and opening one takes the keyboard, so it's read without opening it.
+    static func menuLines() -> [String] {
+        var lines: [String] = []
+        let statusItem = NSSelectorFromString("statusItem")
+        for w in NSApp.windows where w.responds(to: statusItem) {
+            guard let item = w.perform(statusItem)?.takeUnretainedValue() as? NSStatusItem, let menu = item.menu else { continue }
+            describe(menu, indent: "", into: &lines)
+        }
+        return lines
+    }
+
+    private static func describe(_ menu: NSMenu, indent: String, into lines: inout [String]) {
+        menu.delegate?.menuNeedsUpdate?(menu)
+        for i in menu.items {
+            guard !i.isSeparatorItem else {
+                lines.append(indent + "---")
+                continue
+            }
+            var line = indent + i.title
+            if let badge = i.badge?.stringValue { line += "  [\(badge)]" }
+            if let symbol = i.image?.accessibilityDescription { line += "  <\(symbol)>" }
+            if !i.keyEquivalent.isEmpty { line += "  ⌘\(i.keyEquivalent)" }
+            if i.state == .on { line += "  ✓" }
+            if !i.isEnabled { line += "  (dimmed)" }
+            lines.append(line)
+            if let sub = i.submenu { describe(sub, indent: indent + "    ", into: &lines) }
+        }
     }
 
     private static func draw(_ view: NSView, to url: URL) -> Bool {
