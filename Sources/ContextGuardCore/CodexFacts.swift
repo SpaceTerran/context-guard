@@ -8,6 +8,9 @@ public struct CodexFacts: Codable, Equatable, Sendable {
     public var window: Int?
     /// Where Codex compacts by itself, when known (`model_auto_compact_token_limit`).
     public var autoCompactAt: Int?
+    /// Codex also compacts after a turn that ends above this share of the window, when set
+    /// (`model_post_turn_compact_threshold_percent`).
+    public var postTurnCompactPercent: Int?
     /// The model the session last ran.
     public var model: String?
     /// Which Codex client started it: `codex-tui` for a terminal session.
@@ -31,14 +34,13 @@ public struct CodexFacts: Codable, Equatable, Sendable {
     /// A terminal has it open, as far as the link can tell.
     public var attached: Bool?
 
-    /// Our item in the thread's queue, while the save or continue message waits there.
-    public var queueItemId: String?
-
-    public init(window: Int? = nil, autoCompactAt: Int? = nil, model: String? = nil, originator: String? = nil,
+    public init(window: Int? = nil, autoCompactAt: Int? = nil, postTurnCompactPercent: Int? = nil,
+                model: String? = nil, originator: String? = nil,
                 status: String? = nil, flags: [String]? = nil, statusAt: Date? = nil,
-                loaded: Bool? = nil, unloadedAt: Date? = nil, queueItemId: String? = nil) {
+                loaded: Bool? = nil, unloadedAt: Date? = nil) {
         self.window = window
         self.autoCompactAt = autoCompactAt
+        self.postTurnCompactPercent = postTurnCompactPercent
         self.model = model
         self.originator = originator
         self.status = status
@@ -46,7 +48,6 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         self.statusAt = statusAt
         self.loaded = loaded
         self.unloadedAt = unloadedAt
-        self.queueItemId = queueItemId
     }
 
     // A field that doesn't read is left unknown instead of failing the whole state file.
@@ -54,6 +55,7 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         window = try? c.decode(Int.self, forKey: .window)
         autoCompactAt = try? c.decode(Int.self, forKey: .autoCompactAt)
+        postTurnCompactPercent = try? c.decode(Int.self, forKey: .postTurnCompactPercent)
         model = try? c.decode(String.self, forKey: .model)
         originator = try? c.decode(String.self, forKey: .originator)
         terminal = try? c.decode(Bool.self, forKey: .terminal)
@@ -64,13 +66,18 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         loaded = try? c.decode(Bool.self, forKey: .loaded)
         unloadedAt = try? c.decode(Date.self, forKey: .unloadedAt)
         attached = try? c.decode(Bool.self, forKey: .attached)
-        queueItemId = try? c.decode(String.self, forKey: .queueItemId)
     }
 
-    /// Where Codex compacts by itself: its own limit when known, else its default. By default it
-    /// compacts at 90% of the model's window, and the reported window is 95% of that.
+    /// The lowest point where Codex compacts by itself, as far as is known. By default it compacts
+    /// at 90% of the model's window, and the reported window is 95% of that; its own limit and its
+    /// after-a-turn share, when set, can come earlier.
     public var compactsItselfAt: Int? {
-        if let autoCompactAt, autoCompactAt > 0 { return autoCompactAt }
-        return window.map { $0 * 90 / 95 }
+        var points: [Int] = []
+        if let window, window > 0 {
+            points.append(window * 90 / 95)
+            if let pct = postTurnCompactPercent, (1...100).contains(pct) { points.append(window * pct / 100) }
+        }
+        if let autoCompactAt, autoCompactAt > 0 { points.append(autoCompactAt) }
+        return points.min()
     }
 }

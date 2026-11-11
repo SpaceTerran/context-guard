@@ -18,9 +18,12 @@ public struct CodexThreadLook: Equatable, Sendable {
     public var attached: Bool?
     /// Codex's own compaction point, when set (`model_auto_compact_token_limit`).
     public var autoCompactAt: Int?
+    /// Codex compacts after a turn above this share of the window, when set.
+    public var postTurnCompactPercent: Int?
 
     public init(threadId: String, path: String? = nil, cwd: String? = nil, name: String? = nil, status: String,
-                flags: [String] = [], ephemeral: Bool = false, attached: Bool? = nil, autoCompactAt: Int? = nil) {
+                flags: [String] = [], ephemeral: Bool = false, attached: Bool? = nil, autoCompactAt: Int? = nil,
+                postTurnCompactPercent: Int? = nil) {
         self.threadId = threadId
         self.path = path
         self.cwd = cwd
@@ -30,6 +33,7 @@ public struct CodexThreadLook: Equatable, Sendable {
         self.ephemeral = ephemeral
         self.attached = attached
         self.autoCompactAt = autoCompactAt
+        self.postTurnCompactPercent = postTurnCompactPercent
     }
 
     /// Between turns: a prompt starts a new turn, and the session can be compacted.
@@ -105,7 +109,11 @@ public struct CodexRunner: Sendable {
         c.status = t.status
         c.flags = t.flags.isEmpty ? nil : t.flags
         c.attached = t.attached
-        c.autoCompactAt = t.autoCompactAt
+        if t.status != "notLoaded" {
+            // The app server's settings for it; one it doesn't list keeps the last ones seen.
+            c.autoCompactAt = t.autoCompactAt
+            c.postTurnCompactPercent = t.postTurnCompactPercent
+        }
         noteLoaded(&s, &c, loaded: t.status != "notLoaded", now: now)
         if let cwd = t.cwd, !cwd.isEmpty { s.cwd = cwd }
         if let name = t.name, !name.isEmpty { s.title = name }

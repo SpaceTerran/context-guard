@@ -1,5 +1,6 @@
 import XCTest
 @testable import ContextGuardCore
+import ContextGuardTestSupport
 
 /// No answer within `autoYesSeconds` counts as Yes; "Watch This Session" off stops all of it.
 final class AutoYesRuleTests: XCTestCase {

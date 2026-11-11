@@ -132,6 +132,8 @@ public struct ModReport: Codable, Equatable, Sendable {
         case judged, judgeFailed, compacted, compactSkipped, compactFailed, continueFailed
         /// You stopped the compaction (Esc) before it finished.
         case compactInterrupted
+        /// Not compacted: the session started a turn just before (Codex). Doesn't count as a try.
+        case compactDeferred
     }
 
     public var sessionId: String
@@ -384,6 +386,15 @@ public enum Compactor {
             // Yours to decide: a ready verdict still on file mustn't compact it again.
             guard f.stage == .compacting else { return false }
             stop(&f, "you stopped the compaction", now: now)
+            return false
+
+        case .compactDeferred:
+            // The new turn changes the conversation, so it's judged again once the turn ends.
+            guard f.stage == .compacting else { return false }
+            set(&f, .checking, now: now)
+            f.compactAttempts = max(0, f.compactAttempts - 1)
+            f.compactStartedAt = nil
+            f.compactFrom = nil
             return false
 
         case .continueFailed:

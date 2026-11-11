@@ -1,112 +1,6 @@
 import XCTest
 @testable import ContextGuardCore
-
-/// Lines shaped like a Codex 0.167 rollout (taken from real ones, with demo values).
-enum CodexLine {
-    static let thread = "01a1c7f0-4d8a-7870-aab2-07bc76ea7408"
-    static let turnId = "01a1c7f1-22f1-7d70-a4ee-1ed9b0f60470"
-
-    static func line(_ type: String, _ payload: [String: Any], at: String = "2026-11-11T00:10:31.944Z") -> String {
-        Line.json(["timestamp": at, "type": type, "payload": payload])
-    }
-
-    static func event(_ payload: [String: Any], at: String = "2026-11-11T00:10:31.944Z") -> String { line("event_msg", payload, at: at) }
-
-    static func meta(originator: String = "codex-tui", source: Any = "vscode", threadSource: String = "user",
-                     history: String = "paginated", instructions: Int = 48_000) -> String {
-        line("session_meta", ["id": thread, "session_id": thread, "cwd": "/Users/demo/code", "originator": originator,
-                              "cli_version": "0.167.1", "source": source, "thread_source": threadSource,
-                              "model_provider": "openai", "history_mode": history,
-                              "base_instructions": String(repeating: "You are Codex. ", count: instructions / 15)],
-             at: "2026-11-11T00:09:36.928Z")
-    }
-
-    static func taskStarted(at: String = "2026-11-11T00:10:31.574Z") -> String {
-        event(["type": "task_started", "turn_id": turnId, "started_at": 1_794_355_831, "model_context_window": 258_400,
-               "collaboration_mode_kind": "default"], at: at)
-    }
-
-    static func turnContext(model: String = "gpt-6-luna") -> String {
-        line("turn_context", ["turn_id": turnId, "cwd": "/Users/demo/code", "model": model, "approval_policy": "on-request"])
-    }
-
-    static func injected(_ text: String = "# AGENTS.md instructions for /Users/demo/code") -> String {
-        line("response_item", ["type": "message", "role": "user", "content": [["type": "input_text", "text": text]]])
-    }
-
-    static func prompt(_ text: String, clientId: String = "6a3c1f9e-0000-4000-8000-000000000001") -> String {
-        event(["type": "item_completed", "thread_id": thread, "turn_id": turnId,
-               "item": ["type": "UserMessage", "id": "01a1c7f1-2487", "client_id": clientId,
-                        "content": [["type": "text", "text": text, "text_elements": [Any]()]]]])
-    }
-
-    static func reply(_ text: String, phase: String = "final_answer") -> String {
-        event(["type": "item_completed", "thread_id": thread, "turn_id": turnId,
-               "item": ["type": "AgentMessage", "id": "msg_03c7", "content": [["type": "Text", "text": text]], "phase": phase]])
-    }
-
-    static func replyRecord(_ text: String) -> String {
-        line("response_item", ["type": "message", "role": "assistant", "content": [["type": "output_text", "text": text]]])
-    }
-
-    static func reasoning() -> [String] {
-        [event(["type": "item_completed", "item": ["type": "Reasoning", "id": "rs_1", "summary_text": [Any](), "raw_content": [Any]()]]),
-         line("response_item", ["type": "reasoning", "id": "rs_1", "summary": [Any](), "encrypted_content": "gAAAA"])]
-    }
-
-    static func toolCall(_ name: String = "exec", input: String = "await tools.exec_command({cmd: \"git push\"})") -> String {
-        line("response_item", ["type": "custom_tool_call", "status": "completed", "call_id": "call_1", "name": name, "input": input])
-    }
-
-    static func functionCall(_ name: String, _ args: [String: Any]) -> String {
-        let raw = String(decoding: try! JSONSerialization.data(withJSONObject: args), as: UTF8.self)
-        return line("response_item", ["type": "function_call", "name": name, "arguments": raw, "call_id": "call_2"])
-    }
-
-    static func toolOutput(_ text: String) -> String {
-        line("response_item", ["type": "custom_tool_call_output", "call_id": "call_1",
-                               "output": [["type": "input_text", "text": "Script completed\n"], ["type": "input_text", "text": text]]])
-    }
-
-    static func tokens(_ total: Int, window: Int = 258_400) -> String {
-        let usage: [String: Any] = ["input_tokens": total - 69, "cached_input_tokens": 0, "output_tokens": 69,
-                                    "reasoning_output_tokens": 60, "total_tokens": total]
-        return event(["type": "token_count", "info": ["total_token_usage": usage, "last_token_usage": usage,
-                                                      "last_usage_includes_reasoning": true, "model_context_window": window],
-                      "rate_limits": ["limit_id": "codex"]])
-    }
-
-    static func usageRecord(_ total: Int) -> String {
-        line("token_usage_record", ["thread_id": thread, "turn_id": turnId, "usage": ["total_tokens": total]])
-    }
-
-    static func taskComplete() -> String {
-        event(["type": "task_complete", "turn_id": turnId, "last_agent_message": "ok", "duration_ms": 2_644])
-    }
-
-    static func turnAborted(_ reason: String = "interrupted") -> String {
-        event(["type": "turn_aborted", "turn_id": turnId, "reason": reason])
-    }
-
-    static func compacted() -> [String] {
-        [line("compacted", ["message": "", "replacement_history": [["type": "message", "role": "user",
-                                                                     "content": [["type": "input_text", "text": "Earlier: Codex pushed the branch."]]]]]),
-         event(["type": "context_compacted"])]
-    }
-
-    /// A whole turn: your prompt, a tool call, a reply, the size after it.
-    static func turn(_ prompt: String, reply: String, tokens: Int, clientId: String = UUID().uuidString.lowercased()) -> [String] {
-        [taskStarted(), turnContext(), CodexLine.prompt(prompt, clientId: clientId)] + reasoning()
-            + [toolCall(), toolOutput("main -> main"), CodexLine.reply(reply), replyRecord(reply), usageRecord(tokens),
-               CodexLine.tokens(tokens), taskComplete()]
-    }
-}
-
-extension Transcript {
-    func append(_ lines: [String]) {
-        appendRaw(lines.joined(separator: "\n") + "\n")
-    }
-}
+import ContextGuardTestSupport
 
 final class CodexMetaTests: XCTestCase {
     let dir = TempDir()
@@ -231,6 +125,28 @@ final class CodexRolloutTests: XCTestCase {
         let after = CodexRollout.read(path: log.path, cursor: r.transcript.cursor, turn: r.turn)
         XCTAssertNil(after.transcript.compaction)
         XCTAssertEqual(after.transcript.tokens, 18_081)
+    }
+
+    func testTheTerminalAppsOwnCompactionTurn() {
+        log.append(CodexLine.turn("job", reply: "saved", tokens: 200_000))
+        let before = CodexRollout.read(path: log.path, cursor: nil)
+        log.append(CodexLine.compactionTurn(after: 24_712))
+        let r = CodexRollout.read(path: log.path, cursor: before.transcript.cursor, turn: before.turn)
+        XCTAssertEqual(r.transcript.compaction, .compaction(trigger: "manual", preTokens: nil, postTokens: 24_712))
+        XCTAssertEqual(r.transcript.tokens, 24_712)
+        XCTAssertFalse(r.sizeAfterCompactionUnknown)
+        XCTAssertFalse(r.turn.open)
+        XCTAssertFalse(r.turn.aborted)
+    }
+
+    func testEscDuringACompactionLeavesNone() {
+        log.append(CodexLine.turn("job", reply: "saved", tokens: 200_000))
+        let before = CodexRollout.read(path: log.path, cursor: nil)
+        log.append(CodexLine.compactionInterrupted())
+        let r = CodexRollout.read(path: log.path, cursor: before.transcript.cursor, turn: before.turn)
+        XCTAssertNil(r.transcript.compaction)
+        XCTAssertTrue(r.turn.aborted)
+        XCTAssertFalse(r.turn.open)
     }
 
     func testABigTailIsReadBackUntilASizeTurnsUp() {

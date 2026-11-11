@@ -260,6 +260,22 @@ final class ThresholdTests: XCTestCase {
         XCTAssertEqual(Config().resolved(for: codex(window: 258_400)).laterAt, 206_720, "80% has room enough")
     }
 
+    func testTheLowestOfCodexsOwnCompactionPointsCounts() {
+        XCTAssertEqual(CodexFacts(window: 258_400, postTurnCompactPercent: 70).compactsItselfAt, 180_880, "after a turn above 70%")
+        XCTAssertEqual(CodexFacts(window: 258_400, autoCompactAt: 150_000, postTurnCompactPercent: 70).compactsItselfAt, 150_000)
+        XCTAssertEqual(CodexFacts(window: 258_400, postTurnCompactPercent: 95).compactsItselfAt, 244_800, "later than its default")
+        XCTAssertEqual(CodexFacts(window: 258_400, postTurnCompactPercent: 0).compactsItselfAt, 244_800, "not a share")
+        XCTAssertEqual(CodexFacts(window: 258_400, postTurnCompactPercent: 150).compactsItselfAt, 244_800, "not a share")
+        XCTAssertEqual(CodexFacts(autoCompactAt: 150_000).compactsItselfAt, 150_000, "no window yet")
+        XCTAssertNil(CodexFacts().compactsItselfAt)
+
+        var s = codex(window: 258_400)
+        s.codex?.postTurnCompactPercent = 70
+        let r = Config().resolved(for: s)
+        XCTAssertEqual(r.laterAt, 180_880 - 25_840)
+        XCTAssertLessThan(r.askAt, r.laterAt)
+    }
+
     func testAnUnknownWindowKeepsTheTokenCounts() {
         let c = Config()
         XCTAssertEqual(c.resolved(for: codex(window: nil)), c)
