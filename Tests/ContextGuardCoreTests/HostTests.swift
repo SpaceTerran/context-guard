@@ -251,12 +251,12 @@ final class ThresholdTests: XCTestCase {
         XCTAssertEqual(CodexFacts(window: 258_400).compactsItselfAt, 244_800)
         let late = Config(codexAskPercent: 85, codexLaterPercent: 90).normalized
         let r = late.resolved(for: codex(window: 258_400))
-        XCTAssertEqual(r.laterAt, 232_560, "90% is still below 244.8k")
+        XCTAssertEqual(r.laterAt, 244_800 - 25_840, "90% would be too close to 244.8k")
         // A low limit of your own wins, with room for the save to finish first.
         let low = Config().resolved(for: codex(window: 258_400, autoCompactAt: 180_000))
-        XCTAssertEqual(low.laterAt, 180_000 - 5_168)
-        XCTAssertLessThan(low.askAt, low.laterAt)
-        XCTAssertEqual(low.askAt, 155_040)
+        XCTAssertEqual(low.laterAt, 180_000 - 25_840)
+        XCTAssertEqual(low.askAt, 180_000 - 25_840 - 12_920, "asking stays before Wait")
+        XCTAssertEqual(Config().resolved(for: codex(window: 258_400)).laterAt, 206_720, "80% has room enough")
     }
 
     func testAnUnknownWindowKeepsTheTokenCounts() {
