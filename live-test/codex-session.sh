@@ -34,8 +34,8 @@
 #                                                       has sessions loaded that aren't this test's
 #   live-test/codex-session.sh stop <name>              close it, stop the link, delete the test's Codex
 #                                                       sessions, stop the app server if the test
-#                                                       started it and nothing else is loaded, and say
-#                                                       whether ~/.codex/config.toml changed
+#                                                       started it and nothing else is loaded, and show
+#                                                       what changed in ~/.codex/config.toml
 #
 # It refuses to start while an installed link (or any link without --only-cwd) runs: two links would
 # both act on the test session. If Codex offers an update anyway, the driver passes on only esc
@@ -139,8 +139,8 @@ case "$cmd" in
     } > "$dir/.codex/config.toml"
     # Whether Codex's app server was running before, so stop can leave it as it was.
     if loaded >/dev/null 2>&1; then echo yes > "$dir/server-was-running"; else echo no > "$dir/server-was-running"; fi
-    # What Codex's settings were, so stop can say whether the test changed them.
-    shasum -a 256 "$codex_home/config.toml" 2>/dev/null | cut -d' ' -f1 > "$dir/config.sha" || true
+    # A copy of your Codex settings, so stop can show what the test changed in them.
+    if [ -f "$codex_home/config.toml" ]; then (umask 077; cp "$codex_home/config.toml" "$dir/config.before.toml"); fi
     # Filler files: reading one adds roughly 10k tokens of context.
     for i in 1 2 3 4 5 6; do
       python3 -c "import random; random.seed($i); w=['alpha','bravo','charlie','delta','echo','foxtrot','golf','hotel','india','juliet']; print('\n'.join(' '.join(random.choice(w) for _ in range(16)) for _ in range(600)))" > "$dir/filler-$i.txt"
@@ -219,8 +219,9 @@ case "$cmd" in
         printf 'left Codex app server running: it has other sessions loaded:\n%s\n' "$busy"
       fi
     fi
-    if [ -s "$dir/config.sha" ] && [ "$(shasum -a 256 "$codex_home/config.toml" | cut -d' ' -f1)" != "$(cat "$dir/config.sha")" ]; then
-      echo "note: $codex_home/config.toml changed during the test (Codex writes first-run flags there)" >&2
+    if [ -f "$dir/config.before.toml" ] && ! cmp -s "$dir/config.before.toml" "$codex_home/config.toml"; then
+      echo "note: $codex_home/config.toml changed during the test (Codex writes first-run flags there):" >&2
+      diff -u "$dir/config.before.toml" "$codex_home/config.toml" >&2 || true
     fi
     ;;
   *) echo "unknown command $cmd" >&2; exit 1 ;;
