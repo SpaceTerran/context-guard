@@ -37,7 +37,7 @@ enum Theme {
     }
 
     /// The icon color for a notice's tone. Status colors only ever mean status.
-    static func color(_ tone: FollowUpText.Tone) -> Color {
+    static func color(_ tone: Tone) -> Color {
         switch tone {
         case .accent: return accent
         case .success: return success

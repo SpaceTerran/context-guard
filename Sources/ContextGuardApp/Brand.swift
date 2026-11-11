@@ -1,3 +1,4 @@
+import ContextGuardCore
 import SwiftUI
 
 // The app's controls: flat surfaces, 1 px borders, radius 6 on controls and 8 on panels, and the
@@ -384,5 +385,19 @@ struct TabBar<Tab: Hashable & Identifiable>: View {
             Spacer(minLength: 0)
         }
         .overlay(alignment: .bottom) { Rule() }
+    }
+}
+
+extension NumberField {
+    /// A Settings field as Core describes it.
+    init(_ field: SettingsText.Field, value: Binding<Int>, invalid: Bool = false) {
+        self.init(label: field.label, value: value, unit: field.unit, step: field.step, range: field.range, invalid: invalid)
+    }
+}
+
+extension StatusLabel {
+    /// A status line as Core words it, in its tone's color.
+    init(_ line: StatusLine, size: CGFloat = 13) {
+        self.init(text: line.text, symbol: line.symbol.systemName, color: Theme.color(line.tone), size: size)
     }
 }

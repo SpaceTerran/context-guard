@@ -80,7 +80,7 @@ final class FollowUpTextTests: XCTestCase {
     }
 
     func testEachNoticeIsColoredByWhatItMeans() {
-        func tone(_ stage: FollowUp.Stage, compacted: Bool = false) -> FollowUpText.Tone? {
+        func tone(_ stage: FollowUp.Stage, compacted: Bool = false) -> Tone? {
             var f = followUp(stage, note: "x")
             f.compactedAt = compacted ? now : nil
             return FollowUpText.notice(f, continueMessage: "go")?.tone

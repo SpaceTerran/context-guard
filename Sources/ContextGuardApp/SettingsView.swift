@@ -46,9 +46,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .general: return "General"
-        case .asking: return "When to Ask"
-        case .messages: return "Messages"
+        case .general: return Words.Settings.general
+        case .asking: return Words.Settings.whenToAsk
+        case .messages: return Words.Settings.messages
         }
     }
 }
@@ -139,16 +139,16 @@ struct SettingsView: View {
 
     private var general: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Card(title: "Context Guard") {
-                let watch = model.showsCodex ? "Watch sessions" : "Watch Claude Code sessions"
+            Card(title: Words.Settings.contextGuard) {
+                let watch = SettingsText.watchLabel(showsCodex: model.showsCodex)
                 Row(label: watch) {
                     Toggle(watch, isOn: Binding(get: { model.config.enabled }, set: { model.setEnabled($0) }))
                         .labelsHidden()
                 }
                 Rule()
-                Row(label: "Open at login") {
+                Row(label: Words.Settings.openAtLogin) {
                     // A closure, not `set: setLogin`: Swift 6.1 to 6.3 crash building the method reference here.
-                    Toggle("Open at login", isOn: Binding(get: { login == .enabled }, set: { setLogin($0) }))
+                    Toggle(Words.Settings.openAtLogin, isOn: Binding(get: { login == .enabled }, set: { setLogin($0) }))
                         .labelsHidden()
                         .disabled(login == .unavailable)
                 }
@@ -166,98 +166,41 @@ struct SettingsView: View {
                         .padding(.vertical, 12)
                 }
             }
-            Note("When off, nothing pops up and nothing compacts by itself. Compact Now in a session's menu still works.")
+            Note(Words.Settings.offNote)
                 .padding(.horizontal, 2)
                 .padding(.bottom, 14)
 
             // One card per tool, as on When to Ask: what's installed, then the judge and whose sign-in it uses.
             Card(title: SessionHost.claude.name) {
-                Row(label: "Hooks") { installed(hooksInstalled) }
-                    .help("Follow each Claude Code session and send it the save and continue messages")
+                Row(label: Words.Settings.hooks) { StatusLabel(SettingsText.installed(hooksInstalled)) }
+                    .help(Words.Settings.hooksHelp)
                 Rule()
-                Row(label: "Mod") { installed(modInstalled) }
-                    .help("Compacts each Claude Code session once it has saved")
+                Row(label: Words.Settings.mod) { StatusLabel(SettingsText.installed(modInstalled)) }
+                    .help(Words.Settings.modHelp)
                 Rule()
-                Row(label: "Judge") { judgeLabel(SessionHost.claude.judgeName) }
-                    .help(judgeHelp)
+                Row(label: Words.Settings.judge) { StatusLabel(SettingsText.claudeJudge) }
+                    .help(Words.Settings.judgeHelp)
             }
-            Note("No API key: the judge uses your Claude Code sign-in.")
+            Note(SettingsText.signInNote(.claude))
                 .padding(.horizontal, 2)
             if model.showsCodex {
                 Card(title: SessionHost.codex.name) {
-                    Row(label: "Link") { codexLinkLabel }
-                        .help("Follows each Codex session, sends it the save and continue messages and compacts it. It connects to Codex while a Codex session runs in a terminal.")
+                    Row(label: Words.Settings.link) { StatusLabel(SettingsText.link(model.codexLink, installed: codexLinkInstalled)) }
+                        .help(Words.Settings.linkHelp)
                     if case .onlyWatching(let why) = model.codexLink {
                         Rule()
-                        Note("Only watching, not compacting: \(why). A newer Codex may fix this.", color: Theme.warning)
+                        Note(SettingsText.onlyWatchingNote(why), color: Theme.warning)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                     }
                     Rule()
-                    Row(label: "Judge") { codexJudgeLabel }
-                        .help(judgeHelp)
+                    Row(label: Words.Settings.judge) { StatusLabel(SettingsText.codexJudge(model.codexJudge, link: model.codexLink)) }
+                        .help(Words.Settings.judgeHelp)
                 }
                 .padding(.top, 14)
-                Note("No API key: the judge uses your Codex sign-in.")
+                Note(SettingsText.signInNote(.codex))
                     .padding(.horizontal, 2)
             }
-        }
-    }
-
-    private let judgeHelp = "Reads what the session does after the save message and says when it has saved"
-
-    /// The model the Codex link judges with: the one it picked, the session's own when Codex offers
-    /// no small one, or nothing yet until it connects.
-    private var codexJudge: (name: String, known: Bool) {
-        if let m = model.codexJudge { return (m, true) }
-        switch model.codexLink {
-        case .connected, .onlyWatching: return ("Each session's own model", true)
-        case .waiting, .notRunning: return ("Picked when Codex connects", false)
-        }
-    }
-
-    /// The judge as notes name it, in a sentence.
-    private var codexJudgeName: String {
-        model.codexJudge ?? (codexJudge.known ? "each session's own model" : "a small OpenAI model")
-    }
-
-    @ViewBuilder
-    private var codexJudgeLabel: some View {
-        if codexJudge.known {
-            judgeLabel(codexJudge.name)
-        } else {
-            StatusLabel(text: codexJudge.name, symbol: "clock", color: Theme.muted)
-        }
-    }
-
-    private func judgeLabel(_ name: String) -> some View {
-        StatusLabel(text: name, symbol: "checkmark.circle.fill", color: Theme.success)
-    }
-
-    @ViewBuilder
-    private var codexLinkLabel: some View {
-        switch model.codexLink {
-        case .connected:
-            StatusLabel(text: "Connected", symbol: "checkmark.circle.fill", color: Theme.success)
-        case .onlyWatching:
-            StatusLabel(text: "Only watching", symbol: "exclamationmark.triangle.fill", color: Theme.warning)
-        case .waiting:
-            StatusLabel(text: "Waiting for Codex", symbol: "clock", color: Theme.muted)
-        case .notRunning:
-            if codexLinkInstalled {
-                StatusLabel(text: "Not running: run install.sh", symbol: "exclamationmark.triangle.fill", color: Theme.warning)
-            } else {
-                installed(false)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func installed(_ ok: Bool) -> some View {
-        if ok {
-            StatusLabel(text: "Installed", symbol: "checkmark.circle.fill", color: Theme.success)
-        } else {
-            StatusLabel(text: "Not installed: run install.sh", symbol: "exclamationmark.triangle.fill", color: Theme.warning)
         }
     }
 
@@ -268,65 +211,60 @@ struct SettingsView: View {
         if model.showsCodex {
             // Each tool's thresholds, then the countdown both share.
             VStack(alignment: .leading, spacing: 10) {
-                Card(title: "Claude Code") {
+                Card(title: SessionHost.claude.name) {
                     askField
                     Rule()
                     laterField
                 } accessory: {
                     SaveStatusLabel(status: thresholdProblem.map(SaveStatus.notSaved) ?? thresholdsSaved)
                 }
-                problemOr(thresholdProblem, "When a session reaches \(askK)k tokens, a popup asks whether to compact it. If you choose Wait, it compacts at \(laterK)k.")
+                problemOr(thresholdProblem, SettingsText.claudeThresholdsNote(askK: askK, laterK: laterK))
                     .padding(.bottom, 14)
-                Card(title: "Codex") {
-                    NumberField(label: "Ask at", value: $codexAsk, unit: "%", step: 5, range: Config.codexAskPercentRange,
-                                invalid: codexAskInvalid)
+                Card(title: SessionHost.codex.name) {
+                    NumberField(SettingsText.codexAskField, value: $codexAsk, invalid: SettingsText.codexAskInvalid(codexAsk))
                     Rule()
-                    NumberField(label: "If you choose Wait, compact at", value: $codexLater, unit: "%", step: 5,
-                                range: Config.codexLaterPercentRange, invalid: !codexAskInvalid && codexProblem != nil)
+                    NumberField(SettingsText.codexLaterField, value: $codexLater,
+                                invalid: SettingsText.codexLaterInvalid(ask: codexAsk, later: codexLater))
                 } accessory: {
                     SaveStatusLabel(status: codexProblem.map(SaveStatus.notSaved) ?? codexSaved)
                 }
-                problemOr(codexProblem, codexText)
+                problemOr(codexProblem, SettingsText.codexThresholdsNote(ask: codexAsk, later: codexLater))
                     .padding(.bottom, 14)
-                Card(title: "If you don't answer") {
-                    autoYesField(label: "Compact after")
+                Card(title: Words.Settings.ifYouDontAnswer) {
+                    autoYesField
                 } accessory: {
                     SaveStatusLabel(status: countdownSaved)
                 }
-                Note(autoYes > 0
-                     ? "If you don't answer a popup within \(Format.seconds(autoYes)), it compacts the session, whichever tool it runs in."
-                     : "A popup waits for your answer, whichever tool the session runs in (0 seconds: it never compacts on its own).")
+                Note(SettingsText.countdownNote(autoYes))
                     .padding(.horizontal, 2)
             }
         } else {
             VStack(alignment: .leading, spacing: 10) {
-                Card(title: "When to ask") {
+                Card(title: Words.Settings.whenToAskCard) {
                     askField
                     Rule()
-                    autoYesField(label: "If you don't answer, compact after")
+                    autoYesField
                     Rule()
                     laterField
                 } accessory: {
                     // Thresholds that don't make sense aren't saved; the note under the card says why.
                     SaveStatusLabel(status: thresholdProblem.map(SaveStatus.notSaved) ?? .latest(thresholdsSaved, countdownSaved))
                 }
-                problemOr(thresholdProblem, whenToAskText)
+                problemOr(thresholdProblem, SettingsText.whenToAskNote(askK: askK, laterK: laterK, autoYes: autoYes))
             }
         }
     }
 
     private var askField: some View {
-        NumberField(label: "Ask at", value: $askK, unit: "k tokens", step: 50, range: 50...10_000,
-                    invalid: askK < 1 || laterK <= askK)
+        NumberField(SettingsText.askField, value: $askK, invalid: SettingsText.askInvalid(askK: askK, laterK: laterK))
     }
 
     private var laterField: some View {
-        NumberField(label: "If you choose Wait, compact at", value: $laterK, unit: "k tokens", step: 50, range: 50...10_000,
-                    invalid: laterK < 1 || laterK <= askK)
+        NumberField(SettingsText.laterField, value: $laterK, invalid: SettingsText.laterInvalid(askK: askK, laterK: laterK))
     }
 
-    private func autoYesField(label: String) -> some View {
-        NumberField(label: label, value: $autoYes, unit: "seconds", step: 15, range: 0...3_600)
+    private var autoYesField: some View {
+        NumberField(SettingsText.countdownField(showsCodex: model.showsCodex), value: $autoYes)
     }
 
     /// The note under a card: why it isn't saved, or what it does.
@@ -335,45 +273,9 @@ struct SettingsView: View {
             .padding(.horizontal, 2)
     }
 
-    /// What's wrong with the thresholds as typed, or nil when they can be saved.
-    private var thresholdProblem: String? {
-        if askK < 1 { return "“Ask at” needs a number, like 300." }
-        if laterK < 1 { return "“If you choose Wait, compact at” needs a number, like 500." }
-        if laterK <= askK { return "“If you choose Wait, compact at” has to be more than “Ask at”." }
-        return nil
-    }
+    private var thresholdProblem: String? { SettingsText.thresholdProblem(askK: askK, laterK: laterK) }
 
-    private var codexAskInvalid: Bool { !Config.codexAskPercentRange.contains(codexAsk) }
-
-    /// What's wrong with Codex's thresholds as typed, or nil when they can be saved. The same
-    /// limits as `Config.normalized`, so what's saved is what's shown.
-    private var codexProblem: String? {
-        let ask = Config.codexAskPercentRange, later = Config.codexLaterPercentRange
-        if codexAsk < 1 { return "Codex's “Ask at” needs a number, like \(Config.defaultCodexAskPercent)." }
-        if codexAskInvalid { return "Codex's “Ask at” has to be from \(ask.lowerBound)% to \(ask.upperBound)%." }
-        if codexLater < 1 { return "Codex's “If you choose Wait, compact at” needs a number, like \(Config.defaultCodexLaterPercent)." }
-        if codexLater > later.upperBound {
-            return "Codex's “If you choose Wait, compact at” goes up to \(later.upperBound)%: Codex compacts by itself at about 95%, and saving needs room before that."
-        }
-        if codexLater < codexAsk + 5 { return "Codex's “If you choose Wait, compact at” has to be at least 5% more than its “Ask at”." }
-        return nil
-    }
-
-    private var codexText: String {
-        var c = model.config
-        c.codexAskPercent = codexAsk
-        c.codexLaterPercent = codexLater
-        let t = c.codexThresholds()
-        return "When a session reaches \(codexAsk)% of its window, a popup asks whether to compact it. If you choose Wait, it compacts at \(codexLater)%. In a \(Format.tokens(Config.typicalCodexWindow)) window, that's \(Format.tokens(t.askAt)) and \(Format.tokens(t.laterAt))."
-    }
-
-    private var whenToAskText: String {
-        let ask = "When a session reaches \(askK)k tokens, a popup asks whether to compact it."
-        let answer = autoYes > 0
-            ? " If you don't answer within \(Format.seconds(autoYes)), it compacts."
-            : " It waits for your answer (0 seconds: it never compacts on its own)."
-        return ask + answer + " If you choose Wait, it compacts at \(laterK)k."
-    }
+    private var codexProblem: String? { SettingsText.codexProblem(ask: codexAsk, later: codexLater) }
 
     private func saveCodex() {
         guard codexProblem == nil else { return }
@@ -395,12 +297,13 @@ struct SettingsView: View {
 
     private var messages: some View {
         VStack(alignment: .leading, spacing: 10) {
-            messageCard("Before compacting, send", text: $message, original: Config.defaultMessage,
-                        about: "Asks the session to save its work first.", what: "save message", status: messageSaved)
-            messageCard("After compacting, send", text: $continueMessage, original: Config.defaultContinueMessage,
-                        about: "Tells the session to carry on.", what: "continue message", status: continueSaved)
+            messageCard(Words.Settings.beforeCompacting, text: $message, original: Config.defaultMessage,
+                        about: Words.Settings.beforeCompactingAbout, what: Words.Settings.saveMessage, status: messageSaved)
+            messageCard(Words.Settings.afterCompacting, text: $continueMessage, original: Config.defaultContinueMessage,
+                        about: Words.Settings.afterCompactingAbout, what: Words.Settings.continueMessage, status: continueSaved)
                 .padding(.top, 10)
-            Note("Changes save as you type. Both go to the session as your words. \(model.showsCodex ? "The judge (Haiku for Claude Code, \(codexJudgeName) for Codex)" : "The judge (Haiku)") reads what the session does after the first one; once it has saved and is idle, Context Guard compacts it, then sends the second. If you type in the session first, it leaves the rest to you.")
+            Note(SettingsText.messagesNote(showsCodex: model.showsCodex,
+                                           codexJudgeName: SettingsText.codexJudgeName(model.codexJudge, link: model.codexLink)))
                 .padding(.horizontal, 2)
         }
     }
@@ -412,17 +315,12 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 BrandTextEditor(label: title, text: text, height: Self.editorHeight)
                 HStack(alignment: .center) {
-                    if case .notSaved(let problem) = status {
-                        Note("Not saved: \(problem)", color: Theme.danger)
-                    } else if text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Note("Empty, so it sends the default.", color: Theme.warning)
-                    } else {
-                        Note(about)
-                    }
-                    Button("Restore Default") { text.wrappedValue = original }
+                    let note = SettingsText.messageNote(text.wrappedValue, status: status, about: about)
+                    Note(note.text, color: Theme.color(note.tone))
+                    Button(Words.Settings.restoreDefault) { text.wrappedValue = original }
                         .buttonStyle(BrandButtonStyle(kind: .ghost, height: 28))
                         .disabled(text.wrappedValue == original)
-                        .help("Put back the default \(what)")
+                        .help(SettingsText.restoreHelp(what))
                 }
             }
             .padding(16)
@@ -451,41 +349,11 @@ struct SettingsView: View {
     }
 }
 
-/// Where a card's changes stand, shown in its header: Settings saves as you type, and this is how
-/// you can tell.
-enum SaveStatus: Equatable {
-    /// Nothing changed since Settings opened: the card shows what's on disk.
-    case unchanged
-    /// Changed here, and the file read back holds it.
-    case saved(Date)
-    /// Changed here but not on disk, and why.
-    case notSaved(String)
-
-    /// One header for two settings: a problem first, else the later save.
-    static func latest(_ a: SaveStatus, _ b: SaveStatus) -> SaveStatus {
-        switch (a, b) {
-        case (.notSaved, _): return a
-        case (_, .notSaved): return b
-        case (.saved(let x), .saved(let y)): return x >= y ? a : b
-        case (.saved, .unchanged): return a
-        case (.unchanged, _): return b
-        }
-    }
-}
-
 struct SaveStatusLabel: View {
     let status: SaveStatus
 
     var body: some View {
-        switch status {
-        case .unchanged:
-            StatusLabel(text: "Saved", symbol: "checkmark.circle", color: Theme.muted, size: 12)
-        case .saved(let at):
-            StatusLabel(text: "Saved \(at.formatted(date: .omitted, time: .shortened))", symbol: "checkmark.circle.fill",
-                        color: Theme.success, size: 12)
-        case .notSaved:
-            StatusLabel(text: "Not saved", symbol: "exclamationmark.triangle.fill", color: Theme.danger, size: 12)
-        }
+        StatusLabel(status.line, size: 12)
     }
 }
 
@@ -507,20 +375,6 @@ enum LoginItem {
     }
 }
 
-enum ModInstall {
-    /// install.sh copies the mod here and turns the plugin on in Claude Code's user settings.
-    static let plugin = "context-guard@context-guard"
-
-    static func isInstalled(_ paths: Paths) -> Bool {
-        let module = paths.claudeDir.appendingPathComponent("hooks/context-guard/mod/hooks/register.ts")
-        guard FileManager.default.fileExists(atPath: module.path),
-              let data = try? Data(contentsOf: paths.claudeDir.appendingPathComponent("settings.json")),
-              let settings = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let enabled = settings["enabledPlugins"] as? [String: Any] else { return false }
-        return enabled[plugin] as? Bool == true
-    }
-}
-
 enum CodexLinkInstall {
     /// install.sh writes this LaunchAgent, which keeps `context-guard codex` running.
     static let label = "com.spaceterran.ContextGuard.codex"
@@ -535,15 +389,4 @@ enum CodexLinkInstall {
     }
 
     static var isInstalled: Bool { FileManager.default.fileExists(atPath: plist.path) }
-}
-
-enum HookInstall {
-    /// install.sh adds this path to every Context Guard hook in Claude Code's user settings.
-    static let marker = "hooks/context-guard/context-guard"
-
-    static func isInstalled(_ paths: Paths) -> Bool {
-        let settings = paths.claudeDir.appendingPathComponent("settings.json")
-        guard let text = try? String(contentsOf: settings, encoding: .utf8) else { return false }
-        return text.contains(marker)
-    }
 }

@@ -6,14 +6,8 @@ public enum FollowUpText {
     /// A finished follow-up stays in the menu this long.
     public static let shownAfterEnd: TimeInterval = 30 * 60
 
-    /// What a notice's icon color says. Status colors only ever mean status; accent is Context
-    /// Guard itself at work.
-    public enum Tone: Sendable {
-        case accent, success, warning, danger, muted
-    }
-
     public struct Notice: Equatable, Sendable {
-        public var symbol: String
+        public var symbol: Symbol
         public var tone: Tone
         public var title: String
         /// A second line: Haiku's reason or what went wrong.
@@ -47,17 +41,17 @@ public enum FollowUpText {
         switch f.stage {
         case .needsYou:
             // It waits on you, so it stays up longer.
-            return Notice(symbol: "questionmark.bubble.fill", tone: .warning, title: "Needs you before compacting", reason: sentence(f.note), seconds: 20)
+            return Notice(symbol: .needsYou, tone: .warning, title: "Needs you before compacting", reason: sentence(f.note), seconds: 20)
         case .compacting:
-            return Notice(symbol: "arrow.down.right.and.arrow.up.left.circle.fill", tone: .accent, title: "Compacting", reason: nil, seconds: 8)
+            return Notice(symbol: .compacting, tone: .accent, title: "Compacting", reason: nil, seconds: 8)
         case .done:
-            return Notice(symbol: "checkmark.circle.fill", tone: .success, title: "Compacted\(sizes(f))", reason: "Then sent \(message)", seconds: 8)
+            return Notice(symbol: .success, tone: .success, title: "Compacted\(sizes(f))", reason: "Then sent \(message)", seconds: 8)
         case .tookOver:
-            return Notice(symbol: "checkmark.circle.fill", tone: .success, title: "Compacted\(sizes(f))", reason: "You took over, so \(message) wasn't sent", seconds: 8)
+            return Notice(symbol: .success, tone: .success, title: "Compacted\(sizes(f))", reason: "You took over, so \(message) wasn't sent", seconds: 8)
         case .failed where f.compactedAt != nil:
-            return Notice(symbol: "exclamationmark.triangle.fill", tone: .warning, title: "Compacted\(sizes(f))", reason: "Couldn't send \(message)" + reason(f), seconds: 20)
+            return Notice(symbol: .warning, tone: .warning, title: "Compacted\(sizes(f))", reason: "Couldn't send \(message)" + reason(f), seconds: 20)
         case .failed:
-            return Notice(symbol: "xmark.octagon.fill", tone: .danger, title: "Couldn't compact by itself", reason: sentence(f.note), seconds: 20)
+            return Notice(symbol: .failed, tone: .danger, title: "Couldn't compact by itself", reason: sentence(f.note), seconds: 20)
         case .checking, .working, .draft, .continuing, .stopped:
             return nil
         }
