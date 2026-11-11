@@ -43,6 +43,12 @@ public struct Paths: Sendable, Equatable {
     public func muteFile(pid: Int32, start: ProcessStart) -> URL {
         mutedDir.appendingPathComponent("\(pid)-\(start.seconds).json")
     }
+    /// A Codex session you stopped watching: keyed to its thread, since no process of its own runs it.
+    public func codexMuteFile(_ threadId: String) -> URL { mutedDir.appendingPathComponent("codex-\(threadId).json") }
+    /// What `context-guard codex` last said about its link to the Codex app server (`CodexLinkStatus`).
+    public var codexLinkFile: URL { root.appendingPathComponent("codex-link.json") }
+    /// Held by the running `context-guard codex`, so only one runs.
+    public var codexLinkLock: URL { root.appendingPathComponent("codex-link.lock") }
 
     public func ensureDirectories() throws {
         let fm = FileManager.default

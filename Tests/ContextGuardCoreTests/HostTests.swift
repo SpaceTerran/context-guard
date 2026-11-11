@@ -101,9 +101,10 @@ final class HostTests: HookTestCase {
     }
 
     func testADeliveryChannelFromANewerBuildReadsAsAWake() throws {
-        let file = Self.claudeFile.replacingOccurrences(of: #""guarded""#, with: #""sentVia" : "turn",\#n  "guarded""#)
+        let file = Self.claudeFile.replacingOccurrences(of: #""guarded""#, with: #""sentVia" : "pigeon",\#n  "guarded""#)
         XCTAssertEqual(try decode(file).sentVia, .wake)
-        XCTAssertEqual(try decode(file.replacingOccurrences(of: #""turn""#, with: #""step""#)).sentVia, .step)
+        XCTAssertEqual(try decode(file.replacingOccurrences(of: #""pigeon""#, with: #""step""#)).sentVia, .step)
+        XCTAssertEqual(try decode(file.replacingOccurrences(of: #""pigeon""#, with: #""turn""#)).sentVia, .turn)
     }
 
     // MARK: Runners

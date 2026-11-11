@@ -12,6 +12,11 @@ public struct CodexFacts: Codable, Equatable, Sendable {
     public var model: String?
     /// Which Codex client started it: `codex-tui` for a terminal session.
     public var originator: String?
+    /// A session you drive in a terminal, in a format Context Guard reads (`CodexMeta`). nil until
+    /// its rollout's first line has been read.
+    public var terminal: Bool?
+    /// Its turns as the rollout showed them, carried from one read to the next.
+    public var turn: CodexTurn?
 
     /// The thread's status in the app server: `idle`, `active`, `systemError` or `notLoaded`.
     public var status: String?
@@ -23,6 +28,8 @@ public struct CodexFacts: Codable, Equatable, Sendable {
     public var loaded: Bool?
     /// When the link last saw it unloaded, to tell a closed session from a restarting app server.
     public var unloadedAt: Date?
+    /// A terminal has it open, as far as the link can tell.
+    public var attached: Bool?
 
     /// Our item in the thread's queue, while the save or continue message waits there.
     public var queueItemId: String?
@@ -49,11 +56,14 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         autoCompactAt = try? c.decode(Int.self, forKey: .autoCompactAt)
         model = try? c.decode(String.self, forKey: .model)
         originator = try? c.decode(String.self, forKey: .originator)
+        terminal = try? c.decode(Bool.self, forKey: .terminal)
+        turn = try? c.decode(CodexTurn.self, forKey: .turn)
         status = try? c.decode(String.self, forKey: .status)
         flags = try? c.decode([String].self, forKey: .flags)
         statusAt = try? c.decode(Date.self, forKey: .statusAt)
         loaded = try? c.decode(Bool.self, forKey: .loaded)
         unloadedAt = try? c.decode(Date.self, forKey: .unloadedAt)
+        attached = try? c.decode(Bool.self, forKey: .attached)
         queueItemId = try? c.decode(String.self, forKey: .queueItemId)
     }
 

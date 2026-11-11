@@ -4,7 +4,8 @@ import Foundation
 public struct SessionInfo: Identifiable, Equatable, Sendable {
     public var id: String { state.sessionId }
     public var state: SessionState
-    /// Its Claude process is still running this conversation.
+    /// Its Claude process is still running this conversation; for Codex, the app server has it
+    /// loaded and `context-guard codex` is connected to it.
     public var isLive: Bool
     public var registry: RegistryEntry?
     /// A background Stop hook is waiting, so "Yes" reaches the session right away even if it's idle.
@@ -37,10 +38,21 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
         return parts.joined(separator: " · ")
     }
 
+    public var host: SessionHost { state.hostKind ?? .claude }
+
+    /// "Yes" reaches the session right away, even while it sits idle: a background Stop hook is
+    /// waiting (Claude Code), or the link can send it a prompt now (Codex).
+    public var reachableNow: Bool {
+        guard host == .codex else { return waiterAlive }
+        return isLive && state.codex?.status == "idle" && state.codex?.attached != false
+    }
+
     /// Where its Claude process stands now. The app can't count background agents (only the mod
-    /// can), so `background` work here says 0 agents.
+    /// can), so `background` work here says 0 agents. A Codex session is between turns when the
+    /// app server says it's idle.
     public var activity: SessionActivity {
-        SessionActivity.of(registry, turn: turn, processStart: state.claudeStart, now: Date())
+        if host == .codex { return state.codex?.status == "idle" ? .idle : .busy }
+        return SessionActivity.of(registry, turn: turn, processStart: state.claudeStart, now: Date())
     }
 
     /// Not in the middle of a turn: a wake starts a new one.
@@ -65,13 +77,16 @@ public enum SessionCatalog {
         let files = (try? FileManager.default.contentsOfDirectory(at: paths.sessionsDir, includingPropertiesForKeys: nil)) ?? []
         let byPid = Dictionary(registry.all().map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
         let registryAvailable = registry.isAvailable
+        let linkUp = CodexLinkStatus.load(paths)?.isUp(now: Date()) ?? false
         var out: [SessionInfo] = []
         for file in files where file.pathExtension == "json" {
             let id = file.deletingPathExtension().lastPathComponent
             guard let s = SessionState.load(id, paths) else { continue }
             var entry: RegistryEntry?
             var live = false
-            if let pid = s.claudePid, !s.ended, probe.isRunning(pid, startedAt: s.claudeStart) {
+            if s.hostKind == .codex {
+                live = linkUp && !s.ended && s.codex?.loaded == true
+            } else if let pid = s.claudePid, !s.ended, probe.isRunning(pid, startedAt: s.claudeStart) {
                 entry = byPid[pid]
                 if let entry { live = entry.sessionId == s.sessionId } else { live = !registryAvailable }
             }
