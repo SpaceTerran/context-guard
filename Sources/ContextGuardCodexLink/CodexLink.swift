@@ -433,8 +433,10 @@ public final class CodexLink: @unchecked Sendable {
                 return runner.report(ModReport(sessionId: id, nonce: nonce, kind: .judgeFailed, error: "no model to judge with"))
             }
             let started = clock()
+            // The servers the judge's own folder would load: a project config in the session's
+            // folder can add servers that don't exist there, and turning those off fails.
             let result = CodexJudge.ask(prompt, model: model, cwd: judgeFolder.path,
-                                        mcpServers: config(for: look.cwd, daemon, now: started).mcpServers,
+                                        mcpServers: config(for: judgeFolder.path, daemon, now: started).mcpServers,
                                         daemon: daemon, waiters: waiters, callTimeout: t, timeout: options.judgeTimeout)
             switch result {
             case .success(let text):

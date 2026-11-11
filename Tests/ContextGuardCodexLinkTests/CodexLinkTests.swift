@@ -368,6 +368,18 @@ final class CodexLinkTests: XCTestCase {
         XCTAssertEqual(state?.ended, true)
     }
 
+    func testTheJudgeTurnsOffOnlyTheMCPServersItsOwnFolderHas() throws {
+        // A project config in the session's folder adds a server. The judge runs elsewhere, where
+        // that server doesn't exist: turning it off there makes Codex refuse the whole config.
+        daemon.projectConfig["/Users/demo/code"] = ["mcp_servers": ["docs": ["command": "docs-mcp"], "project-db": ["command": "db-mcp"]]]
+        _ = try sendTheSaveMessage()
+        try finishSaving()
+        try pass()
+        let judge = try XCTUnwrap(daemon.calls("thread/start").first)
+        XCTAssertEqual(judge["config"]?["mcp_servers"], ["docs": ["enabled": false]])
+        XCTAssertTrue(daemon.calls("config/read").contains { $0["cwd"]?.string == link.judgeFolder.path })
+    }
+
     func testCodexsOwnSettingsReachTheSession() throws {
         daemon.config = ["model_auto_compact_token_limit": 180_000, "model_post_turn_compact_threshold_percent": 70, "mcp_servers": .null]
         try configure()
