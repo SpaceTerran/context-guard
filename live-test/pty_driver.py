@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run an interactive Claude Code session in a pseudo-terminal and drive it from a FIFO.
+"""Run an interactive Claude Code or Codex session in a pseudo-terminal and drive it from a FIFO.
 
-The session gets a real TTY, so Claude Code treats it like a terminal tab and Context Guard
-guards it. Each line written to the FIFO is one command:
+The session gets a real TTY, so the tool treats it like a terminal tab and Context Guard guards
+it. Each line written to the FIFO is one command:
 
     type <text>     type the text (no Enter)
     send <text>     type the text, then press Enter
@@ -12,6 +12,7 @@ guards it. Each line written to the FIFO is one command:
 The rendered screen is rewritten to --screen every half second; raw output goes to --log.
 
     uv run --with pyte python3 pty_driver.py --cwd DIR --fifo F --screen S --log L -- claude ...
+    uv run --with pyte python3 pty_driver.py --cwd DIR --fifo F --screen S --log L -- codex ...
 """
 import argparse
 import fcntl
