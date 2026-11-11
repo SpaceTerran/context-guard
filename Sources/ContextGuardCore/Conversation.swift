@@ -31,6 +31,11 @@ public enum ConversationReader {
     /// before it). With `marker` nil, everything from `from`. If the marker never shows up, it's
     /// everything read, with `after` nil.
     public static func read(path: String, from: UInt64?, after marker: String?, limit: Int = defaultLimit) -> Conversation? {
+        read(path: path, from: from, after: marker, limit: limit, parse: parse)
+    }
+
+    /// `read` for any log, with `parse` turning one of its lines into conversation entries.
+    static func read(path: String, from: UInt64?, after marker: String?, limit: Int, parse: (Data) -> Parsed?) -> Conversation? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
         var st = stat()
