@@ -5,11 +5,14 @@
 #   - adds its hooks to ~/.claude/settings.json (backed up first; other hooks are left alone)
 #   - puts the mod (mod/, the part that compacts once the session has saved) at ~/.claude/hooks/context-guard/mod
 #     and installs it as a Claude Code plugin for this user
+#   - adds a LaunchAgent that keeps `context-guard codex` running, which guards Codex sessions
+#     (macOS says "Background Items Added")
 #   - puts the app in ~/Applications, sets it to open at login, and starts it
 #
 #   ./install.sh               install, or update in place (run it again after changing the code)
-#   ./install.sh --uninstall   remove the hooks, the hook program, the mod and the app; keeps your
-#                              settings and session records in ~/.claude/context-guard
+#   ./install.sh --no-codex    the same, without the Codex link (and removes one installed before)
+#   ./install.sh --uninstall   remove the hooks, the hook program, the mod, the Codex link and the
+#                              app; keeps your settings and session records in ~/.claude/context-guard
 set -euo pipefail
 
 pkg="$(cd "$(dirname "$0")" && pwd)"
@@ -25,6 +28,12 @@ app="$HOME/Applications/Context Guard.app"
 exe="$app/Contents/MacOS/ContextGuard"
 # Every Context Guard hook command contains this path; that's how install and uninstall find them.
 marker="hooks/context-guard/context-guard"
+# The LaunchAgent that runs `context-guard codex`. The app looks for this file to tell whether the
+# Codex link is installed.
+agent_label="com.spaceterran.ContextGuard.codex"
+agent_plist="$HOME/Library/LaunchAgents/$agent_label.plist"
+agent="gui/$(id -u)/$agent_label"
+state="${CONTEXT_GUARD_HOME:-${CLAUDE_CONFIG_DIR:-$claude}/context-guard}"
 # If the program is missing (uninstalled, or mid-update), the hook just reads its input and exits.
 command='f="$HOME/.claude/hooks/context-guard/context-guard"; if [ -x "$f" ]; then CG_CLAUDE_PID=$PPID exec "$f" hook; else cat >/dev/null; fi'
 
@@ -49,7 +58,8 @@ edit_settings() {
     say "error: $settings isn't valid JSON; fix it and run this again" >&2
     exit 1
   fi
-  local backup="$settings.context-guard-backup-$(date +%Y%m%d-%H%M%S)"
+  local backup
+  backup="$settings.context-guard-backup-$(date +%Y%m%d-%H%M%S)"
   cp -p "$settings" "$backup"
   local tmp
   tmp="$(mktemp "$claude/.settings.json.XXXXXX")"
@@ -123,7 +133,72 @@ uninstall_mod() {
   rm -rf "$mod_dir"
 }
 
+xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
+
+# Stops the link (it says so in codex-link.json) and waits until launchd has let it go, so it can
+# be loaded again right away.
+stop_codex_link() {
+  launchctl bootout "$agent" >/dev/null 2>&1 || return 0
+  for _ in $(seq 1 100); do launchctl print "$agent" >/dev/null 2>&1 || return 0; sleep 0.1; done
+}
+
+# Writes the LaunchAgent and (re)starts it, so it runs the program just installed. It inherits no
+# shell variables, so the folders Context Guard and Codex use are written into it.
+install_codex_link() {
+  local env="" key
+  for key in CODEX_HOME CLAUDE_CONFIG_DIR CONTEXT_GUARD_HOME; do
+    [ -n "${!key:-}" ] && env+="        <key>$key</key><string>$(xml "${!key}")</string>"$'\n'
+  done
+  mkdir -p "$(dirname "$agent_plist")" "$state"
+  local tmp
+  tmp="$(mktemp "$(dirname "$agent_plist")/.$agent_label.XXXXXX")"
+  cat > "$tmp" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$agent_label</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$(xml "$hook_bin")</string>
+        <string>codex</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+$env    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    <key>StandardErrorPath</key>
+    <string>$(xml "$state/codex-link.stderr")</string>
+</dict>
+</plist>
+PLIST
+  plutil -lint "$tmp" >/dev/null
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$agent_plist"
+  stop_codex_link
+  launchctl bootstrap "gui/$(id -u)" "$agent_plist"
+  say "installed $agent_plist (runs \`context-guard codex\`; macOS may say \"Background Items Added\")"
+  # Its first report, so the status below shows it.
+  for _ in $(seq 1 30); do [ -f "$state/codex-link.json" ] && break; sleep 0.1; done
+}
+
+# Removes the LaunchAgent and what the link last said, so the app and `status` go back to showing
+# Claude Code alone. Its log stays with the session records.
+uninstall_codex_link() {
+  [ -f "$agent_plist" ] || launchctl print "$agent" >/dev/null 2>&1 || [ -f "$state/codex-link.json" ] || return 0
+  stop_codex_link
+  rm -f "$agent_plist" "$state/codex-link.json" "$state/codex-link.lock" "$state/codex-link.stderr"
+  say "removed the Codex link ($agent_plist)"
+}
+
 uninstall() {
+  uninstall_codex_link
   quit_app
   if [ -x "$exe" ]; then "$exe" --login-item off 2>/dev/null || true; fi
   rm -rf "$app"
@@ -137,6 +212,7 @@ uninstall() {
 }
 
 install() {
+  local codex="$1"
   "$pkg/build.sh"
 
   # The hook program first, so the hooks never point at a missing file. Renamed into place:
@@ -154,6 +230,8 @@ install() {
 
   copy_mod
   install_mod
+
+  if [ "$codex" = yes ]; then install_codex_link; else uninstall_codex_link; fi
 
   quit_app
   mkdir -p "$(dirname "$app")"
@@ -174,7 +252,8 @@ install() {
 }
 
 case "${1:-}" in
-  "") install ;;
+  "") install yes ;;
+  --no-codex) install no ;;
   --uninstall) uninstall ;;
-  *) say "usage: $0 [--uninstall]" >&2; exit 1 ;;
+  *) say "usage: $0 [--no-codex | --uninstall]" >&2; exit 1 ;;
 esac
