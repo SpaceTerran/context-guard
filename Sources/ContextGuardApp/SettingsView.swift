@@ -7,23 +7,30 @@ import SwiftUI
 final class SettingsWindow {
     private var window: NSWindow?
 
+    /// The window, empty: Settings opens in it (and so does `live-test/ui-demo.sh capture`).
+    static func makeWindow() -> NSWindow {
+        let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .fullSizeContentView],
+                         backing: .buffered, defer: true)
+        w.title = "Context Guard Settings"
+        // The brand's background runs under the title bar.
+        w.titlebarAppearsTransparent = true
+        w.backgroundColor = Theme.windowBackground
+        w.isReleasedWhenClosed = false
+        return w
+    }
+
+    static func fill(_ window: NSWindow, model: AppModel, tab: SettingsTab = .general) {
+        let host = NSHostingController(rootView: SettingsView(model: model, tab: tab))
+        host.sizingOptions = .preferredContentSize
+        window.contentViewController = host
+    }
+
     func show(model: AppModel) {
-        if window == nil {
-            let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .fullSizeContentView],
-                             backing: .buffered, defer: true)
-            w.title = "Context Guard Settings"
-            // The brand's background runs under the title bar.
-            w.titlebarAppearsTransparent = true
-            w.backgroundColor = Theme.windowBackground
-            w.isReleasedWhenClosed = false
-            window = w
-        }
+        if window == nil { window = Self.makeWindow() }
         guard let window else { return }
         if !window.isVisible {
             // Fresh each time it opens, so it shows settings changed elsewhere (the CLI, the menu).
-            let host = NSHostingController(rootView: SettingsView(model: model))
-            host.sizingOptions = .preferredContentSize
-            window.contentViewController = host
+            Self.fill(window, model: model)
             window.center()
         }
         // Wait for the menu to finish closing: activating while it still tracks the mouse is
@@ -163,19 +170,23 @@ struct SettingsView: View {
                 .padding(.horizontal, 2)
                 .padding(.bottom, 14)
 
-            Card(title: "Setup") {
-                Row(label: "Claude Code hooks") { installed(hooksInstalled) }
+            // One card per tool, as on When to Ask: what's installed, then the judge and whose sign-in it uses.
+            Card(title: SessionHost.claude.name) {
+                Row(label: "Hooks") { installed(hooksInstalled) }
+                    .help("Follow each Claude Code session and send it the save and continue messages")
                 Rule()
-                Row(label: "Claude Code mod") { installed(modInstalled) }
-                    .help("Compacts sessions once they have saved")
+                Row(label: "Mod") { installed(modInstalled) }
+                    .help("Compacts each Claude Code session once it has saved")
                 Rule()
-                if model.showsCodex {
-                    Row(label: "Judge for Claude Code") {
-                        StatusLabel(text: "Haiku, each session's sign-in", symbol: "checkmark.circle.fill", color: Theme.success)
-                    }
-                    Rule()
-                    Row(label: "Codex link") { codexLinkLabel }
-                        .help("Keeps Codex sessions guarded. It connects to Codex while a Codex session runs in a terminal.")
+                Row(label: "Judge") { judgeLabel(SessionHost.claude.judgeName) }
+                    .help(judgeHelp)
+            }
+            Note("No API key: the judge uses your Claude Code sign-in.")
+                .padding(.horizontal, 2)
+            if model.showsCodex {
+                Card(title: SessionHost.codex.name) {
+                    Row(label: "Link") { codexLinkLabel }
+                        .help("Follows each Codex session, sends it the save and continue messages and compacts it. It connects to Codex while a Codex session runs in a terminal.")
                     if case .onlyWatching(let why) = model.codexLink {
                         Rule()
                         Note("Only watching, not compacting: \(why). A newer Codex may fix this.", color: Theme.warning)
@@ -183,25 +194,45 @@ struct SettingsView: View {
                             .padding(.vertical, 12)
                     }
                     Rule()
-                    Row(label: "Judge for Codex") {
-                        StatusLabel(text: model.codexJudge.map { "\($0), your Codex sign-in" } ?? "Your Codex sign-in",
-                                    symbol: "checkmark.circle.fill", color: Theme.success)
-                    }
-                } else {
-                    Row(label: "Haiku") {
-                        StatusLabel(text: "Each session's sign-in", symbol: "checkmark.circle.fill", color: Theme.success)
-                    }
+                    Row(label: "Judge") { codexJudgeLabel }
+                        .help(judgeHelp)
                 }
+                .padding(.top, 14)
+                Note("No API key: the judge uses your Codex sign-in.")
+                    .padding(.horizontal, 2)
             }
-            Note(model.showsCodex
-                 ? "Nothing to sign in to. The mod asks Haiku through the Claude Code session it runs in, with that session's account. The Codex link asks \(codexJudgeName) through Codex, with your Codex sign-in."
-                 : "Nothing to sign in to. The mod asks Haiku through the Claude Code session it runs in, with that session's account.")
-                .padding(.horizontal, 2)
         }
     }
 
-    /// The model the Codex link judges with, once it has said; until then what it is.
-    private var codexJudgeName: String { model.codexJudge ?? "a small OpenAI model" }
+    private let judgeHelp = "Reads what the session does after the save message and says when it has saved"
+
+    /// The model the Codex link judges with: the one it picked, the session's own when Codex offers
+    /// no small one, or nothing yet until it connects.
+    private var codexJudge: (name: String, known: Bool) {
+        if let m = model.codexJudge { return (m, true) }
+        switch model.codexLink {
+        case .connected, .onlyWatching: return ("Each session's own model", true)
+        case .waiting, .notRunning: return ("Picked when Codex connects", false)
+        }
+    }
+
+    /// The judge as notes name it, in a sentence.
+    private var codexJudgeName: String {
+        model.codexJudge ?? (codexJudge.known ? "each session's own model" : "a small OpenAI model")
+    }
+
+    @ViewBuilder
+    private var codexJudgeLabel: some View {
+        if codexJudge.known {
+            judgeLabel(codexJudge.name)
+        } else {
+            StatusLabel(text: codexJudge.name, symbol: "clock", color: Theme.muted)
+        }
+    }
+
+    private func judgeLabel(_ name: String) -> some View {
+        StatusLabel(text: name, symbol: "checkmark.circle.fill", color: Theme.success)
+    }
 
     @ViewBuilder
     private var codexLinkLabel: some View {
@@ -244,7 +275,7 @@ struct SettingsView: View {
                 } accessory: {
                     SaveStatusLabel(status: thresholdProblem.map(SaveStatus.notSaved) ?? thresholdsSaved)
                 }
-                problemOr(thresholdProblem, "At \(askK)k tokens a popup asks whether to compact the session. If you choose Wait, it compacts at \(laterK)k.")
+                problemOr(thresholdProblem, "When a session reaches \(askK)k tokens, a popup asks whether to compact it. If you choose Wait, it compacts at \(laterK)k.")
                     .padding(.bottom, 14)
                 Card(title: "Codex") {
                     NumberField(label: "Ask at", value: $codexAsk, unit: "%", step: 5, range: Config.codexAskPercentRange,
@@ -333,11 +364,11 @@ struct SettingsView: View {
         c.codexAskPercent = codexAsk
         c.codexLaterPercent = codexLater
         let t = c.codexThresholds()
-        return "Shares of each session's own window. In a \(Format.tokens(Config.typicalCodexWindow)) window a popup asks at \(Format.tokens(t.askAt)); if you choose Wait, it compacts at \(Format.tokens(t.laterAt))."
+        return "When a session reaches \(codexAsk)% of its window, a popup asks whether to compact it. If you choose Wait, it compacts at \(codexLater)%. In a \(Format.tokens(Config.typicalCodexWindow)) window, that's \(Format.tokens(t.askAt)) and \(Format.tokens(t.laterAt))."
     }
 
     private var whenToAskText: String {
-        let ask = "At \(askK)k tokens a popup asks whether to compact the session."
+        let ask = "When a session reaches \(askK)k tokens, a popup asks whether to compact it."
         let answer = autoYes > 0
             ? " If you don't answer within \(Format.seconds(autoYes)), it compacts."
             : " It waits for your answer (0 seconds: it never compacts on its own)."
@@ -369,7 +400,7 @@ struct SettingsView: View {
             messageCard("After compacting, send", text: $continueMessage, original: Config.defaultContinueMessage,
                         about: "Tells the session to carry on.", what: "continue message", status: continueSaved)
                 .padding(.top, 10)
-            Note("Changes save as you type. Both go to the session as your words. \(model.showsCodex ? "A small model (Haiku for Claude Code, \(codexJudgeName) for Codex)" : "Haiku") reads what the session does after the first one; once it has saved and is idle, Context Guard compacts it, then sends the second. If you type in the session first, it leaves the rest to you.")
+            Note("Changes save as you type. Both go to the session as your words. \(model.showsCodex ? "The judge (Haiku for Claude Code, \(codexJudgeName) for Codex)" : "The judge (Haiku)") reads what the session does after the first one; once it has saved and is idle, Context Guard compacts it, then sends the second. If you type in the session first, it leaves the rest to you.")
                 .padding(.horizontal, 2)
         }
     }
@@ -494,8 +525,13 @@ enum CodexLinkInstall {
     /// install.sh writes this LaunchAgent, which keeps `context-guard codex` running.
     static let label = "com.spaceterran.ContextGuard.codex"
 
+    /// `CONTEXT_GUARD_LAUNCH_AGENTS` moves the folder it's looked for in, so `live-test/ui-demo.sh`
+    /// shows the same thing whatever this Mac has installed.
     static var plist: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
+        let moved = ProcessInfo.processInfo.environment["CONTEXT_GUARD_LAUNCH_AGENTS"].flatMap { $0.isEmpty ? nil : $0 }
+        let dir = moved.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+        return dir.appendingPathComponent("\(label).plist")
     }
 
     static var isInstalled: Bool { FileManager.default.fileExists(atPath: plist.path) }

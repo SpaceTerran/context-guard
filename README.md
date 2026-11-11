@@ -45,17 +45,18 @@ so, and Haiku holds it until it's done.
 A notice says when it needs you, when it compacts and how it went. After a session compacts, it's
 asked again the next time it reaches 300k.
 
-Haiku needs no sign-in or key: the mod asks it through the Claude Code session it runs in, with that
-session's account.
+Haiku needs no API key: the mod asks it through the Claude Code session it runs in, with your Claude
+Code sign-in.
 
 Each session's menu has **Watch This Session**. Turned off, that tab gets no questions and isn't
 compacted by itself until it closes or you turn it back on. **Compact Now** always works, even there
 and with Context Guard off.
 
-Settings has three tabs: **General** (on or off, open at login, what's installed), **When to Ask**
-(the thresholds, and how long a question waits before it compacts by itself; 0 for never) and
-**Messages** (the save message and the continue message). Changes save as you type. The When to Ask
-and Messages cards say in their header when your last change was saved, or that it wasn't and why.
+Settings has three tabs: **General** (on or off, open at login, and for each tool what's installed and
+its judge), **When to Ask** (the thresholds, and how long a question waits before it compacts by
+itself; 0 for never) and **Messages** (the save message and the continue message). Changes save as
+you type. The When to Ask and Messages cards say in their header when your last change was saved, or
+that it wasn't and why.
 
 | The session's menu | Settings |
 |---|---|

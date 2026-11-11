@@ -17,6 +17,8 @@
 #   live-test/ui-demo.sh windows              list the app's windows (id, bounds) for screenshots
 #   live-test/ui-demo.sh snap <folder> <name>  have the app draw each window to <folder>/<name>-<n>.png
 #                                             (works with the display asleep or the screen locked)
+#   live-test/ui-demo.sh capture <general|asking|messages> <file.png>  screen-capture a Settings window on
+#                                             that tab, behind your windows and never focused (display awake)
 #   live-test/ui-demo.sh stop
 #
 # Each staged Claude Code session is "run" by a placeholder `sleep`, and a scratch registry says which
@@ -101,7 +103,7 @@ EOF
 case "$cmd" in
   start)
     "$0" stop >/dev/null 2>&1 || true
-    rm -rf "$dir"; mkdir -p "$home/sessions" "$home/answers" "$reg"
+    rm -rf "$dir"; mkdir -p "$home/sessions" "$home/answers" "$reg" "$dir/LaunchAgents"
     printf '{"schemaVersion":1,"enabled":true,"askAt":300000,"laterAt":500000}\n' > "$home/config.json"
     echo "{" > "$dir/pids.json"
     for k in A B C D waiter; do
@@ -109,6 +111,8 @@ case "$cmd" in
       printf '"%s": %d,\n' "$k" $! >> "$dir/pids.json"
     done
     if [ "${3:-}" != no-codex ]; then
+      # The Codex link counts as installed (the app looks here, not in ~/Library/LaunchAgents).
+      : > "$dir/LaunchAgents/com.spaceterran.ContextGuard.codex.plist"
       "$0" link connected
       # The stand-in for `context-guard codex`: keeps codex-link.json fresh, saying what link.json says.
       # shellcheck disable=SC2016  # the inner bash expands these
@@ -121,6 +125,7 @@ case "$cmd" in
     # Launch arguments set the appearance for this app only: Aqua-only for light, Dark for dark.
     if [ "${2:-light}" = dark ]; then look=(-AppleInterfaceStyle Dark); else look=(-NSRequiresAquaSystemAppearance YES); fi
     CONTEXT_GUARD_HOME="$home" CONTEXT_GUARD_REGISTRY="$reg" CONTEXT_GUARD_SNAPSHOTS="$dir/snaps" \
+      CONTEXT_GUARD_LAUNCH_AGENTS="$dir/LaunchAgents" \
       nohup "$app" "${look[@]}" > "$dir/app.log" 2>&1 &
     echo $! > "$dir/app.pid"
     echo "app pid $(cat "$dir/app.pid"), home $home"
@@ -195,6 +200,29 @@ case "$cmd" in
       n=$((n + 1)); cp "$dir/snaps/$file" "$out/$name-$n.png"
       echo "$out/$name-$n.png  $kind  ${title:-(no title)}  $frame"
     done < "$dir/snaps/index.txt"
+    ;;
+  capture)
+    # The Settings window on one tab, as docs/settings.png shows it. Needs the display awake.
+    tab="${2:?general|asking|messages}"; out="${3:?file.png}"
+    mkdir -p "$dir/snaps"; rm -f "$dir/snaps/shown"
+    echo "$tab" > "$dir/snaps/show"
+    kill -USR2 "$(cat "$dir/app.pid")"
+    for _ in $(seq 50); do [ -s "$dir/snaps/shown" ] && break; sleep 0.1; done
+    [ -s "$dir/snaps/shown" ] || { echo "no window for $tab (a debug build started by this script?)" >&2; exit 1; }
+    sleep 0.5
+    screencapture -o -x -l "$(cat "$dir/snaps/shown")" "$out"
+    rm -f "$dir/snaps/show"; kill -USR2 "$(cat "$dir/app.pid")"
+    # Only the picture and its color profile: no screenshot metadata in a checked-in image.
+    python3 -I - "$out" <<'EOF'
+import struct, sys
+p = sys.argv[1]; d = open(p, "rb").read(); i = 8; out = [d[:8]]
+while i < len(d):
+    n = struct.unpack(">I", d[i:i + 4])[0]
+    if d[i + 4:i + 8] in (b"IHDR", b"iCCP", b"IDAT", b"IEND"): out.append(d[i:i + 12 + n])
+    i += 12 + n
+open(p, "wb").write(b"".join(out))
+EOF
+    echo "$out"
     ;;
   stop)
     [ -f "$dir/app.pid" ] && kill "$(cat "$dir/app.pid")" 2>/dev/null || true
