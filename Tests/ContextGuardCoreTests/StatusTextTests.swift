@@ -49,6 +49,13 @@ final class StatusTextTests: XCTestCase {
         ])
     }
 
+    func testCodexSessionFilesAloneDontBringBackTheCodexLines() {
+        // After `install.sh --no-codex` the link's file is gone, but session files stay a week.
+        let lines = StatusText.lines(config: Config(), sessions: [claude(40_000), codex(160_000)], link: nil, now: now)
+        XCTAssertEqual(lines.first, "Context Guard is on · asks at 300k · compacts at 500k when told to wait")
+        XCTAssertFalse(lines.contains { $0.contains("Codex link") })
+    }
+
     func testACodexSessionsOwnFacts() {
         XCTAssertEqual(StatusText.row(codex(30_000, window: nil), tools: true), "01a1c7f0  Codex  30k    watching  Release notes (not guarded)")
         XCTAssertEqual(StatusText.row(codex(30_000, attached: false), tools: true),
