@@ -1,11 +1,12 @@
 // Works one app's controls through accessibility, found by their label, so a test never sends keys
 // or clicks to whatever app is in front:
 //
-//   ax <pid> press <label> [n]  press the button or switch with this title or description
-//   ax <pid> clear <label> [n]  focus the text field or text area with this label and empty it
-//   ax <pid> list               print every control's role and label (to find the right one)
+//   ax <pid> press <label> [n|text]  press the button or switch with this title or description
+//   ax <pid> clear <label> [n|text]  focus the text field or text area with this label and empty it
+//   ax <pid> list                    print every control's role and label (to find the right one)
 //
-// When several controls share a label, n picks the nth one in `list` order (default 1).
+// When several controls share a label, n picks the nth one in `list` order (default 1), and a text
+// picks the first one in a window that shows that text (a popup's session title, say).
 //
 // `ui-demo.sh` compiles it once to .build/ax.
 import ApplicationServices
@@ -40,9 +41,17 @@ func labels(_ e: AXUIElement) -> [String] {
 let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
 let elements = windows.flatMap { all($0) }
 
+/// Whether this element shows the text, as its value or one of its labels.
+func shows(_ e: AXUIElement, _ text: String) -> Bool {
+    string(e, kAXValueAttribute) == text || labels(e).contains(text)
+}
+
 func find(_ label: String, roles: Set<String>) -> AXUIElement? {
-    let n = args.count > 3 ? Int(args[3]) ?? 0 : 1
-    let matches = elements.filter { e in
+    let pick = args.count > 3 ? args[3] : "1"
+    let n = Int(pick) ?? 1
+    let scope = Int(pick) != nil ? elements
+        : windows.map { all($0) }.filter { $0.contains { shows($0, pick) } }.flatMap { $0 }
+    let matches = scope.filter { e in
         guard let role = string(e, kAXRoleAttribute), roles.contains(role) else { return false }
         return labels(e).contains(label)
     }

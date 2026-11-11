@@ -10,8 +10,9 @@
 #   live-test/ui-demo.sh link connected|waiting|watching|stopped   what the stand-in link says
 #   live-test/ui-demo.sh settings             open Settings (from the menu, through accessibility)
 #   live-test/ui-demo.sh tab <General|When to Ask|Messages>  show a Settings tab (pressed through accessibility)
-#   live-test/ui-demo.sh press "<label>" [n]  press a button or switch in the app's windows, by its label
-#                                             (n: the nth with that label, in `controls` order)
+#   live-test/ui-demo.sh press "<label>" [n|text]  press a button or switch in the app's windows, by its label
+#                                             (n: the nth with that label, in `controls` order; text: the one
+#                                             in the window that shows that text, such as a popup's session title)
 #   live-test/ui-demo.sh controls             list the controls in the app's windows and their labels
 #   live-test/ui-demo.sh type "<field>" <text> [n]  replace a Settings field's text, typed key by key
 #   live-test/ui-demo.sh windows              list the app's windows (id, bounds) for screenshots
