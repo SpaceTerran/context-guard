@@ -16,6 +16,7 @@
 #   live-test/ui-demo.sh type "<field>" <text> [n]  replace a Settings field's text, typed key by key
 #   live-test/ui-demo.sh windows              list the app's windows (id, bounds) for screenshots
 #   live-test/ui-demo.sh snap <folder> <name>  have the app draw each window to <folder>/<name>-<n>.png
+#                                             and write its menu to <folder>/<name>-menu.txt
 #                                             (works with the display asleep or the screen locked)
 #   live-test/ui-demo.sh capture <general|asking|messages> <file.png>  screen-capture a Settings window on
 #                                             that tab, behind your windows and never focused (display awake)
@@ -200,6 +201,7 @@ case "$cmd" in
       n=$((n + 1)); cp "$dir/snaps/$file" "$out/$name-$n.png"
       echo "$out/$name-$n.png  $kind  ${title:-(no title)}  $frame"
     done < "$dir/snaps/index.txt"
+    cp "$dir/snaps/menu.txt" "$out/$name-menu.txt" && echo "$out/$name-menu.txt  the menu"
     ;;
   capture)
     # The Settings window on one tab, as docs/settings.png shows it. Needs the display awake.
