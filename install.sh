@@ -2,7 +2,8 @@
 # Installs Context Guard for this Mac user:
 #   - builds it (build.sh)
 #   - puts the hook program at ~/.claude/hooks/context-guard/context-guard
-#   - adds its hooks to ~/.claude/settings.json (backed up first; other hooks are left alone)
+#   - adds its hooks to ~/.claude/settings.json (`context-guard setup`: backed up first; other hooks
+#     are left alone)
 #   - puts the mod (mod/, the part that compacts once the session has saved) at ~/.claude/hooks/context-guard/mod
 #     and installs it as a Claude Code plugin for this user
 #   - adds a LaunchAgent that keeps `context-guard codex` running, which guards Codex sessions
@@ -26,7 +27,7 @@ mod_dir="$hook_dir/mod"
 plugin="context-guard@context-guard"
 app="$HOME/Applications/Context Guard.app"
 exe="$app/Contents/MacOS/ContextGuard"
-# Every Context Guard hook command contains this path; that's how install and uninstall find them.
+# Every Context Guard hook command contains this path.
 marker="hooks/context-guard/context-guard"
 # The LaunchAgent that runs `context-guard codex`. The app looks for this file to tell whether the
 # Codex link is installed.
@@ -34,8 +35,6 @@ agent_label="com.spaceterran.ContextGuard.codex"
 agent_plist="$HOME/Library/LaunchAgents/$agent_label.plist"
 agent="gui/$(id -u)/$agent_label"
 state="${CONTEXT_GUARD_HOME:-${CLAUDE_CONFIG_DIR:-$claude}/context-guard}"
-# If the program is missing (uninstalled, or mid-update), the hook just reads its input and exits.
-command='f="$HOME/.claude/hooks/context-guard/context-guard"; if [ -x "$f" ]; then CG_CLAUDE_PID=$PPID exec "$f" hook; else cat >/dev/null; fi'
 
 say() { printf '%s\n' "$*"; }
 
@@ -48,49 +47,17 @@ quit_app() {
   pkill -f "^$exe" || true
 }
 
-# Rewrites settings.json with a jq filter: validated first, backed up, then swapped in whole, so
-# a running Claude Code never reads a half-written file. Keeps the file's permissions.
-edit_settings() {
-  local filter="$1"
-  mkdir -p "$claude"
-  [ -f "$settings" ] || printf '{}\n' > "$settings"
-  if ! jq empty "$settings" 2>/dev/null; then
-    say "error: $settings isn't valid JSON; fix it and run this again" >&2
-    exit 1
+# Takes Context Guard's hooks out of settings.json, with the program that put them there: the
+# installed one, or this checkout's build when that's gone.
+remove_hooks() {
+  [ -f "$settings" ] && grep -q "$marker" "$settings" || return 0
+  local prog="$hook_bin"
+  if [ ! -x "$prog" ]; then
+    swift build -c release --product context-guard --package-path "$pkg" >/dev/null
+    prog="$(swift build -c release --show-bin-path --package-path "$pkg")/context-guard"
   fi
-  local backup
-  backup="$settings.context-guard-backup-$(date +%Y%m%d-%H%M%S)"
-  cp -p "$settings" "$backup"
-  local tmp
-  tmp="$(mktemp "$claude/.settings.json.XXXXXX")"
-  jq --arg c "$command" --arg m "$marker" "$filter" "$settings" > "$tmp"
-  chmod "$(stat -f %Lp "$settings")" "$tmp"
-  mv -f "$tmp" "$settings"
-  say "updated $settings (backup: $backup)"
+  "$prog" setup --uninstall
 }
-
-# Drops Context Guard's hooks from every event, and any group or event left empty by that.
-strip='
-  def ours: (.command // "") | contains($m);
-  if .hooks then
-    .hooks |= (with_entries(.value |= map(
-                 if any(.hooks[]?; ours) then (.hooks |= map(select(ours | not))) | select(.hooks | length > 0)
-                 else . end))
-               | with_entries(select(.value | length > 0)))
-  else . end'
-
-add='
-  def hook: {type: "command", command: $c, timeout: 5};
-  .hooks //= {}
-  | .hooks.PostToolBatch += [{hooks: [hook]}]
-  | .hooks.SessionStart += [{hooks: [hook]}]
-  | .hooks.SessionEnd += [{hooks: [hook]}]
-  | .hooks.StopFailure += [{hooks: [hook]}]
-  # Runs in the background after each turn; exiting 2 wakes the idle session with the save message.
-  # 43500 s is about 12 hours, the longest one waits.
-  | .hooks.Stop += [{hooks: [hook + {asyncRewake: true, timeout: 43500,
-                                     rewakeSummary: "Context Guard: save before compacting",
-                                     rewakeMessage: "Stop hook message:"}]}]'
 
 # Copies the mod's files (not its tests) and swaps the folder in whole. Claude Code reads the
 # plugin from this folder in place, so a copy is all an update needs.
@@ -203,7 +170,7 @@ uninstall() {
   if [ -x "$exe" ]; then "$exe" --login-item off 2>/dev/null || true; fi
   rm -rf "$app"
   say "removed $app"
-  if [ -f "$settings" ] && grep -q "$marker" "$settings"; then edit_settings "$strip"; fi
+  remove_hooks
   uninstall_mod
   rm -f "$hook_bin"
   rmdir "$hook_dir" 2>/dev/null || true
@@ -225,8 +192,9 @@ install() {
   mv -f "$tmp" "$hook_bin"
   say "installed $hook_bin"
 
-  # Remove then add, so running this again leaves exactly one copy of each hook.
-  edit_settings "$strip | $add"
+  # Backs up settings.json, then removes and adds the hooks, so running this again leaves exactly
+  # one copy of each. Other hooks and settings stay as they are.
+  "$hook_bin" setup
 
   copy_mod
   install_mod

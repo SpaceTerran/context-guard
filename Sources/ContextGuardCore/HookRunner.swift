@@ -64,8 +64,15 @@ public enum HookOutcome: Equatable, Sendable {
 /// Runs one hook event against the state files. Every failure ends in `.silent`.
 public struct HookRunner: Sendable {
     public let paths: Paths
-    /// The Claude Code process that ran the hook (`$PPID` in the hook command).
+    /// The Claude Code process that ran the hook (see `claudePid(_:)`).
     public let claudePid: Int32?
+
+    /// Which Claude Code process ran the hook: the one the hook command names (`CG_CLAUDE_PID=$PPID`
+    /// in the Mac's shell line, always the process that ran it), else the one Claude Code names
+    /// (`CLAUDE_PID`, since 2.1.214; the Windows hook runs the program with no shell).
+    public static func claudePid(_ env: [String: String]) -> Int32? {
+        env["CG_CLAUDE_PID"].flatMap { Int32($0) } ?? env["CLAUDE_PID"].flatMap { Int32($0) }
+    }
     public let environment: [String: String]
     public let probe: any ProcessProbing
     public let registry: any RegistryReading

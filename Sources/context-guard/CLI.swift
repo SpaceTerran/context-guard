@@ -20,6 +20,7 @@ struct CLI {
                                                  answer a session's question (id or id prefix)
       context-guard watch <session> on|off       watch a session's tab, or stop watching it
       context-guard on | off                     turn Context Guard on or off
+      context-guard setup [--uninstall]          add Context Guard's hooks to Claude Code's settings, or remove them
       context-guard mod tick | report | turn     for the Context Guard mod (JSON on stdin and stdout)
     """
 
@@ -43,6 +44,8 @@ struct CLI {
             watch(paths: paths, args: Array(args.dropFirst()))
         case "mod":
             runMod(paths: paths, args: Array(args.dropFirst()))
+        case "setup":
+            setup(env: env, args: Array(args.dropFirst()))
         case "on", "off":
             var config = Config.load(paths)
             config.setEnabled(args.first == "on", now: Date())
@@ -67,7 +70,7 @@ struct CLI {
         // Stop can fire a moment before the final response line is written.
         if input.event == HookEvent.stop.rawValue { Thread.sleep(forTimeInterval: 0.4) }
 
-        let runner = HookRunner(paths: paths, claudePid: env["CG_CLAUDE_PID"].flatMap { Int32($0) }, environment: env)
+        let runner = HookRunner(paths: paths, claudePid: HookRunner.claudePid(env), environment: env)
         switch runner.handle(input) {
         case .silent:
             exit(0)
@@ -179,6 +182,27 @@ struct CLI {
             FileHandle.standardOutput.write(Data("\n".utf8))
         }
         exit(0)
+    }
+
+    // MARK: setup
+
+    /// The installers run this once the program is in place, and `--uninstall` before removing it.
+    static func setup(env: [String: String], args: [String]) {
+        guard args.isEmpty || args == ["--uninstall"] else { fail(usage) }
+        let settings = HookSetup.settingsFile(env)
+        let file = PathRules.native(settings.path)
+        do {
+            let outcome = args.isEmpty
+                ? try HookSetup.install(HookSetup.program(env), settings: settings)
+                : try HookSetup.uninstall(settings: settings)
+            switch outcome {
+            case .updated(let backup?): print("updated \(file) (backup: \(PathRules.native(backup.path)))")
+            case .updated(nil): print("updated \(file)")
+            case .unchanged: print(args.isEmpty ? "\(file) already has Context Guard's hooks" : "no Context Guard hooks in \(file)")
+            }
+        } catch {
+            fail("error: \(error)")
+        }
     }
 
     // MARK: watch

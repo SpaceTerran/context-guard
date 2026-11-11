@@ -73,7 +73,6 @@ of Haiku. See [Codex](#codex).
 
 - macOS 14 or newer.
 - Xcode Command Line Tools 16.4 or newer (Swift 6.1 or newer): `xcode-select --install`.
-- `jq`: built into macOS 15 and later; on macOS 14, `brew install jq`.
 - Claude Code with plugin support (tested with 2.1.318), signed in as usual.
 - For Codex sessions: the Codex CLI (tested with 0.167.1), signed in as usual. Without it, nothing
   changes.
