@@ -191,11 +191,12 @@ What's different from Claude Code:
 - **Nothing goes in mid-turn.** The save message and the compaction wait for the turn to end. A very
   long turn can reach Codex's own compaction first; a notice says so.
 - **The prompt box can't be read** from outside Codex, so text you've typed but not sent doesn't
-  hold the compaction.
+  hold the compaction. It stays in the box.
 - **A terminal has to show the session.** Messages go out only to a session a terminal has open.
-  Which ones are open is worked out from the `codex` processes running in terminals: their folder,
-  or the session `codex resume <id>` names. A `codex resume` from another folder, without an id,
-  isn't seen; its messages wait and `status` says "no terminal shows it".
+  Which ones are open is worked out from the `codex` processes running in terminals: the folder
+  each runs in, the session a `codex resume <id>` names, and a session started there since (as
+  `/new` does). A `codex resume` from another folder, without an id, isn't seen; its messages wait
+  and `status` says "no terminal shows it".
 - **Watch This Session** belongs to the Codex session, not the tab. `/new` starts a new session,
   which is watched again.
 - **Which sessions:** only terminal sessions in the shared server. A `codex` started with `-c`,
@@ -224,11 +225,20 @@ CG_TEST_PLUGIN_DIR=$PWD/mod CG_TEST_AUTO_YES=5 live-test/session.sh start <name>
                                                # the same, with the mod and a 5 s countdown
 CG_TEST_TERMINAL=terminal CG_TEST_PROMPT="Read filler-1.txt" live-test/session.sh start <name> 60 75
                                                # the same in a Terminal.app window (or ghostty)
+CG_TEST_CODEX_DIR=<folder> live-test/codex-session.sh start <name>
+                                               # a real Codex session (gpt-6-luna), asks at 10%
 ```
 
 The live tests keep their files in `.scratch/` at the repo root. They never touch your real
 sessions or settings. Without `CG_TEST_TERMINAL`, `session.sh` runs Claude Code in a hidden terminal
 that needs [`uv`](https://docs.astral.sh/uv/).
+
+`codex-session.sh` runs `codex` in a hidden terminal on your own Codex server, with a test link that
+looks only at the test's folder; `stop` deletes the test's Codex sessions. Codex asks whether to
+trust a folder it doesn't know and saves the answer in your settings, so `CG_TEST_CODEX_DIR` should
+be a folder inside a project Codex already trusts, not a git repo of its own. The test folder gets
+Codex settings of its own: gpt-6-luna and no update check. Codex itself may note first-run flags in
+`~/.codex/config.toml`; `stop` says when it did. The script's header lists its other commands.
 
 ## License
 
