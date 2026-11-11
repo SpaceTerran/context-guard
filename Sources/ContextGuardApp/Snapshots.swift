@@ -8,16 +8,41 @@ import SwiftUI
 /// The app draws them itself: no screen recording, and nothing else on screen.
 @MainActor
 enum Snapshots {
-    private static var source: DispatchSourceSignal?
+    private static var sources: [DispatchSourceSignal] = []
+    private static var shown: NSWindow?
 
-    /// With `CONTEXT_GUARD_SNAPSHOTS` set to a folder, SIGUSR1 writes the PNGs there.
+    /// With `CONTEXT_GUARD_SNAPSHOTS` set to a folder, SIGUSR1 writes the PNGs there and SIGUSR2
+    /// shows a Settings window for `live-test/ui-demo.sh capture`.
     static func start(model: AppModel) {
-        guard let dir = ProcessInfo.processInfo.environment["CONTEXT_GUARD_SNAPSHOTS"], !dir.isEmpty else { return }
-        signal(SIGUSR1, SIG_IGN)
-        let s = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
-        s.setEventHandler { MainActor.assumeIsolated { write(model: model, to: URL(fileURLWithPath: dir, isDirectory: true)) } }
-        s.resume()
-        source = s
+        guard let path = ProcessInfo.processInfo.environment["CONTEXT_GUARD_SNAPSHOTS"], !path.isEmpty else { return }
+        let dir = URL(fileURLWithPath: path, isDirectory: true)
+        for (sig, act) in [(SIGUSR1, { write(model: model, to: dir) }), (SIGUSR2, { show(model: model, in: dir) })] {
+            signal(sig, SIG_IGN)
+            let s = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            s.setEventHandler { MainActor.assumeIsolated { act() } }
+            s.resume()
+            sources.append(s)
+        }
+    }
+
+    /// The Settings window on the tab named in `show`, as the README shows it, for a screen capture
+    /// (`screencapture -l`, which gives the corners and nothing else; drawing the view can't). It
+    /// goes behind every other window and is never key, so nothing you type reaches it. Its window
+    /// number goes to `shown`. With no `show` file, it closes.
+    static func show(model: AppModel, in dir: URL) {
+        shown?.orderOut(nil)
+        shown = nil
+        let marker = dir.appendingPathComponent("shown")
+        try? FileManager.default.removeItem(at: marker)
+        let name = (try? String(contentsOf: dir.appendingPathComponent("show"), encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let tab = name.flatMap(SettingsTab.init(rawValue:)) else { return }
+        let w = SettingsWindow.makeWindow()
+        SettingsWindow.fill(w, model: model, tab: tab)
+        w.center()
+        w.orderBack(nil)
+        shown = w
+        try? "\(w.windowNumber)\n".write(to: marker, atomically: true, encoding: .utf8)
     }
 
     /// `window-<number>.png` for each visible window, the frame (title bar and all) included;
