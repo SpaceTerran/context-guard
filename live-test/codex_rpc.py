@@ -3,9 +3,10 @@
 
     uv run -q --with websockets python3 codex_rpc.py loaded
 
-Prints one JSON object per loaded session: {"id", "cwd", "ephemeral", "status"}. Exits 3 when no
-app server is listening. It only reads (thread/loaded/list, thread/read), connects to the control
-socket's "/" path only (never /daemon/shutdown), and answers no requests from the server.
+Prints one JSON object per loaded session: {"id", "cwd", "ephemeral", "status", "originator",
+"createdAt"}. Exits 3 when no app server is listening. It only reads (thread/loaded/list,
+thread/read), connects to the control socket's "/" path only (never /daemon/shutdown), and answers
+no requests from the server.
 """
 import asyncio
 import json
@@ -58,7 +59,8 @@ async def loaded() -> None:
         for tid in ids:
             t = (await call("thread/read", {"threadId": tid}))["thread"]
             print(json.dumps({"id": tid, "cwd": t.get("cwd"), "ephemeral": bool(t.get("ephemeral")),
-                              "status": (t.get("status") or {}).get("type")}))
+                              "status": (t.get("status") or {}).get("type"), "originator": t.get("originator"),
+                              "createdAt": t.get("createdAt")}))
 
 
 if __name__ == "__main__":

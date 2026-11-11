@@ -14,6 +14,9 @@
 #       CG_TEST_MESSAGE=<text> the save message (default: a request to reply with set words). The
 #         test folder isn't a repo of its own, so don't ask it to commit or push.
 #       CG_TEST_PROMPT=<text> the session's first prompt, given on the command line
+#       CG_TEST_AUTO_COMPACT=<tokens> where Codex compacts by itself (model_auto_compact_token_limit)
+#       The test folder gets Codex settings of its own (<folder>/.codex/config.toml, read only for
+#       sessions there): gpt-6-luna, so /new keeps it; no update check; and CG_TEST_AUTO_COMPACT.
 #   live-test/codex-session.sh send <name> <text>       type a prompt and press Enter
 #   live-test/codex-session.sh type <name> <text>       type without pressing Enter
 #   live-test/codex-session.sh key <name> enter|esc|ctrl-c|ctrl-u|backspace|up|down
@@ -35,8 +38,8 @@
 #                                                       whether ~/.codex/config.toml changed
 #
 # It refuses to start while an installed link (or any link without --only-cwd) runs: two links would
-# both act on the test session. Codex may show an update prompt first: press esc (skip), never
-# update from a test. Needs `uv` (for pyte and websockets) and a debug build.
+# both act on the test session. If Codex offers an update anyway, the driver passes on only esc
+# (skip) and quit: never update from a test. Needs `uv` (for pyte and websockets) and a debug build.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -125,7 +128,15 @@ case "$cmd" in
       echo "a Context Guard link without --only-cwd is running; stop it first" >&2; exit 1
     fi
     running "$dir/link.pid" && { echo "$name is running; stop it first" >&2; exit 1; }
-    rm -rf "$dir"; mkdir -p "$home"
+    auto_compact="${CG_TEST_AUTO_COMPACT:-}"
+    [[ -z "$auto_compact" || "$auto_compact" =~ ^[0-9]+$ ]] || { echo "CG_TEST_AUTO_COMPACT: a number of tokens" >&2; exit 1; }
+    rm -rf "$dir"; mkdir -p "$home" "$dir/.codex"
+    # Codex settings for this folder only; your own config files are never touched. No update
+    # check: its prompt's default is "Update now", and a test's Enter would pick it.
+    { echo 'model = "gpt-6-luna"'
+      echo 'check_for_update_on_startup = false'
+      [ -z "$auto_compact" ] || echo "model_auto_compact_token_limit = $auto_compact"
+    } > "$dir/.codex/config.toml"
     # Whether Codex's app server was running before, so stop can leave it as it was.
     if loaded >/dev/null 2>&1; then echo yes > "$dir/server-was-running"; else echo no > "$dir/server-was-running"; fi
     # What Codex's settings were, so stop can say whether the test changed them.

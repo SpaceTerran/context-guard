@@ -11,6 +11,10 @@ it. Each line written to the FIFO is one command:
 
 The rendered screen is rewritten to --screen every half second; raw output goes to --log.
 
+While the tool offers to update itself (Codex: "1. Update now (runs `brew upgrade …`)"), only esc
+and quit are passed on: a test never updates anything. The prompt can appear a second after the
+first screen, so this is checked before every key, not only at start.
+
     uv run --with pyte python3 pty_driver.py --cwd DIR --fifo F --screen S --log L -- claude ...
     uv run --with pyte python3 pty_driver.py --cwd DIR --fifo F --screen S --log L -- codex ...
 """
@@ -29,6 +33,8 @@ import pyte
 
 KEYS = {"enter": b"\r", "esc": b"\x1b", "ctrl-c": b"\x03", "ctrl-u": b"\x15", "backspace": b"\x7f",
         "up": b"\x1b[A", "down": b"\x1b[B"}
+# Words on a screen that offers to update the tool.
+UPDATE_OFFER = ("Update now", "Skip until next version")
 
 
 def main() -> int:
@@ -86,19 +92,32 @@ def main() -> int:
     threading.Thread(target=reader, daemon=True).start()
     threading.Thread(target=snapshot, daemon=True).start()
 
+    def write(data: bytes) -> bool:
+        """Sends keys unless the screen offers an update. Checked under the reader's lock, so the
+        screen can't change between the check and the write."""
+        with lock:
+            shown = "\n".join(screen.display)
+            if any(words in shown for words in UPDATE_OFFER):
+                print("refused: the screen offers an update; press esc to skip it", file=sys.stderr, flush=True)
+                return False
+            os.write(fd, data)
+            return True
+
     while not done.is_set():
         with open(args.fifo) as f:  # blocks until a writer opens it
             for raw in f:
                 line = raw.rstrip("\n")
                 verb, _, rest = line.partition(" ")
                 if verb == "type":
-                    os.write(fd, rest.encode())
+                    write(rest.encode())
                 elif verb == "send":
-                    os.write(fd, rest.encode())
-                    time.sleep(0.3)
-                    os.write(fd, b"\r")
+                    if write(rest.encode()):
+                        time.sleep(0.3)
+                        write(b"\r")
+                elif verb == "esc":
+                    os.write(fd, KEYS["esc"])
                 elif verb in KEYS:
-                    os.write(fd, KEYS[verb])
+                    write(KEYS[verb])
                 elif verb == "quit":
                     os.kill(pid, signal.SIGTERM)
                     done.wait(5)
