@@ -13,6 +13,8 @@ let package = Package(
         .target(name: "ContextGuardCore"),
         .executableTarget(name: "context-guard", dependencies: ["ContextGuardCore"]),
         .executableTarget(name: "ContextGuardApp", dependencies: ["ContextGuardCore"]),
-        .testTarget(name: "ContextGuardCoreTests", dependencies: ["ContextGuardCore"]),
+        // Fixtures both test targets use.
+        .target(name: "ContextGuardTestSupport", path: "Tests/ContextGuardTestSupport"),
+        .testTarget(name: "ContextGuardCoreTests", dependencies: ["ContextGuardCore", "ContextGuardTestSupport"]),
     ]
 )

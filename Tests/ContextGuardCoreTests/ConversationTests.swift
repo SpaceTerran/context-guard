@@ -1,5 +1,6 @@
 import XCTest
 @testable import ContextGuardCore
+import ContextGuardTestSupport
 
 /// The conversation after a save message, as Haiku reads it.
 final class ConversationTests: XCTestCase {

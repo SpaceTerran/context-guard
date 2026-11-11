@@ -1,5 +1,6 @@
 import XCTest
 @testable import ContextGuardCore
+import ContextGuardTestSupport
 
 /// Reading Claude Code's registry status with the mod's turn record: mid-turn, or between turns
 /// with or without work left running in the background.

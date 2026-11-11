@@ -1,5 +1,6 @@
 import XCTest
 @testable import ContextGuardCore
+import ContextGuardTestSupport
 
 final class TranscriptTests: XCTestCase {
     let dir = TempDir()

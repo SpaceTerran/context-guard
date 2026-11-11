@@ -1,5 +1,6 @@
 import XCTest
 @testable import ContextGuardCore
+import ContextGuardTestSupport
 
 final class EngineTests: XCTestCase {
     let config = Config()

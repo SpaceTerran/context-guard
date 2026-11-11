@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import ContextGuardCore
+import ContextGuardTestSupport
 
 /// Lines shaped like Claude Code's transcript JSONL (compact JSON, one record per line).
 enum Line {
@@ -87,43 +88,6 @@ enum Line {
     }
 }
 
-final class TempDir {
-    let url: URL
-
-    init() {
-        url = FileManager.default.temporaryDirectory.appendingPathComponent("cg-tests-\(UUID().uuidString)", isDirectory: true)
-        try! FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    }
-
-    deinit { try? FileManager.default.removeItem(at: url) }
-
-    func file(_ name: String) -> URL { url.appendingPathComponent(name) }
-}
-
-final class Transcript {
-    let url: URL
-
-    init(_ dir: TempDir, name: String = "t.jsonl") {
-        url = dir.file(name)
-        FileManager.default.createFile(atPath: url.path, contents: nil)
-    }
-
-    var path: String { url.path }
-
-    func append(_ lines: String..., newline: Bool = true) {
-        appendRaw(lines.joined(separator: "\n") + (newline ? "\n" : ""))
-    }
-
-    func appendRaw(_ s: String) {
-        let h = try! FileHandle(forWritingTo: url)
-        h.seekToEndOfFile()
-        h.write(Data(s.utf8))
-        try! h.close()
-    }
-
-    var size: UInt64 { (try! FileManager.default.attributesOfItem(atPath: path)[.size] as! NSNumber).uint64Value }
-}
-
 /// A process table the tests control.
 final class FakeProbe: ProcessProbing, @unchecked Sendable {
     private let lock = NSLock()
@@ -185,22 +149,6 @@ extension TranscriptReading {
         var r = TranscriptReading()
         r.latest = .response(tokens: t)
         return r
-    }
-}
-
-/// Real time, shifted by however far a test moved it on.
-final class TestClock: @unchecked Sendable {
-    private let lock = NSLock()
-    private var offset: TimeInterval = 0
-
-    var now: Date {
-        lock.lock(); defer { lock.unlock() }
-        return Date().addingTimeInterval(offset)
-    }
-
-    func advance(_ seconds: TimeInterval) {
-        lock.lock(); defer { lock.unlock() }
-        offset += seconds
     }
 }
 

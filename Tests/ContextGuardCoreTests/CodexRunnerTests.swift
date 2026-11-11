@@ -1,5 +1,6 @@
 import XCTest
 @testable import ContextGuardCore
+import ContextGuardTestSupport
 
 /// A Codex session through `CodexRunner`, against real files: the rollout as Codex writes it and
 /// the thread as the app server reports it.
@@ -219,6 +220,47 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertEqual(tick(), .compact(nonce: nonce))
         XCTAssertEqual(tick(), .none)
         XCTAssertEqual(state?.followUp?.stage, .compacting)
+    }
+
+    /// Up to a ready verdict and Context Guard's compaction. Returns the nonce.
+    func readyToCompact() throws -> String {
+        let nonce = try askAndSend()
+        log.append(CodexLine.reply("Ready."), CodexLine.taskComplete())
+        status = "idle"
+        try settle()
+        guard case .judge(_, let mark, _) = tick() else {
+            XCTFail("expected the judge")
+            return nonce
+        }
+        runner.report(ModReport(sessionId: id, nonce: nonce, kind: .judged, mark: mark, text: #"{"verdict":"ready"}"#))
+        XCTAssertEqual(tick(), .compact(nonce: nonce))
+        return nonce
+    }
+
+    func testACompactionPutOffForANewTurnIsNotATry() throws {
+        let nonce = try readyToCompact()
+        // A turn started before the link compacted: it put it off.
+        for _ in 0..<Compactor.maxCompactAttempts + 1 {
+            runner.report(ModReport(sessionId: id, nonce: nonce, kind: .compactDeferred))
+            XCTAssertEqual(state?.followUp?.stage, .checking)
+            XCTAssertNil(state?.followUp?.compactStartedAt)
+            XCTAssertEqual(tick(), .compact(nonce: nonce), "the same conversation, still ready")
+        }
+        XCTAssertEqual(state?.followUp?.compactAttempts, 1)
+    }
+
+    func testACompactionPutOffIsJudgedAgainOnceItsTurnEnds() throws {
+        let nonce = try readyToCompact()
+        runner.report(ModReport(sessionId: id, nonce: nonce, kind: .compactDeferred))
+        status = "active"
+        log.append(CodexLine.taskStarted(), CodexLine.prompt("one more thing"), CodexLine.reply("Done that too."))
+        XCTAssertEqual(tick(), .none, "not while it works")
+        log.append(CodexLine.taskComplete())
+        status = "idle"
+        try settle()
+        guard case .judge(let n, _, let prompt) = tick() else { return XCTFail("the conversation changed: judged again") }
+        XCTAssertEqual(n, nonce)
+        XCTAssertTrue(prompt.contains("Done that too."))
     }
 
     func testARefusedSendIsSentAgainWithoutUsingTheResend() throws {
