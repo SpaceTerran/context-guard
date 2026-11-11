@@ -25,6 +25,8 @@ public enum DeliveryChannel: String, Codable, Sendable {
     case step
     /// Woke the idle session from the background Stop hook.
     case wake
+    /// Started as a turn of its own, between turns (Codex).
+    case turn
 
     // It's only shown, so a channel from a newer build reads as a wake rather than failing the
     // whole state file.
