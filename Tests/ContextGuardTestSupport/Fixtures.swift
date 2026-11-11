@@ -22,7 +22,7 @@ public final class Transcript: @unchecked Sendable {
 
     public init(_ dir: TempDir, name: String = "t.jsonl") {
         url = dir.file(name)
-        FileManager.default.createFile(atPath: url.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: url.path, contents: nil)
     }
 
     public var path: String { url.path }

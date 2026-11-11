@@ -70,6 +70,12 @@ public final class SocketStream: @unchecked Sendable {
     let native: Native
     private let lock = NSLock()
     private var isClosed = false
+    /// `shutdown()` or `close()` was called.
+    private var isEnded = false
+    #if os(Windows)
+    /// Reads in `recv` now.
+    private var readers = 0
+    #endif
 
     /// A Unix socket address holds the path and its terminating NUL (104 bytes on the Mac, 108 on Windows).
     public static let maxPathBytes = MemoryLayout.size(ofValue: sockaddr_un().sun_path) - 1
@@ -136,19 +142,53 @@ public final class SocketStream: @unchecked Sendable {
     public func read(max: Int = 64 << 10) throws -> Data {
         var buffer = [UInt8](repeating: 0, count: max)
         while true {
-            let n = buffer.withUnsafeMutableBytes { raw -> Int in
-                #if os(Windows)
-                Int(recv(native, raw.baseAddress!.assumingMemoryBound(to: CChar.self), Int32(max), 0))
-                #else
-                Darwin.read(native, raw.baseAddress, max)
-                #endif
-            }
+            #if os(Windows)
+            guard let got = receive(into: &buffer) else { return Data() }
+            let (n, e) = got
+            #else
+            let n = buffer.withUnsafeMutableBytes { Darwin.read(native, $0.baseAddress, max) }
+            let e = n < 0 ? errno : 0
+            #endif
             if n >= 0 { return Data(buffer[0..<n]) }
-            let e = Self.lastError()
             if Self.isInterrupted(e) { continue }
             throw CodexLinkError.io(e)
         }
     }
+
+    #if os(Windows)
+    /// One `recv`, or nil once `shutdown()` or `close()` has ended the stream (a `recv` they
+    /// cancelled included), which reads as the end of the stream, as on the Mac.
+    private func receive(into buffer: inout [UInt8]) -> (count: Int, error: Int32)? {
+        lock.lock()
+        guard !isEnded else {
+            lock.unlock()
+            return nil
+        }
+        readers += 1
+        lock.unlock()
+        let n = buffer.withUnsafeMutableBytes { Int(recv(native, $0.baseAddress!.assumingMemoryBound(to: CChar.self), Int32($0.count), 0)) }
+        let e = n < 0 ? WSAGetLastError() : 0
+        lock.lock()
+        readers -= 1
+        let ended = isEnded
+        lock.unlock()
+        return n < 0 && ended ? nil : (n, e)
+    }
+
+    /// Windows doesn't wake a `recv` that's already waiting when its socket is shut down, so it's
+    /// cancelled, again until it has returned: one may have been about to start.
+    private func cancelReads() {
+        let deadline = Date().addingTimeInterval(1)
+        while true {
+            lock.lock()
+            let waiting = readers
+            lock.unlock()
+            guard waiting > 0, Date() < deadline else { return }
+            _ = CancelIoEx(HANDLE(bitPattern: UInt(native)), nil)
+            Thread.sleep(forTimeInterval: 0.001)
+        }
+    }
+    #endif
 
     public func write(_ data: Data) throws {
         try data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
@@ -175,16 +215,31 @@ public final class SocketStream: @unchecked Sendable {
     /// until `close()`, so a read in progress never lands on a reused one.
     public func shutdown() {
         lock.lock()
-        defer { lock.unlock() }
-        if !isClosed { Self.shutdownNative(native) }
+        guard !isClosed else {
+            lock.unlock()
+            return
+        }
+        isEnded = true
+        Self.shutdownNative(native)
+        lock.unlock()
+        #if os(Windows)
+        cancelReads()
+        #endif
     }
 
     public func close() {
         lock.lock()
-        defer { lock.unlock() }
-        guard !isClosed else { return }
+        guard !isClosed else {
+            lock.unlock()
+            return
+        }
         isClosed = true
+        isEnded = true
         Self.shutdownNative(native)
+        lock.unlock()
+        #if os(Windows)
+        cancelReads()
+        #endif
         Self.closeNative(native)
     }
 
@@ -204,7 +259,9 @@ public final class SocketStream: @unchecked Sendable {
     static func lastError() -> Int32 { WSAGetLastError() }
     static func isInterrupted(_ code: Int32) -> Bool { code == WSAEINTR }
     static func isTimeout(_ code: Int32) -> Bool { code == WSAETIMEDOUT || code == WSAEWOULDBLOCK }
-    static func shutdownNative(_ s: Native) { _ = WinSDK.shutdown(s, SD_BOTH) }
+    /// Sending only: shutting down receiving with data still unread resets the connection, so the
+    /// other end would never see a clean end. Reads end through `isEnded` and `cancelReads()`.
+    static func shutdownNative(_ s: Native) { _ = WinSDK.shutdown(s, SD_SEND) }
     static func closeNative(_ s: Native) { _ = closesocket(s) }
 
     /// What Windows calls the error, without the trailing period.

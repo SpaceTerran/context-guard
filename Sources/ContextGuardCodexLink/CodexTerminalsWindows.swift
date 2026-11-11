@@ -76,7 +76,7 @@ public struct SystemCodexTerminals: CodexTerminalProbing {
 enum ProcessMemory {
     typealias QueryInformation = @convention(c) (HANDLE?, Int32, UnsafeMutableRawPointer?, ULONG, UnsafeMutablePointer<ULONG>?) -> LONG
 
-    nonisolated(unsafe) static let queryInformation: QueryInformation? = {
+    static let queryInformation: QueryInformation? = {
         let ntdll = "ntdll.dll".withCString(encodedAs: UTF16.self) { GetModuleHandleW($0) }
         guard let ntdll, let fn = GetProcAddress(ntdll, "NtQueryInformationProcess") else { return nil }
         return unsafeBitCast(fn, to: QueryInformation.self)
