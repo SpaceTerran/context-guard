@@ -45,9 +45,11 @@ public struct CodexSocketConnector: CodexConnecting {
         return (home as NSString).appendingPathComponent("app-server-control/app-server-control.sock")
     }
 
+    /// A socket is there. Codex 0.167.1 keeps the socket itself under `/private/tmp/codex-daemon-<uid>/`
+    /// and links to it from `app-server-control/`, so the link is followed.
     public func available() -> Bool {
         var st = stat()
-        return lstat(socketPath, &st) == 0 && (st.st_mode & S_IFMT) == S_IFSOCK
+        return stat(socketPath, &st) == 0 && (st.st_mode & S_IFMT) == S_IFSOCK
     }
 
     public func connect(onEvent: @escaping @Sendable (CodexEvent) -> Void) throws -> CodexDaemon {
