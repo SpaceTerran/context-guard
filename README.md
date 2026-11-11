@@ -2,9 +2,10 @@
 
 ![Context Guard asking whether to compact a session](docs/popup.png)
 
-A small Mac menu bar app for [Claude Code](https://code.claude.com/docs/en/overview). When a
-session's context gets big, it asks before compacting. If you say yes, the session saves its work
-first, then it's compacted and told to carry on.
+A small Mac menu bar app for [Claude Code](https://code.claude.com/docs/en/overview) and the
+[Codex CLI](https://github.com/openai/codex). When a session's context gets big, it asks before
+compacting. If you say yes, the session saves its work first, then it's compacted and told to carry
+on.
 
 There are about a thousand ways to handle context in Claude Code: `/compact` by hand, auto-compact,
 and plenty of other tools. This is just the one I like. The story behind it is on the blog:
@@ -63,12 +64,18 @@ and Messages cards say in their header when your last change was saved, or that 
 It doesn't care which terminal you use (tested in Warp, Terminal and Ghostty): everything goes
 through Claude Code's own hooks and plugins.
 
+**Codex** sessions get the same, with two differences: the thresholds are a share of each session's
+context window (60% and 80%), and a small OpenAI model reads whether the session has saved, in place
+of Haiku. See [Codex](#codex).
+
 ## Requirements
 
 - macOS 14 or newer.
 - Xcode Command Line Tools 16.4 or newer (Swift 6.1 or newer): `xcode-select --install`.
 - `jq`: built into macOS 15 and later; on macOS 14, `brew install jq`.
 - Claude Code with plugin support (tested with 2.1.318), signed in as usual.
+- For Codex sessions: the Codex CLI (tested with 0.167.1), signed in as usual. Without it, nothing
+  changes.
 
 ## Install, update, uninstall
 
@@ -76,7 +83,8 @@ through Claude Code's own hooks and plugins.
 git clone https://github.com/SpaceTerran/context-guard.git
 cd context-guard
 ./install.sh                 # install, or update after a git pull
-./install.sh --uninstall     # remove the hooks, the hook program, the mod and the app
+./install.sh --no-codex      # the same, without the Codex link (removes one installed before)
+./install.sh --uninstall     # remove the hooks, the hook program, the mod, the Codex link and the app
 ```
 
 It builds on your Mac (about a minute), so there's nothing to download and nothing for Gatekeeper to
@@ -88,6 +96,9 @@ block. `install.sh` does the following:
   left alone, and running it again doesn't add the hooks twice;
 - copies the mod to `~/.claude/hooks/context-guard/mod` and installs it as the user plugin
   `context-guard@context-guard`. Claude Code reads it from that folder, so an update is a copy;
+- adds a LaunchAgent, `~/Library/LaunchAgents/com.spaceterran.ContextGuard.codex.plist`, that keeps
+  `context-guard codex` running for Codex sessions (see [Codex](#codex)). macOS says "Background
+  Items Added";
 - installs `~/Applications/Context Guard.app`, sets it to open at login, and starts it.
 
 Running sessions pick up the hooks within a few seconds, and the mod at `/reload-plugins` or their
@@ -125,7 +136,7 @@ each turn of the conversation starts and ends.
 | File | Written by |
 |---|---|
 | `~/.claude/context-guard/config.json` | the app and `context-guard on/off`: on/off, thresholds, messages, the wait before a question compacts by itself |
-| `~/.claude/context-guard/sessions/<id>.json` | the hook and `context-guard mod`: each session's size, where its save message stands, and how compacting is going |
+| `~/.claude/context-guard/sessions/<id>.json` | the hook, `context-guard mod` and `context-guard codex`: each session's size, where its save message stands, and how compacting is going |
 | `~/.claude/context-guard/answers/<id>.json` | the app and `context-guard answer`: your answer to a popup |
 | `~/.claude/context-guard/muted/<pid>-<start>.json` | the app and `context-guard watch`: a tab you stopped watching, by its Claude process |
 | `~/.claude/context-guard/turns/<id>.json` | `context-guard mod turn`: whether the session's latest turn is running, and since when |
@@ -139,14 +150,75 @@ context-guard status                  # every session and where it stands
 context-guard answer <id> yes|later|skip
 context-guard watch <id> on|off       # watch a session's tab, or stop
 context-guard on | off
+context-guard codex [--only-cwd <folder>] [--verbose]
+                                      # the Codex link (the LaunchAgent runs it)
 ```
+
+## Codex
+
+Codex hooks can't start a turn or a compaction, so Codex sessions are reached another way. A plain
+`codex` in any terminal runs its session in Codex's shared background server, and
+`context-guard codex` (kept running by the LaunchAgent) connects to that server's socket,
+`~/.codex/app-server-control/app-server-control.sock`, the same way the terminal does. There's no
+Codex hook or plugin to install. The link:
+
+- reads each session's size from its file in `~/.codex/sessions`;
+- puts the save and continue messages in the session's queue, so the terminal shows them as prompts
+  from you. The save message ends with a tag like `[cg-1a2b3c4d5e]`, which marks it as Context
+  Guard's;
+- compacts the session, as `/compact` does;
+- asks the judge whether the session has finished saving.
+
+It connects only while a Codex terminal has run in the last 5 minutes, and never starts or stops
+Codex's server.
+
+**The judge.** Haiku isn't available to Codex, so the judge is OpenAI's smallest model,
+**gpt-6-luna** (or gpt-5.6-luna, else the session's own model), at low effort. It runs as a
+throwaway Codex session with your Codex sign-in: no API key, no tools, no MCP servers, and nothing
+saved to your history. Each check takes a few seconds and about 4k tokens of your Codex usage. It
+follows the same rules as Haiku: a question to you, or a session still waiting on a push or CI,
+holds it.
+
+**Thresholds.** Codex models have different context windows (258k on most today), so the
+thresholds are a share of each session's window: it asks at **60%** and, told to wait, compacts at
+**80%**. Settings → When to Ask has a Codex card for both. Codex compacts by itself at about 95% of
+the window, and that would cut a save short, so Wait goes no higher than 84%, and stays a tenth of
+the window below Codex's own point if you've lowered it (`model_auto_compact_token_limit`). The
+popup shows both numbers: "Context at 62% (160k)".
+
+What's different from Claude Code:
+
+- **Nothing goes in mid-turn.** The save message and the compaction wait for the turn to end. A very
+  long turn can reach Codex's own compaction first; a notice says so.
+- **The prompt box can't be read** from outside Codex, so text you've typed but not sent doesn't
+  hold the compaction.
+- **A terminal has to show the session.** Messages go out only to a session a terminal has open.
+  Which ones are open is worked out from the `codex` processes running in terminals: their folder,
+  or the session `codex resume <id>` names. A `codex resume` from another folder, without an id,
+  isn't seen; its messages wait and `status` says "no terminal shows it".
+- **Watch This Session** belongs to the Codex session, not the tab. `/new` starts a new session,
+  which is watched again.
+- **Which sessions:** only terminal sessions in the shared server. A `codex` started with `-c`,
+  `--profile`, `--no-daemon` or `--oss` runs its session inside the terminal's own process, where
+  nothing else can reach it. `codex exec`, the Codex app and subagents are left alone.
+- **An older Codex** missing something the link needs is only watched. Settings and `status` say
+  why.
+
+| File (in `~/.claude/context-guard/`) | Written by |
+|---|---|
+| `codex-link.json` | `context-guard codex`, every 5 seconds: running or stopped, connected, Codex's version, the judge model |
+| `codex-link.log` | `context-guard codex`: what it did. At 1 MB it moves to `codex-link.log.1` and starts again |
+| `codex-link.stderr` | launchd: anything the link printed as an error |
+| `muted/codex-<id>.json` | the app and `context-guard watch`: a Codex session you stopped watching |
 
 ## Development
 
 ```
-swift test                                     # the rules, transcript reading, hook runs
+swift test                                     # the rules, transcript reading, hook runs, the Codex link
 claude plugin test mod                         # the mod, against a mocked clock and program
-live-test/ui-demo.sh start dark                # the app on four staged sessions, to look at it
+live-test/ui-demo.sh start dark                # the app on staged sessions (four Claude Code, one Codex)
+live-test/ui-demo.sh snap <folder> <name>      # the app draws its windows to PNGs (works with the
+                                               # screen locked)
 live-test/session.sh start <name> 60 75        # a real Haiku session with low thresholds
 CG_TEST_PLUGIN_DIR=$PWD/mod CG_TEST_AUTO_YES=5 live-test/session.sh start <name> 60 75
                                                # the same, with the mod and a 5 s countdown
