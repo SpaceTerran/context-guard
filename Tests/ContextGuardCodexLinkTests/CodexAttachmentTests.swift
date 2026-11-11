@@ -5,12 +5,14 @@ import XCTest
 final class CodexAttachmentTests: XCTestCase {
     let dir = TempDir()
 
-    func terminal(_ args: String..., in cwd: String = "/Users/demo/code") -> CodexTerminalProcess {
-        CodexTerminalProcess(pid: Int32.random(in: 100...9_999), cwd: cwd, args: ["codex"] + args)
+    func terminal(_ args: String..., in cwd: String = "/Users/demo/code", started: Double? = nil) -> CodexTerminalProcess {
+        CodexTerminalProcess(pid: Int32.random(in: 100...9_999), cwd: cwd, args: ["codex"] + args, startedAt: started)
     }
 
-    func thread(_ id: String, in cwd: String? = "/Users/demo/code", at recency: Double = 0, originator: String? = "codex-tui") -> CodexThreadInfo {
-        CodexThreadInfo(id: id, path: "/r/\(id).jsonl", cwd: cwd, status: "idle", originator: originator, recencyAt: recency)
+    func thread(_ id: String, in cwd: String? = "/Users/demo/code", at recency: Double = 0, created: Double? = nil,
+                originator: String? = "codex-tui") -> CodexThreadInfo {
+        CodexThreadInfo(id: id, path: "/r/\(id).jsonl", cwd: cwd, status: "idle", originator: originator, recencyAt: recency,
+                        createdAt: created)
     }
 
     func testTheCommandWordsWithoutItsOptions() {
@@ -69,6 +71,36 @@ final class CodexAttachmentTests: XCTestCase {
                        ["old": true, "new": true])
         XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [terminal("resume", "gone")]),
                        ["old": false, "new": true], "one naming a session not loaded holds its folder's newest")
+    }
+
+    func testANewSessionInAResumedTerminalTakesItsPlace() {
+        // `codex resume old`, then `/new`: the command line still names old.
+        let resumed = terminal("resume", "old", started: 1_000.4)
+        let old = thread("old", at: 1_030, created: 500)
+        XCTAssertEqual(CodexAttachment.attached(threads: [old], terminals: [resumed]), ["old": true])
+        let new = thread("new", at: 1_060, created: 1_060)
+        XCTAssertEqual(CodexAttachment.attached(threads: [old, new], terminals: [resumed]), ["old": false, "new": true])
+        let newer = thread("newer", at: 1_090, created: 1_090)
+        XCTAssertEqual(CodexAttachment.attached(threads: [old, new, newer], terminals: [resumed]),
+                       ["old": false, "new": false, "newer": true], "a second /new")
+    }
+
+    func testATerminalStartedLaterKeepsTheSessionItStarted() {
+        // A resumed terminal, then a plain one in the same folder: each keeps its own.
+        let resumed = terminal("resume", "old", started: 1_000)
+        let plain = terminal(started: 2_000.8)
+        let threads = [thread("old", at: 2_500, created: 500), thread("mine", at: 2_001, created: 2_000),
+                       thread("stale", at: 2_600, created: 300)]
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [resumed, plain]),
+                       ["old": true, "mine": true, "stale": false])
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [plain, resumed]),
+                       ["old": true, "mine": true, "stale": false], "in either order")
+    }
+
+    func testTwoTerminalsOnOneSessionHoldOnlyThatOne() {
+        let threads = [thread("old", at: 10, created: 5), thread("other", at: 20, created: 6)]
+        let both = [terminal("resume", "old", started: 100), terminal("resume", "old", started: 200)]
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: both), ["old": true, "other": false])
     }
 
     func testOnlyTheTerminalAppsOwnSessionsCount() {

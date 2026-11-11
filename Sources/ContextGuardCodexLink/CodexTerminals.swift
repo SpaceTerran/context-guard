@@ -9,11 +9,14 @@ public struct CodexTerminalProcess: Equatable, Sendable {
     public var cwd: String
     /// Its command line, program first.
     public var args: [String]
+    /// When it started (Unix seconds). nil when it can't be read.
+    public var startedAt: Double?
 
-    public init(pid: Int32, cwd: String, args: [String]) {
+    public init(pid: Int32, cwd: String, args: [String], startedAt: Double? = nil) {
         self.pid = pid
         self.cwd = cwd
         self.args = args
+        self.startedAt = startedAt
     }
 }
 
@@ -101,24 +104,18 @@ public enum CodexAttachment {
         return String(cString: real)
     }
 
-    /// For each thread: a terminal has it open. A terminal that names its session holds that one;
-    /// the rest hold sessions in their folder, the most recently used first. nil when a thread's
-    /// folder isn't known.
+    /// For each thread: a terminal has it open. Each terminal shows one session, the first of:
+    /// 1. the newest one started in its folder since the terminal started: its own, or one `/new`
+    ///    made (a `codex resume <id>` keeps naming the old one after `/new`);
+    /// 2. the one its `codex resume <id>` names;
+    /// 3. its folder's most recently used one.
+    /// Terminals that started last choose first, so a session goes to the terminal that started it.
+    /// nil when a thread's folder isn't known.
     public static func attached(threads: [CodexThreadInfo], terminals: [CodexTerminalProcess]) -> [String: Bool] {
         var out: [String: Bool] = [:]
         let ids = Set(threads.map(\.id))
-        var free: [CodexTerminalProcess] = []
-        for t in terminals {
-            if let named = namedSession(t), ids.contains(named) {
-                out[named] = true
-            } else {
-                free.append(t)
-            }
-        }
-        var terminalsIn: [String: Int] = [:]
-        for t in free { terminalsIn[sessionFolder(t), default: 0] += 1 }
         var threadsIn: [String: [CodexThreadInfo]] = [:]
-        for th in threads where out[th.id] == nil {
+        for th in threads {
             // Only the terminal app's sessions compete for its terminals.
             guard th.originator == terminalOriginator else {
                 out[th.id] = false
@@ -127,11 +124,31 @@ public enum CodexAttachment {
             guard let cwd = th.cwd, !cwd.isEmpty else { continue }
             threadsIn[resolved(cwd), default: []].append(th)
         }
-        for (folder, list) in threadsIn {
-            let count = terminalsIn[folder] ?? 0
-            let newest = list.sorted { ($0.recencyAt ?? 0) > ($1.recencyAt ?? 0) }
-            for (i, th) in newest.enumerated() { out[th.id] = i < count }
+        let folders = terminals.map(sessionFolder)
+        let latestFirst = terminals.indices.sorted {
+            (terminals[$0].startedAt ?? -.infinity) > (terminals[$1].startedAt ?? -.infinity)
         }
+        var placed: Set<Int> = []
+        func untaken(_ i: Int) -> [CodexThreadInfo] { (threadsIn[folders[i]] ?? []).filter { out[$0.id] != true } }
+        for i in latestFirst {
+            // `createdAt` is in whole seconds.
+            guard let since = terminals[i].startedAt?.rounded(.down) else { continue }
+            let started = untaken(i).filter { ($0.createdAt ?? -.infinity) >= since }
+            if let th = started.max(by: { ($0.createdAt ?? 0, $0.recencyAt ?? 0) < ($1.createdAt ?? 0, $1.recencyAt ?? 0) }) {
+                out[th.id] = true
+                placed.insert(i)
+            }
+        }
+        for i in latestFirst where !placed.contains(i) {
+            guard let named = namedSession(terminals[i]), ids.contains(named) else { continue }
+            // Shown here, even when another terminal shows it too.
+            out[named] = true
+            placed.insert(i)
+        }
+        for i in latestFirst where !placed.contains(i) {
+            if let th = untaken(i).max(by: { ($0.recencyAt ?? 0) < ($1.recencyAt ?? 0) }) { out[th.id] = true }
+        }
+        for list in threadsIn.values { for th in list where out[th.id] == nil { out[th.id] = false } }
         return out
     }
 }
@@ -143,10 +160,11 @@ public struct SystemCodexTerminals: CodexTerminalProbing {
     public func terminals() -> [CodexTerminalProcess] {
         let probe = SystemProcessProbe()
         return Self.pids().compactMap { pid in
-            guard let name = Self.name(pid), Self.isCodexProgram(name), probe.identity(of: pid)?.hasTTY == true,
+            guard let name = Self.name(pid), Self.isCodexProgram(name), let id = probe.identity(of: pid), id.hasTTY,
                   let args = Self.arguments(pid), CodexAttachment.isTerminalApp(args),
                   let cwd = Self.cwd(pid) else { return nil }
-            return CodexTerminalProcess(pid: pid, cwd: cwd, args: args)
+            let started = Double(id.start.seconds) + Double(id.start.microseconds) / 1_000_000
+            return CodexTerminalProcess(pid: pid, cwd: cwd, args: args, startedAt: started)
         }
     }
 

@@ -5,12 +5,13 @@ final class CodexAPITests: XCTestCase {
     func testAThreadAsTheAppServerDescribesIt() throws {
         let v = try JSONValue.parse(#"""
         {"id":"t1","path":"/r/rollout.jsonl","cwd":"/code","name":"Settings","ephemeral":false,"model":"gpt-6-luna",
-         "originator":"codex-tui","updatedAt":1794355000,"status":{"type":"active","activeFlags":["waitingOnApproval"]}}
+         "originator":"codex-tui","createdAt":1794350000,"updatedAt":1794355000,
+         "status":{"type":"active","activeFlags":["waitingOnApproval"]}}
         """#)
         let t = try XCTUnwrap(CodexThreadInfo.parse(v))
         XCTAssertEqual(t, CodexThreadInfo(id: "t1", path: "/r/rollout.jsonl", cwd: "/code", name: "Settings", status: "active",
                                           flags: ["waitingOnApproval"], ephemeral: false, model: "gpt-6-luna",
-                                          originator: "codex-tui", recencyAt: 1_794_355_000))
+                                          originator: "codex-tui", recencyAt: 1_794_355_000, createdAt: 1_794_350_000))
         XCTAssertNil(CodexThreadInfo.parse(["id": ""]))
         let bare = try XCTUnwrap(CodexThreadInfo.parse(["id": "t2"]))
         XCTAssertEqual(bare.status, "notLoaded")

@@ -315,6 +315,23 @@ final class CodexLinkTests: XCTestCase {
         XCTAssertEqual(state?.phase, .sent, "a resume names it")
     }
 
+    func testAfterNewInAResumedTerminalTheNewSessionIsTheOneShown() throws {
+        // `codex resume <id>`, then `/new`: the command line still names the old session.
+        let now = clock.now.timeIntervalSince1970
+        terminals.set([CodexTerminalProcess(pid: 4243, cwd: "/Users/demo/code", args: ["codex", "resume", id], startedAt: now - 120)])
+        daemon.add(.init(id: id, path: log.path, cwd: "/Users/demo/code", recencyAt: now - 60, createdAt: now - 86_400))
+        try pass()
+        XCTAssertEqual(state?.codex?.attached, true)
+
+        let fresh = "01a1c7f0-0000-7000-8000-00000000000c"
+        let r = Transcript(dir, name: "rollout-\(fresh).jsonl")
+        r.append(CodexLine.meta(id: fresh))
+        daemon.add(.init(id: fresh, path: r.path, cwd: "/Users/demo/code", recencyAt: now - 30, createdAt: now - 30))
+        try pass()
+        XCTAssertEqual(state?.codex?.attached, false, "the old session isn't shown any more")
+        XCTAssertEqual(SessionState.load(fresh, paths)?.codex?.attached, true)
+    }
+
     func testOnlyTheFolderAskedFor() throws {
         let work = dir.file("work")
         let other = dir.file("work-2")

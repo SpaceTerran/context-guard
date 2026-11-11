@@ -15,6 +15,7 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
         var ephemeral = false
         var originator: String? = "codex-tui"
         var recencyAt: Double = 1_794_355_000
+        var createdAt: Double?
     }
 
     enum Judge {
@@ -262,6 +263,7 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
         if let cwd = t.cwd { o["cwd"] = .string(cwd) }
         if let name = t.name { o["name"] = .string(name) }
         if let originator = t.originator { o["originator"] = .string(originator) }
+        if let createdAt = t.createdAt { o["createdAt"] = .number(createdAt) }
         return .object(o)
     }
 }

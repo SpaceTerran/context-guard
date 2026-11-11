@@ -17,10 +17,12 @@ public struct CodexThreadInfo: Equatable, Sendable {
     public var originator: String?
     /// When it was last used (Unix seconds).
     public var recencyAt: Double?
+    /// When it was started (whole Unix seconds).
+    public var createdAt: Double?
 
     public init(id: String, path: String? = nil, cwd: String? = nil, name: String? = nil, status: String,
                 flags: [String] = [], ephemeral: Bool = false, model: String? = nil, originator: String? = nil,
-                recencyAt: Double? = nil) {
+                recencyAt: Double? = nil, createdAt: Double? = nil) {
         self.id = id
         self.path = path
         self.cwd = cwd
@@ -31,6 +33,7 @@ public struct CodexThreadInfo: Equatable, Sendable {
         self.model = model
         self.originator = originator
         self.recencyAt = recencyAt
+        self.createdAt = createdAt
     }
 
     public static func parse(_ v: JSONValue) -> CodexThreadInfo? {
@@ -46,7 +49,8 @@ public struct CodexThreadInfo: Equatable, Sendable {
             ephemeral: v["ephemeral"]?.bool ?? true,
             model: v["model"]?.string,
             originator: v["originator"]?.string,
-            recencyAt: v["recencyAt"]?.double ?? v["updatedAt"]?.double)
+            recencyAt: v["recencyAt"]?.double ?? v["updatedAt"]?.double,
+            createdAt: v["createdAt"]?.double)
     }
 }
 
