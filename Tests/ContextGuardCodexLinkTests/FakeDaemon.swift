@@ -37,6 +37,8 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
 
     var models: [JSONValue] = [["model": "gpt-5.6-luna", "hidden": false], ["model": "gpt-6-luna", "hidden": false]]
     var config: JSONValue = ["model_auto_compact_token_limit": .null, "mcp_servers": ["docs": ["command": "docs-mcp"]]]
+    /// What `config/read` gives for a folder with a project config of its own; `config` elsewhere.
+    var projectConfig: [String: JSONValue] = [:]
     var judge: Judge = .answer(#"{"verdict":"ready","reason":"pushed and saved"}"#)
     /// Methods that fail, and how.
     var failing: [String: CodexLinkError] = [:]
@@ -175,7 +177,7 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
         case "model/list":
             return page(models, params)
         case "config/read":
-            return ["config": config]
+            return ["config": params["cwd"]?.string.flatMap { projectConfig[$0] } ?? config]
         case "thread/start":
             let judgeId = "01a1c7f9-0000-7000-8000-\(String(format: "%012d", nextId))"
             nextId += 1
