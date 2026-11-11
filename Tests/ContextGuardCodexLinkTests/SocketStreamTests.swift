@@ -25,6 +25,16 @@ final class SocketStreamTests: XCTestCase {
         withExtendedLifetime(b) {}
     }
 
+    func testAReadAfterShutdownEndsAtOnce() throws {
+        let (a, b) = try SocketStream.pair()
+        try b.write(Data("unread".utf8))
+        a.shutdown()
+        let started = Date()
+        XCTAssertEqual(try a.read(), Data())
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
+        XCTAssertEqual(try b.read(), Data(), "the other end sees the end of the stream")
+    }
+
     func testAReadGivesUpAfterItsTimeout() throws {
         let (a, b) = try SocketStream.pair()
         a.setTimeouts(read: 0.2, write: 1)

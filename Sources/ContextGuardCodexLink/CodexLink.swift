@@ -1,5 +1,4 @@
 import ContextGuardCore
-import Darwin
 import Foundation
 
 /// `context-guard codex`: keeps Context Guard's rules running for Codex sessions. It connects to the
