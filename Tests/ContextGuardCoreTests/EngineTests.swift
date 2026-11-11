@@ -189,6 +189,25 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(s.phase, .asking)
     }
 
+    func testCompactNowFarBelowTheThresholdIsNotTakenForAReset() {
+        // Compact Now at 40k, with the question at 300k: nothing fell, so nothing starts over.
+        var s = SessionState.guarded(40_000)
+        Engine.apply(answer(s, .yes, source: .menu), to: &s)
+        Engine.observe(&s, .tokens(40_000), config: config, now: now)
+        XCTAssertEqual(s.phase, .queued)
+        _ = Engine.claimDelivery(&s, via: .step, config: config, nonce: "cg-1", now: now)
+        var r = TranscriptReading.tokens(41_000)
+        r.markersSeen = ["cg-1"]
+        Engine.observe(&s, r, config: config, now: now)
+        XCTAssertEqual(s.phase, .sent)
+        XCTAssertEqual(s.sendReason, .manual)
+        XCTAssertNotNil(s.confirmedAt, "it showed up")
+        Engine.observe(&s, .tokens(30_000), config: config, now: now)
+        XCTAssertEqual(s.phase, .sent, "a small dip")
+        Engine.observe(&s, .tokens(19_000), config: config, now: now)
+        XCTAssertEqual(s.phase, .watching, "under half of where it was sent: a rewind, so it starts over")
+    }
+
     func testCompactNowWhileAskingIsStillCompactNow() {
         var s = SessionState.guarded(310_000, phase: .asking, cycle: 1)
         Engine.apply(answer(s, .yes, source: .menu), to: &s)
