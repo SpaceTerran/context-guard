@@ -372,9 +372,11 @@ public final class CodexLink: @unchecked Sendable {
 
         case .deliver(let nonce, let text):
             clearOurQueue(id, daemon)
+            let clientId = CodexClientID.make(nonce: nonce, kind: "save")
             do {
-                try daemon.addToQueue(threadId: id, text: text, clientId: CodexClientID.make(nonce: nonce, kind: "save"), timeout: t)
+                try daemon.addToQueue(threadId: id, text: text, clientId: clientId, timeout: t)
                 log.write("\(short(id)): sent the save message (\(nonce))")
+                startIfHeld(id, clientId: clientId, daemon)
             } catch let e as CodexLinkError where e.isRefusal {
                 noteMissing(e, "thread/queue/add")
                 runner.refused(threadId: id, nonce: nonce)
@@ -387,9 +389,11 @@ public final class CodexLink: @unchecked Sendable {
 
         case .continue(let nonce, let text):
             clearOurQueue(id, daemon)
+            let clientId = CodexClientID.make(nonce: nonce, kind: "continue")
             do {
-                try daemon.addToQueue(threadId: id, text: text, clientId: CodexClientID.make(nonce: nonce, kind: "continue"), timeout: t)
+                try daemon.addToQueue(threadId: id, text: text, clientId: clientId, timeout: t)
                 log.write("\(short(id)): sent the continue message")
+                startIfHeld(id, clientId: clientId, daemon)
             } catch let e as CodexLinkError where e.isRefusal {
                 noteMissing(e, "thread/queue/add")
                 log.write("\(short(id)): Codex refused the continue message: \(e)")
@@ -449,6 +453,29 @@ public final class CodexLink: @unchecked Sendable {
             if (try? daemon.removeFromQueue(threadId: id, itemId: item.id, timeout: options.callTimeout)) != nil {
                 log.write("\(short(id)): took an older message of ours out of its queue")
             }
+        }
+    }
+
+    /// Codex holds its queue after you stop a turn (Esc), so a message added between turns waits
+    /// there, and the terminal doesn't show it. Ours is started when nothing of yours waits ahead
+    /// of it: you agreed to it after stopping. Yours ahead of it stay held for you to send, and
+    /// ours runs after them.
+    func startIfHeld(_ id: String, clientId: String, _ daemon: CodexDaemon) {
+        let t = options.callTimeout
+        guard let items = try? daemon.queuedItems(threadId: id, timeout: t),
+              let at = items.firstIndex(where: { $0.clientUserMessageId == clientId }) else { return }
+        guard !items[..<at].contains(where: { !CodexClientID.isOurs($0.clientUserMessageId) }) else {
+            log.write("\(short(id)): Codex is holding its queue; ours waits behind yours")
+            return
+        }
+        // A turn that started since takes it from the queue by itself.
+        guard let info = try? daemon.readThread(id, timeout: t), info.status == "idle" else { return }
+        do {
+            try daemon.startQueued(threadId: id, itemId: items[at].id, timeout: t)
+            log.write("\(short(id)): Codex was holding its queue; started ours")
+        } catch {
+            // Left queued: it runs when the queue moves, or counts as lost and goes again.
+            log.write("\(short(id)): starting ours from the queue: \(describe(error))")
         }
     }
 

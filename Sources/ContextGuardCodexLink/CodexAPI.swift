@@ -166,6 +166,12 @@ extension CodexDaemon {
         ], timeout: timeout)
     }
 
+    /// Starts a queued item now, as Codex does with the next one when a turn ends. Codex holds its
+    /// queue after you stop a turn.
+    public func startQueued(threadId: String, itemId: String, timeout: TimeInterval) throws {
+        _ = try call("thread/queue/start", ["threadId": .string(threadId), "queuedSubmissionId": .string(itemId)], timeout: timeout)
+    }
+
     public func removeFromQueue(threadId: String, itemId: String, timeout: TimeInterval) throws {
         _ = try call("thread/queue/delete", ["threadId": .string(threadId), "queuedSubmissionId": .string(itemId)], timeout: timeout)
     }

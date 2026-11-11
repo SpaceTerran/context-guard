@@ -117,6 +117,81 @@ final class CodexLinkTests: XCTestCase {
         XCTAssertEqual(state?.followUp?.stage, .done)
         try pass()
         XCTAssertEqual(queued.count, 2, "the save message and continue, once each")
+        XCTAssertTrue(daemon.calls("thread/queue/start").isEmpty, "both started by themselves")
+    }
+
+    // MARK: - Codex holding its queue (after Esc)
+
+    /// At 160k, you said Yes, with Codex holding its queue.
+    func yesWhileCodexHoldsItsQueue() throws {
+        try configure()
+        log.append(CodexLine.turn("two", reply: "ok", tokens: 160_000))
+        try pass()
+        try answerYes()
+        daemon.pause(id)
+    }
+
+    func testASaveMessageCodexHoldsIsStarted() throws {
+        try yesWhileCodexHoldsItsQueue()
+        try pass()
+        let item = try XCTUnwrap(daemon.calls("thread/queue/add").first)
+        XCTAssertEqual(state?.phase, .sent)
+        let started = try XCTUnwrap(daemon.calls("thread/queue/start").first)
+        XCTAssertEqual(started["threadId"]?.string, id)
+        XCTAssertNotNil(started["queuedSubmissionId"]?.string, "ours by its id, nothing else")
+        XCTAssertTrue(daemon.queue(id).isEmpty)
+        XCTAssertEqual(item["clientUserMessageId"]?.string, CodexClientID.make(nonce: try XCTUnwrap(state?.sentNonce), kind: "save"))
+    }
+
+    func testYoursHeldAheadOfItStayFirst() throws {
+        try yesWhileCodexHoldsItsQueue()
+        let yours = daemon.queueYours(id)
+        try pass()
+        XCTAssertTrue(daemon.calls("thread/queue/start").isEmpty, "yours are yours to send")
+        XCTAssertEqual(daemon.queue(id).count, 2)
+        XCTAssertEqual(daemon.queue(id).first?["id"]?.string, yours)
+
+        // Never seen: sent once more, still behind yours.
+        clock.advance(31)
+        try settle(40)
+        try pass()
+        XCTAssertEqual(state?.resendCount, 1)
+        XCTAssertEqual(daemon.calls("thread/queue/add").count, 2)
+        XCTAssertEqual(daemon.queue(id).map { $0["id"]?.string }.first, yours)
+        XCTAssertEqual(daemon.queue(id).count, 2, "the older copy taken out")
+        XCTAssertTrue(daemon.calls("thread/queue/start").isEmpty)
+    }
+
+    func testOneATurnTookIsLeftAlone() throws {
+        try yesWhileCodexHoldsItsQueue()
+        daemon.onCall = { [daemon, id] method, _ in
+            if method == "thread/queue/list", !daemon.calls("thread/queue/add").isEmpty { daemon.setStatus(id, "active") }
+        }
+        try pass()
+        XCTAssertTrue(daemon.calls("thread/queue/start").isEmpty, "a turn started since")
+    }
+
+    func testACodexThatCantStartItLeavesItQueued() throws {
+        try yesWhileCodexHoldsItsQueue()
+        daemon.failing["thread/queue/start"] = .rpc(code: -32600, message: "Invalid request: unknown variant `thread/queue/start`")
+        try pass()
+        XCTAssertEqual(state?.phase, .sent)
+        XCTAssertNil(link.currentObserveOnly, "only that one step is missing")
+        XCTAssertEqual(daemon.queue(id).count, 1)
+    }
+
+    func testAContinueMessageCodexHoldsIsStarted() throws {
+        let nonce = try sendTheSaveMessage()
+        try finishSaving()
+        try pass()
+        log.append(CodexLine.compactionTurn(after: 18_000))
+        daemon.setStatus(id, "idle")
+        daemon.pause(id)
+        try settle()
+        try pass()
+        XCTAssertEqual(queued.last?.clientId, CodexClientID.make(nonce: nonce, kind: "continue"))
+        XCTAssertEqual(daemon.calls("thread/queue/start").count, 1)
+        XCTAssertTrue(daemon.queue(id).isEmpty)
     }
 
     func testATurnStartedWhileItWasJudgedHoldsTheCompaction() throws {
