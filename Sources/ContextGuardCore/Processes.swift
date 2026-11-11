@@ -1,12 +1,12 @@
-import Darwin
 import Foundation
 
 public struct ProcessIdentity: Equatable, Sendable {
     public var start: ProcessStart
-    /// Has a controlling terminal (interactive sessions do; SDK and headless ones don't).
-    public var hasTTY: Bool
+    /// Has a controlling terminal (interactive sessions do; SDK and headless ones don't). nil where
+    /// processes have none (Windows), so something else has to tell.
+    public var hasTTY: Bool?
 
-    public init(start: ProcessStart, hasTTY: Bool) {
+    public init(start: ProcessStart, hasTTY: Bool?) {
         self.start = start
         self.hasTTY = hasTTY
     }
@@ -22,23 +22,6 @@ extension ProcessProbing {
         guard let id = identity(of: pid) else { return false }
         guard let start else { return true }
         return id.start == start
-    }
-}
-
-public struct SystemProcessProbe: ProcessProbing {
-    public init() {}
-
-    public func identity(of pid: Int32) -> ProcessIdentity? {
-        guard pid > 0 else { return nil }
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0, info.kp_proc.p_pid == pid else { return nil }
-        let tv = info.kp_proc.p_un.__p_starttime
-        let tdev = info.kp_eproc.e_tdev
-        return ProcessIdentity(
-            start: ProcessStart(seconds: Int(tv.tv_sec), microseconds: Int(tv.tv_usec)),
-            hasTTY: tdev != -1 && tdev != 0)
     }
 }
 

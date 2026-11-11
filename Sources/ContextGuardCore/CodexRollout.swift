@@ -84,7 +84,7 @@ public enum CodexRollout {
     static let maxMetaLine = 1 << 20
 
     public static func meta(path: String) -> CodexMeta? {
-        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        guard let handle = SharedFile.openForReading(path) else { return nil }
         defer { try? handle.close() }
         guard let head = try? handle.read(upToCount: maxMetaLine),
               let end = head.firstIndex(of: UInt8(ascii: "\n")),

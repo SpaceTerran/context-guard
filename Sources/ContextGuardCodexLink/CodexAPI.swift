@@ -1,5 +1,4 @@
 import ContextGuardCore
-import CryptoKit
 import Foundation
 
 /// A thread as `thread/read` or `thread/started` describes it.
@@ -106,8 +105,7 @@ public enum CodexClientID {
 
     /// The same nonce and kind always give the same id.
     public static func make(nonce: String, kind: String) -> String {
-        let digest = Array(SHA256.hash(data: Data("context-guard \(kind) \(nonce)".utf8)))
-        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        let hex = Digest.hex(Digest.sha256(Data("context-guard \(kind) \(nonce)".utf8)))
         func part(_ from: Int, _ length: Int) -> Substring {
             let start = hex.index(hex.startIndex, offsetBy: from)
             return hex[start..<hex.index(start, offsetBy: length)]

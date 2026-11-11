@@ -1,4 +1,9 @@
+import ContextGuardCore
+#if canImport(Darwin)
 import Darwin
+#elseif os(Windows)
+import WinSDK
+#endif
 import Foundation
 
 /// What the app server sends that isn't a reply to a request.
@@ -36,6 +41,11 @@ public struct CodexSocketConnector: CodexConnecting {
     }
 
     public static func defaultSocketPath(_ env: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        #if os(Windows)
+        // `%USERPROFILE%\.codex` unless CODEX_HOME says otherwise; Windows separators throughout.
+        let home = env["CODEX_HOME"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory() + "\\.codex"
+        return PathRules.native(home) + "\\app-server-control\\app-server-control.sock"
+        #else
         let home: String
         if let codexHome = env["CODEX_HOME"], !codexHome.isEmpty {
             home = (codexHome as NSString).expandingTildeInPath
@@ -43,14 +53,27 @@ public struct CodexSocketConnector: CodexConnecting {
             home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
         }
         return (home as NSString).appendingPathComponent("app-server-control/app-server-control.sock")
+        #endif
     }
 
-    /// A socket is there. Codex 0.167.1 keeps the socket itself under `/private/tmp/codex-daemon-<uid>/`
-    /// and links to it from `app-server-control/`, so the link is followed.
+    /// A socket is there. On the Mac, Codex 0.167.1 keeps the socket itself under
+    /// `/private/tmp/codex-daemon-<uid>/` and links to it from `app-server-control/`, so the link is
+    /// followed. On Windows the socket is the file itself: a reparse point tagged as a Unix socket.
     public func available() -> Bool {
+        #if os(Windows)
+        var data = WIN32_FIND_DATAW()
+        let h = socketPath.withCString(encodedAs: UTF16.self) { FindFirstFileW($0, &data) }
+        guard let h, h != INVALID_HANDLE_VALUE else { return false }
+        FindClose(h)
+        return data.dwFileAttributes & DWORD(FILE_ATTRIBUTE_REPARSE_POINT) != 0 && data.dwReserved0 == Self.unixSocketTag
+        #else
         var st = stat()
         return stat(socketPath, &st) == 0 && (st.st_mode & S_IFMT) == S_IFSOCK
+        #endif
     }
+
+    /// `IO_REPARSE_TAG_AF_UNIX`.
+    static let unixSocketTag: UInt32 = 0x8000_0023
 
     public func connect(onEvent: @escaping @Sendable (CodexEvent) -> Void) throws -> CodexDaemon {
         let stream = try SocketStream.connect(unixPath: socketPath)

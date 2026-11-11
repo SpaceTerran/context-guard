@@ -63,21 +63,46 @@ final class CodexAPITests: XCTestCase {
     }
 
     func testTheSocketIsFoundInCodexsHome() {
+        #if os(Windows)
+        XCTAssertEqual(CodexSocketConnector.defaultSocketPath(["CODEX_HOME": "C:/ch/"]), "C:\\ch\\app-server-control\\app-server-control.sock")
+        XCTAssertEqual(CodexSocketConnector.defaultSocketPath([:]), NSHomeDirectory() + "\\.codex\\app-server-control\\app-server-control.sock")
+        XCTAssertFalse(CodexSocketConnector(socketPath: "C:\\nonexistent\\x.sock").available())
+        // A file that isn't a socket isn't one.
+        XCTAssertFalse(CodexSocketConnector(socketPath: ProcessInfo.processInfo.arguments[0]).available())
+        #else
         XCTAssertEqual(CodexSocketConnector.defaultSocketPath(["CODEX_HOME": "/tmp/ch"]), "/tmp/ch/app-server-control/app-server-control.sock")
         XCTAssertTrue(CodexSocketConnector.defaultSocketPath([:]).hasSuffix("/.codex/app-server-control/app-server-control.sock"))
         XCTAssertFalse(CodexSocketConnector(socketPath: "/nonexistent/x.sock").available())
         // A file that isn't a socket isn't one.
         XCTAssertFalse(CodexSocketConnector(socketPath: "/etc/hosts").available())
+        #endif
     }
 
+    func testAListeningSocketIsFound() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cg-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("app-server-control.sock").path
+        XCTAssertFalse(CodexSocketConnector(socketPath: path).available(), "not there yet")
+        let listener = try SocketListener(path: path)
+        XCTAssertTrue(CodexSocketConnector(socketPath: path).available())
+        XCTAssertNoThrow(try SocketStream.connect(unixPath: path).close())
+        listener.close()
+        XCTAssertFalse(CodexSocketConnector(socketPath: path).available(), "gone with its listener")
+        let file = dir.appendingPathComponent("plain").path
+        XCTAssertTrue(FileManager.default.createFile(atPath: file, contents: Data("x".utf8)))
+        XCTAssertFalse(CodexSocketConnector(socketPath: file).available(), "a plain file")
+    }
+
+    #if !os(Windows)
     func testASocketLinkedFromCodexsHomeIsFound() throws {
         // Codex 0.167.1: app-server-control.sock is a symlink to the socket in /private/tmp.
         let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cg-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let real = dir.appendingPathComponent("s").path
-        let fd = try listen(at: real)
-        defer { Darwin.close(fd) }
+        let listener = try SocketListener(path: real)
+        defer { listener.close() }
         let link = dir.appendingPathComponent("app-server-control.sock").path
         try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
         XCTAssertTrue(CodexSocketConnector(socketPath: real).available())
@@ -91,25 +116,7 @@ final class CodexAPITests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: dangling, withDestinationPath: dir.appendingPathComponent("gone").path)
         XCTAssertFalse(CodexSocketConnector(socketPath: dangling).available())
     }
-
-    /// A listening Unix socket at `path`.
-    func listen(at path: String) throws -> Int32 {
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw POSIXError(.EIO) }
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
-            path.utf8CString.withUnsafeBytes { raw.copyMemory(from: $0) }
-        }
-        let bound = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
-        }
-        guard bound == 0, Darwin.listen(fd, 1) == 0 else {
-            Darwin.close(fd)
-            throw POSIXError(.EADDRINUSE)
-        }
-        return fd
-    }
+    #endif
 
     func testAConnectorWithNoAppServerFailsToConnect() {
         XCTAssertThrowsError(try CodexSocketConnector(socketPath: "/nonexistent/x.sock").connect(onEvent: { _ in }))

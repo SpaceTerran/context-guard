@@ -33,7 +33,7 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
         var parts: [String] = []
         if let n = state.name ?? registry?.name, !n.isEmpty, n != title { parts.append(n) }
         if let cwd = state.cwd ?? registry?.cwd, !cwd.isEmpty {
-            parts.append((cwd as NSString).abbreviatingWithTildeInPath)
+            parts.append(PathRules.abbreviatingHome(cwd))
         }
         return parts.joined(separator: " · ")
     }

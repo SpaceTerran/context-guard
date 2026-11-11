@@ -1,5 +1,7 @@
 import ContextGuardCore
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// A running `codex` terminal app.
@@ -32,7 +34,7 @@ public enum CodexAttachment {
     static let otherCommands: Set<String> = [
         "exec", "e", "app-server", "mcp", "mcp-server", "login", "logout", "completion", "delete", "apply", "a",
         "sandbox", "debug", "cloud", "features", "help", "update", "generate-ts", "responses-api-proxy",
-        "stdio-to-uds", "proto", "doctor", "archive", "unarchive",
+        "stdio-to-uds", "proto", "doctor", "archive", "unarchive", "exec-server",
     ]
     /// Options that take a value, so the value isn't read as a subcommand or prompt.
     static let valueOptions: Set<String> = [
@@ -80,8 +82,12 @@ public enum CodexAttachment {
                 value = String(a.dropFirst(2))
             }
             if let value {
+                #if os(Windows)
+                let full = (value as NSString).isAbsolutePath ? value : p.cwd + "\\" + value
+                #else
                 let expanded = (value as NSString).expandingTildeInPath
                 let full = expanded.hasPrefix("/") ? expanded : (p.cwd as NSString).appendingPathComponent(expanded)
+                #endif
                 return resolved(full)
             }
             i += 1
@@ -96,10 +102,16 @@ public enum CodexAttachment {
         return w[1]
     }
 
+    /// The folder's real path: links followed; on Windows also its real case, `\\` separators and no
+    /// trailing one.
     public static func resolved(_ path: String) -> String {
+        #if os(Windows)
+        return WindowsPaths.resolved(path)
+        #else
         guard let real = realpath(path, nil) else { return (path as NSString).standardizingPath }
         defer { free(real) }
         return String(cString: real)
+        #endif
     }
 
     /// For each thread: a terminal has it open. Each terminal shows one session, the first of:
@@ -120,9 +132,9 @@ public enum CodexAttachment {
                 continue
             }
             guard let cwd = th.cwd, !cwd.isEmpty else { continue }
-            threadsIn[resolved(cwd), default: []].append(th)
+            threadsIn[PathRules.key(resolved(cwd)), default: []].append(th)
         }
-        let folders = terminals.map(sessionFolder)
+        let folders = terminals.map { PathRules.key(sessionFolder($0)) }
         let latestFirst = terminals.indices.sorted {
             (terminals[$0].startedAt ?? -.infinity) > (terminals[$1].startedAt ?? -.infinity)
         }
@@ -151,6 +163,7 @@ public enum CodexAttachment {
     }
 }
 
+#if canImport(Darwin)
 /// The `codex` processes running in a terminal on this Mac.
 public struct SystemCodexTerminals: CodexTerminalProbing {
     public init() {}
@@ -158,7 +171,7 @@ public struct SystemCodexTerminals: CodexTerminalProbing {
     public func terminals() -> [CodexTerminalProcess] {
         let probe = SystemProcessProbe()
         return Self.pids().compactMap { pid in
-            guard let name = Self.name(pid), Self.isCodexProgram(name), let id = probe.identity(of: pid), id.hasTTY,
+            guard let name = Self.name(pid), Self.isCodexProgram(name), let id = probe.identity(of: pid), id.hasTTY == true,
                   let args = Self.arguments(pid), CodexAttachment.isTerminalApp(args),
                   let cwd = Self.cwd(pid) else { return nil }
             let started = Double(id.start.seconds) + Double(id.start.microseconds) / 1_000_000
@@ -219,3 +232,4 @@ public struct SystemCodexTerminals: CodexTerminalProbing {
         return args.isEmpty ? nil : args
     }
 }
+#endif

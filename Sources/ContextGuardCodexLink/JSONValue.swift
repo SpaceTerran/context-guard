@@ -81,12 +81,16 @@ extension JSONValue {
 
     public static func parse(_ text: String) throws -> JSONValue { try parse(Data(text.utf8)) }
 
+    /// What JSONSerialization makes `true` and `false` into (`__NSCFBoolean` on both platforms), so
+    /// they aren't taken for 1 and 0. Numbers never come out as it.
+    private static let booleanType = type(of: NSNumber(value: true))
+
     static func from(_ any: Any) -> JSONValue {
         switch any {
         case is NSNull:
             return .null
         case let n as NSNumber:
-            if CFGetTypeID(n) == CFBooleanGetTypeID() { return .bool(n.boolValue) }
+            if type(of: n) == booleanType { return .bool(n.boolValue) }
             return .number(n.doubleValue)
         case let s as String:
             return .string(s)
