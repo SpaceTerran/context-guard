@@ -170,7 +170,8 @@ Codex hook or plugin to install. The link:
 - asks the judge whether the session has finished saving.
 
 It connects only while a Codex terminal has run in the last 5 minutes, and never starts or stops
-Codex's server.
+Codex's server. It doesn't care which terminal you use (tested in Warp and Terminal): it talks to
+Codex's server, not to the terminal.
 
 **The judge.** Haiku isn't available to Codex, so the judge is OpenAI's smallest model,
 **gpt-6-luna** (or gpt-5.6-luna, else the session's own model), at low effort. It runs as a
