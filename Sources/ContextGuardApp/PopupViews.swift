@@ -1,7 +1,8 @@
 import ContextGuardCore
 import SwiftUI
 
-/// The question: "Context at 302k … Compact this session?" with Turn Off, Wait, Compact.
+/// The question: "Context at 302k … Compact this session?" with Turn Off, Wait, Compact. A Codex
+/// session's sizes are shares of its window first: "Context at 62% (160k)".
 struct QuestionView: View {
     let model: AppModel
     let sessionID: String
@@ -18,15 +19,16 @@ struct QuestionView: View {
             HStack(alignment: .top, spacing: 12) {
                 AppBadge(size: 38)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Context at \(model.tokensText(info))")
+                    Text("Context at \(model.sizeText(info))")
                         .font(Theme.font(14, .bold))
                         .foregroundStyle(Theme.heading)
                     Text(info.title)
                         .font(Theme.font(13))
                         .foregroundStyle(Theme.text)
                         .lineLimit(1)
-                    if !info.subtitle.isEmpty {
-                        Text(info.subtitle)
+                    let subtitle = model.subtitle(info)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
                             .font(Theme.font(12))
                             .foregroundStyle(Theme.muted)
                             .lineLimit(1)
@@ -42,7 +44,7 @@ struct QuestionView: View {
             if progress == .question {
                 question(info)
             } else {
-                status(progress)
+                status(progress, info)
             }
         }
         .panelCard()
@@ -50,7 +52,8 @@ struct QuestionView: View {
 
     @ViewBuilder
     private func question(_ info: SessionInfo) -> some View {
-        let pastLater = info.state.tokens >= model.config.laterAt
+        let laterAt = model.thresholds(info).laterAt
+        let pastLater = info.state.tokens >= laterAt
         VStack(alignment: .leading, spacing: 6) {
             Text(questionText(info))
                 .foregroundStyle(Theme.text)
@@ -80,9 +83,9 @@ struct QuestionView: View {
                     .buttonStyle(BrandButtonStyle(kind: .secondary))
                     .help("Don't ask again until this session compacts")
             } else {
-                Button("Wait until \(Format.tokens(model.config.laterAt))") { model.answer(sessionID, .later, from: .popup) }
+                Button("Wait until \(info.shortSize(laterAt))") { model.answer(sessionID, .later, from: .popup) }
                     .buttonStyle(BrandButtonStyle(kind: .secondary))
-                    .help("Compact by itself when this session reaches \(Format.tokens(model.config.laterAt))")
+                    .help("Compact by itself when this session reaches \(info.size(laterAt))")
             }
             Button("Compact") { model.answer(sessionID, .yes, from: .popup) }
                 .buttonStyle(BrandButtonStyle(kind: .primary))
@@ -94,18 +97,21 @@ struct QuestionView: View {
     private func countdownText(_ info: SessionInfo, deadline: Date, now: Date) -> String {
         let left = Int(deadline.timeIntervalSince(now).rounded(.up))
         if left > 0 { return "Compacts in \(Format.seconds(left)) unless you answer" }
-        // The hook sends it: at the session's next step, or now if it's waiting in the background.
-        return info.isIdle && !info.waiterAlive ? "Starts when this session next runs" : "Starting…"
+        // It goes out at the session's next step (or when its turn ends), or now if it can be reached.
+        guard info.isIdle, !info.reachableNow else { return "Starting…" }
+        return info.host == .codex ? "Starts \(info.host.whenOutOfReach)" : "Starts when this session next runs"
     }
 
     private func questionText(_ info: SessionInfo) -> String {
         let base = "Compact this session? It saves its work first."
-        // Rare: no background hook is waiting (it timed out), so an idle session hears it on its next turn.
-        guard info.isIdle, !info.waiterAlive else { return base }
+        // Rare: no background hook is waiting (it timed out), so an idle session hears it on its next
+        // turn; a Codex session no terminal shows hears it once one does.
+        guard info.isIdle, !info.reachableNow else { return base }
+        if info.host == .codex { return base + " No terminal shows it, so it starts when one does." }
         return base + " It's idle, so it starts when it next runs."
     }
 
-    private func status(_ progress: QuestionProgress) -> some View {
+    private func status(_ progress: QuestionProgress, _ info: SessionInfo) -> some View {
         HStack(spacing: 8) {
             // One fixed slot, so the text stays put as the spinner turns into a check.
             Group {
@@ -122,20 +128,20 @@ struct QuestionView: View {
             }
             .font(.system(size: 13, weight: .semibold))
             .frame(width: 18, height: 18)
-            Text(statusText(progress))
+            Text(statusText(progress, info))
                 .foregroundStyle(Theme.text)
         }
         .font(Theme.font(12))
         .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
     }
 
-    private func statusText(_ progress: QuestionProgress) -> String {
+    private func statusText(_ progress: QuestionProgress, _ info: SessionInfo) -> String {
         switch progress {
-        case .nextStep: return "Asking it to save at its next step…"
+        case .nextStep: return "Asking it to save \(info.host.whenBusy)…"
         case .waking: return "Asking it to save…"
-        case .nextRun: return "Asks it to save when it next runs"
+        case .nextRun: return "Asks it to save \(info.host.whenOutOfReach)"
         case .sent: return "Asked it to save, then it compacts"
-        case .scheduled(let at): return "Compacts by itself at \(Format.tokens(at))"
+        case .scheduled(let at): return "Compacts by itself at \(info.size(at))"
         case .question, .closed: return ""
         }
     }

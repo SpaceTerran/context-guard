@@ -1,21 +1,26 @@
 #!/bin/bash
 # Run the app against staged sessions, to look at it without real Claude Code sessions.
 #
-#   live-test/ui-demo.sh start [light|dark]   stage four sessions and launch the debug app on them
-#   live-test/ui-demo.sh phase <A|B|C|D> <phase> [tokens]   change a staged session (as the hook would)
-#   live-test/ui-demo.sh followup <A|B|C|D> <stage> [note] [compacted]  set where compacting stands after
+#   live-test/ui-demo.sh start [light|dark] [no-codex]   stage four Claude Code sessions and a Codex one (E),
+#                                             with a stand-in for `context-guard codex`, and launch the debug app
+#   live-test/ui-demo.sh phase <A-E> <phase> [tokens]   change a staged session (as the hook or the link would)
+#   live-test/ui-demo.sh followup <A-E> <stage> [note] [compacted]  set where compacting stands after
 #                                             the save message (continuing, done and tookOver are always compacted)
-#   live-test/ui-demo.sh watch <A|B|C|D> on|off             watch a staged session's tab, or stop
+#   live-test/ui-demo.sh watch <A-D> on|off   watch a staged Claude Code session's tab, or stop
+#   live-test/ui-demo.sh link connected|waiting|watching|stopped   what the stand-in link says
 #   live-test/ui-demo.sh settings             open Settings (from the menu, through accessibility)
 #   live-test/ui-demo.sh tab <General|When to Ask|Messages>  show a Settings tab (pressed through accessibility)
 #   live-test/ui-demo.sh press "<label>"      press a button or switch in the app's windows, by its label
 #   live-test/ui-demo.sh controls             list the controls in the app's windows and their labels
 #   live-test/ui-demo.sh type "<field>" <text> replace a Settings field's text, typed key by key
 #   live-test/ui-demo.sh windows              list the app's windows (id, bounds) for screenshots
+#   live-test/ui-demo.sh snap <folder> <name>  have the app draw each window to <folder>/<name>-<n>.png
+#                                             (works with the display asleep or the screen locked)
 #   live-test/ui-demo.sh stop
 #
-# Each staged session is "run" by a placeholder `sleep`, and a scratch registry says which are busy.
-# Everything lives in .scratch/ui at the repo root; nothing touches real sessions.
+# Each staged Claude Code session is "run" by a placeholder `sleep`, and a scratch registry says which
+# are busy. The Codex session is live while the stand-in link keeps codex-link.json fresh. Everything
+# lives in .scratch/ui at the repo root; nothing touches real sessions.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -37,6 +42,7 @@ stage() {
   python3 - "$home" "$reg" "$dir" "$@" <<'EOF'
 import json, os, sys, datetime, subprocess
 home, reg, d = sys.argv[1:4]
+codex = "no-codex" not in sys.argv[4:]
 now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 H = os.path.expanduser("~")
 sessions = {
@@ -46,6 +52,9 @@ sessions = {
   "C": dict(title="Fix the flaky login test", name="web-app-21", cwd=f"{H}/code/web-app", tokens=188_400, phase="watching", status="idle", waiter=False),
   "D": dict(title="Move the jobs to Postgres", name="pipeline-b7", cwd=f"{H}/code/pipeline", tokens=341_250, phase="sent", status="idle", waiter=False),
 }
+if codex:
+    # 51% of its window: it asks at 60% (155k).
+    sessions["E"] = dict(title="Add retries to the sync job", cwd=f"{H}/code/sync-service", tokens=131_800, phase="watching", codex=True)
 pids = json.load(open(f"{d}/pids.json"))
 
 def start(pid):
@@ -59,7 +68,17 @@ def start(pid):
     sec, usec = ctypes.c_long.from_buffer(buf, 0).value, ctypes.c_int.from_buffer(buf, 8).value
     return {"seconds": sec, "microseconds": usec}
 for key, s in sessions.items():
-    sid = f"00000000-0000-4000-8000-00000000000{'ABCD'.index(key) + 1}"
+    sid = f"00000000-0000-4000-8000-00000000000{'ABCDE'.index(key) + 1}"
+    if s.get("codex"):
+        state = {
+          "schemaVersion": 1, "sessionId": sid, "host": "codex", "cwd": s["cwd"], "title": s["title"],
+          "tokens": s["tokens"], "tokensAt": now, "updatedAt": now, "guarded": True, "phase": s["phase"], "cycle": 1,
+          "stopsSinceSent": 0, "resendCount": 0, "awaitingCompactionRecord": False, "ended": False,
+          "codex": {"window": 258_400, "model": "gpt-6.1-codex", "originator": "codex-tui", "terminal": True,
+                    "status": "idle", "statusAt": now, "loaded": True, "attached": True},
+        }
+        json.dump(state, open(f"{home}/sessions/{sid}.json", "w"), indent=2)
+        continue
     state = {
       "schemaVersion": 1, "sessionId": sid, "cwd": s["cwd"], "title": s["title"], "name": s["name"],
       "tokens": s["tokens"], "tokensAt": now, "updatedAt": now, "lastEvent": "Stop",
@@ -88,21 +107,32 @@ case "$cmd" in
       nohup sleep 86400 >/dev/null 2>&1 &
       printf '"%s": %d,\n' "$k" $! >> "$dir/pids.json"
     done
+    if [ "${3:-}" != no-codex ]; then
+      "$0" link connected
+      # The stand-in for `context-guard codex`: keeps codex-link.json fresh, saying what link.json says.
+      nohup bash -c 'while :; do jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ".at = \$at" "$1/link.json" > "$2.tmp" && mv "$2.tmp" "$2"; sleep 4; done' \
+        _ "$dir" "$home/codex-link.json" >/dev/null 2>&1 &
+      printf '"link": %d,\n' $! >> "$dir/pids.json"
+    fi
     printf '"_": 0}\n' >> "$dir/pids.json"
-    stage
+    stage "${3:-}"
     # Launch arguments set the appearance for this app only: Aqua-only for light, Dark for dark.
     if [ "${2:-light}" = dark ]; then look=(-AppleInterfaceStyle Dark); else look=(-NSRequiresAquaSystemAppearance YES); fi
-    CONTEXT_GUARD_HOME="$home" CONTEXT_GUARD_REGISTRY="$reg" nohup "$app" "${look[@]}" > "$dir/app.log" 2>&1 &
+    CONTEXT_GUARD_HOME="$home" CONTEXT_GUARD_REGISTRY="$reg" CONTEXT_GUARD_SNAPSHOTS="$dir/snaps" \
+      nohup "$app" "${look[@]}" > "$dir/app.log" 2>&1 &
     echo $! > "$dir/app.pid"
     echo "app pid $(cat "$dir/app.pid"), home $home"
     ;;
   phase)
-    key="${2:?A|B|C|D}"; phase="${3:?phase}"; tokens="${4:-}"
+    key="${2:?A-E}"; phase="${3:?phase}"; tokens="${4:-}"
     f="$home/sessions/00000000-0000-4000-8000-00000000000$(( $(printf '%d' "'$key") - 64 )).json"
-    jq --arg p "$phase" --arg t "$tokens" '.phase = $p | (if $t != "" then .tokens = ($t | tonumber) else . end)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    # A question starts its countdown when it's asked.
+    jq --arg p "$phase" --arg t "$tokens" --arg now "$now" '.phase = $p | (if $t != "" then .tokens = ($t | tonumber) else . end)
+        | (if $p == "asking" and .askedAt == null then .askedAt = $now | .askedTokens = .tokens else . end)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
     ;;
   followup)
-    key="${2:?A|B|C|D}"; stage="${3:?stage}"; note="${4:-}"; compacted="${5:-}"
+    key="${2:?A-E}"; stage="${3:?stage}"; note="${4:-}"; compacted="${5:-}"
     f="$home/sessions/00000000-0000-4000-8000-00000000000$(( $(printf '%d' "'$key") - 64 )).json"
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     case "$stage" in continuing|done|tookOver) compacted=compacted ;; esac
@@ -110,6 +140,18 @@ case "$cmd" in
         nonce: (.sentNonce // ("cg-demo-" + .name)), stage: $s, startedAt: $now, stageAt: $now,
         tokensBefore: .tokens, tokensAfter: 24100} + (if $n != "" then {note: $n} else {} end)
         + (if $c != "" then {compactedAt: $now} else {} end)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    ;;
+  link)
+    agent='"serverVersion": "codex-tui/0.167.1 (Mac OS 27.2.0; arm64)", "judgeModel": "gpt-6-luna"'
+    case "${2:?connected|waiting|watching|stopped}" in
+      connected) body="\"connected\": true, $agent" ;;
+      waiting) body='"connected": false' ;;
+      watching) body="\"connected\": true, $agent, \"observeOnly\": \"this Codex has no thread/queue/add\"" ;;
+      stopped) body='"connected": false, "stopped": true' ;;
+      *) echo "unknown link state $2" >&2; exit 1 ;;
+    esac
+    printf '{"at": "%s", %s}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$body" > "$dir/link.json"
+    cp "$dir/link.json" "$home/codex-link.json"
     ;;
   watch)
     key="${2:?A|B|C|D}"
@@ -139,6 +181,18 @@ case "$cmd" in
     ;;
   windows)
     swift "$here/windows.swift" ContextGuardApp
+    ;;
+  snap)
+    out="${2:?folder}"; name="${3:?name}"
+    rm -rf "$dir/snaps"; mkdir -p "$out"
+    kill -USR1 "$(cat "$dir/app.pid")"
+    for _ in $(seq 50); do [ -f "$dir/snaps/index.txt" ] && break; sleep 0.1; done
+    [ -f "$dir/snaps/index.txt" ] || { echo "the app wrote nothing (a debug build started by this script?)" >&2; exit 1; }
+    n=0
+    while IFS=$'\t' read -r file kind title frame; do
+      n=$((n + 1)); cp "$dir/snaps/$file" "$out/$name-$n.png"
+      echo "$out/$name-$n.png  $kind  ${title:-(no title)}  $frame"
+    done < "$dir/snaps/index.txt"
     ;;
   stop)
     [ -f "$dir/app.pid" ] && kill "$(cat "$dir/app.pid")" 2>/dev/null || true

@@ -70,6 +70,27 @@ final class StatusTextTests: XCTestCase {
         XCTAssertEqual(StatusText.ago(10_800), "3 h ago")
     }
 
+    func testAStateForSettings() {
+        XCTAssertEqual(CodexLinkStatus.state(nil, now: now), .notRunning)
+        XCTAssertEqual(CodexLinkStatus.state(CodexLinkStatus(at: now.addingTimeInterval(-60), connected: true), now: now), .notRunning)
+        XCTAssertEqual(CodexLinkStatus.state(CodexLinkStatus(at: now, connected: true, stopped: true), now: now), .notRunning)
+        XCTAssertEqual(CodexLinkStatus.state(CodexLinkStatus(at: now, connected: false, lastError: "refused"), now: now), .waiting)
+        XCTAssertEqual(CodexLinkStatus.state(CodexLinkStatus(at: now, connected: true), now: now), .connected)
+        XCTAssertEqual(CodexLinkStatus.state(CodexLinkStatus(at: now, connected: true, observeOnly: "no thread/queue/add"), now: now),
+                       .onlyWatching("no thread/queue/add"))
+    }
+
+    func testSizesAsEachToolCountsThem() {
+        XCTAssertEqual(claude(302_517).size(302_517), "302k")
+        XCTAssertEqual(codex(160_000).size(160_000), "61% (160k)")
+        XCTAssertEqual(codex(160_000).size(155_039), "59% (155k)", "rounds down, never early")
+        XCTAssertEqual(codex(160_000, window: nil).size(160_000), "160k", "no window yet")
+        XCTAssertEqual(codex(160_000).shortSize(206_720), "80%")
+        XCTAssertEqual(claude(40_000).shortSize(500_000), "500k")
+        XCTAssertEqual(SessionHost.claude.whenOutOfReach, "when it next runs")
+        XCTAssertEqual(SessionHost.codex.whenOutOfReach, "when a terminal shows it")
+    }
+
     func testALinkWithNoSessionsYet() {
         let lines = StatusText.lines(config: Config(), sessions: [], link: CodexLinkStatus(at: now, connected: false), now: now)
         XCTAssertEqual(lines.last, "No running sessions seen yet.")

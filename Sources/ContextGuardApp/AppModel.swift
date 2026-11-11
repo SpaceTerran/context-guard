@@ -13,6 +13,12 @@ final class AppModel {
     private(set) var sessions: [SessionInfo] = []
     /// What you answered in a popup, by session id. The popup shows progress in place of its buttons.
     private(set) var replies: [String: Reply] = [:]
+    /// The Codex link is installed, has run, or has sessions: the menu and Settings show each
+    /// tool's own lines. Otherwise they read as they did before Codex.
+    private(set) var showsCodex = false
+    /// How `context-guard codex` stands, and the model it judges Codex sessions with.
+    private(set) var codexLink = CodexLinkStatus.State.notRunning
+    private(set) var codexJudge: String?
 
     struct Reply: Equatable {
         var cycle: Int
@@ -84,6 +90,12 @@ final class AppModel {
         if newConfig != config { config = newConfig }
         let loaded = SessionCatalog.load(paths, registry: registry)
         if loaded != sessions { sessions = loaded }
+        let link = CodexLinkStatus.load(paths)
+        let linkState = CodexLinkStatus.state(link, now: Date())
+        if linkState != codexLink { codexLink = linkState }
+        if link?.judgeModel != codexJudge { codexJudge = link?.judgeModel }
+        let codex = CodexLinkInstall.isInstalled || link != nil || loaded.contains { $0.host == .codex }
+        if codex != showsCodex { showsCodex = codex }
         if Date() > pruneAt {
             SessionCatalog.prune(paths, sessions: loaded, olderThan: 7 * 86_400)
             pruneAt = Date().addingTimeInterval(3_600)
@@ -104,8 +116,24 @@ final class AppModel {
         info.state.awaitingCompactionRecord ? "compacted" : Format.tokens(info.state.tokens)
     }
 
+    /// The context's size for a popup's heading: for Codex, its share of the window too.
+    func sizeText(_ info: SessionInfo) -> String {
+        info.state.awaitingCompactionRecord ? "compacted" : info.size(info.state.tokens)
+    }
+
+    /// The settings as they apply to this session: Codex's thresholds are shares of its window.
+    func thresholds(_ info: SessionInfo) -> Config { config.resolved(for: info.state) }
+
+    /// Its location line. A Codex session's starts with the tool ("Codex · ~/code"); Claude Code
+    /// sessions' read as they always have.
+    func subtitle(_ info: SessionInfo) -> String {
+        guard info.host == .codex else { return info.subtitle }
+        return info.subtitle.isEmpty ? info.host.name : "\(info.host.name) · \(info.subtitle)"
+    }
+
     func statusText(_ info: SessionInfo) -> String {
-        let ask = Format.tokens(config.askAt), later = Format.tokens(config.laterAt)
+        let c = thresholds(info)
+        let ask = info.size(c.askAt), later = info.size(c.laterAt)
         if info.muted, config.enabled, !isSending(info) { return "Not watching this session" }
         switch info.effectivePhase {
         case .watching:
@@ -117,11 +145,11 @@ final class AppModel {
         case .later:
             return config.enabled ? "Compacts by itself at \(later)" : "Waiting for \(later): paused while off"
         case .queued:
-            if !info.isIdle { return "Asking it to save at its next step" }
-            return info.waiterAlive ? "Asking it to save…" : "Asks it to save when it next runs"
+            if !info.isIdle { return "Asking it to save \(info.host.whenBusy)" }
+            return info.reachableNow ? "Asking it to save…" : "Asks it to save \(info.host.whenOutOfReach)"
         case .sent:
             guard info.state.confirmedAt != nil else { return "Asking it to save…" }
-            return "Asked it to save at \(Format.tokens(info.state.sentTokens ?? info.state.tokens))"
+            return "Asked it to save at \(info.size(info.state.sentTokens ?? info.state.tokens))"
         case .skipped:
             return "Not asking again until it compacts"
         }
@@ -261,12 +289,12 @@ final class AppModel {
         }
         switch action {
         case .skip: return .closed
-        case .later: return .scheduled(at: config.laterAt)
+        case .later: return .scheduled(at: thresholds(info).laterAt)
         case .yes:
             switch info.effectivePhase {
             case .queued:
                 if !info.isIdle { return .nextStep }
-                return info.waiterAlive ? .waking : .nextRun
+                return info.reachableNow ? .waking : .nextRun
             case .sent:
                 return info.state.confirmedAt != nil ? .sent : .waking
             default:
@@ -298,7 +326,7 @@ final class AppModel {
                 if let n = FollowUpText.notice(f, continueMessage: config.continueMessage) {
                     panels.showNotice(key: "notice:\(followUpKey(f))",
                                       NoticeView(symbol: n.symbol, tone: n.tone, title: n.title, detail: info.title,
-                                                 caption: n.reason ?? info.subtitle, captionWraps: n.reason != nil),
+                                                 caption: n.reason ?? subtitle(info), captionWraps: n.reason != nil),
                                       seconds: n.seconds)
                 }
             }
@@ -307,9 +335,9 @@ final class AppModel {
                 // A popup that's still open already shows this send.
                 if !panels.isOpen("question:\(info.id)") {
                     let title = s.sendReason == .later
-                        ? "Reached \(Format.tokens(s.sentTokens ?? s.tokens)): saving, then compacting"
+                        ? "Reached \(info.size(s.sentTokens ?? s.tokens)): saving, then compacting"
                         : "Saving, then compacting"
-                    panels.showNotice(key: "notice:\(nonce)", NoticeView(symbol: "tray.and.arrow.down.fill", tone: .accent, title: title, detail: info.title, caption: info.subtitle))
+                    panels.showNotice(key: "notice:\(nonce)", NoticeView(symbol: "tray.and.arrow.down.fill", tone: .accent, title: title, detail: info.title, caption: subtitle(info)))
                 }
             }
             if let c = s.lastCompaction, c.at > startedAt, c.interruptedPhase != nil, c.trigger != nil {
@@ -317,10 +345,10 @@ final class AppModel {
                 guard !announced.contains(key) else { continue }
                 announced.insert(key)
                 guard c.trigger == "auto" else { continue }
-                let size = c.preTokens.map { " at \(Format.tokens($0))" } ?? ""
+                let size = c.preTokens.map { " at \(info.size($0))" } ?? ""
                 panels.showNotice(key: "notice:\(key)", NoticeView(
                     symbol: "arrow.down.right.and.arrow.up.left.circle.fill", tone: .warning,
-                    title: "Auto-compacted\(size) before it could save", detail: info.title, caption: info.subtitle))
+                    title: "Auto-compacted\(size) before it could save", detail: info.title, caption: subtitle(info)))
             }
         }
     }
@@ -329,11 +357,12 @@ final class AppModel {
 /// What a question popup shows.
 enum QuestionProgress: Equatable {
     case question
-    /// Busy: the hook adds it after the session's next step.
+    /// Busy: the hook adds it after the session's next step (Claude Code), or the link sends it
+    /// when the turn ends (Codex).
     case nextStep
-    /// Idle with a waiter: going out now.
+    /// Idle and reachable now (a waiter, or the link): going out now.
     case waking
-    /// Idle and nothing waiting: it goes out when the session next runs.
+    /// Idle and out of reach: it goes out when the session next runs, or a terminal shows it.
     case nextRun
     case sent
     case scheduled(at: Int)

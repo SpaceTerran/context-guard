@@ -7,11 +7,18 @@ struct MenuContent: View {
 
     var body: some View {
         Toggle("Context Guard On", isOn: Binding(get: { model.config.enabled }, set: { model.setEnabled($0) }))
-        Text("Asks at \(Format.tokens(model.config.askAt)) · Wait until \(Format.tokens(model.config.laterAt))")
+        let c = model.config
+        let claude = "\(Format.tokens(c.askAt)) · Wait until \(Format.tokens(c.laterAt))"
+        if model.showsCodex {
+            Text("Claude Code: asks at \(claude)")
+            Text("Codex: asks at \(c.codexAskPercent)% · Wait until \(c.codexLaterPercent)%")
+        } else {
+            Text("Asks at \(claude)")
+        }
         Divider()
         let sessions = model.liveSessions
         if sessions.isEmpty {
-            Text("No Claude Code sessions running")
+            Text("No sessions running")
         } else {
             Section("Sessions") {
                 ForEach(sessions) { info in
@@ -35,14 +42,16 @@ struct SessionMenu: View {
         Menu {
             Text(model.statusText(info))
             if let followUp = model.followUpText(info) { Text(followUp) }
-            if !info.subtitle.isEmpty { Text(info.subtitle) }
+            let subtitle = model.subtitle(info)
+            if !subtitle.isEmpty { Text(subtitle) }
             Divider()
             // Asks the session to save, then compacts it, even with Context Guard off or the tab unwatched.
             Button("Compact Now") { model.answer(info.id, .yes, from: .menu) }
                 .disabled(!model.canCompactNow(info))
             if info.effectivePhase == .asking {
-                if info.state.tokens < model.config.laterAt {
-                    Button("Wait until \(Format.tokens(model.config.laterAt))") { model.answer(info.id, .later, from: .menu) }
+                let laterAt = model.thresholds(info).laterAt
+                if info.state.tokens < laterAt {
+                    Button("Wait until \(info.shortSize(laterAt))") { model.answer(info.id, .later, from: .menu) }
                 } else {
                     Button("Not Now") { model.answer(info.id, .skip, from: .menu) }
                 }

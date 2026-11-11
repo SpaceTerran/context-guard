@@ -60,4 +60,21 @@ public struct CodexLinkStatus: Codable, Equatable, Sendable {
 
     /// The link is running and connected to the app server.
     public func isUp(now: Date) -> Bool { connected && isRunning(now: now) }
+
+    /// Where the link stands, as Settings shows it.
+    public enum State: Equatable, Sendable {
+        case notRunning
+        /// Running, not connected: no Codex terminal lately, or the app server isn't up.
+        case waiting
+        case connected
+        /// Connected, but this Codex lacks something it needs to act (why).
+        case onlyWatching(String)
+    }
+
+    /// nil (no file) reads as not running.
+    public static func state(_ link: CodexLinkStatus?, now: Date) -> State {
+        guard let link, link.isRunning(now: now) else { return .notRunning }
+        guard link.connected else { return .waiting }
+        return link.observeOnly.map(State.onlyWatching) ?? .connected
+    }
 }

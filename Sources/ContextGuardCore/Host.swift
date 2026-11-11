@@ -31,6 +31,15 @@ public enum SessionHost: String, Codable, Sendable, CaseIterable {
         case .codex: return "when this turn ends"
         }
     }
+
+    /// When the save message reaches an idle session nothing can reach right now: Claude Code
+    /// hears it on its next turn; the Codex link sends it once a terminal shows the session.
+    public var whenOutOfReach: String {
+        switch self {
+        case .claude: return "when it next runs"
+        case .codex: return "when a terminal shows it"
+        }
+    }
 }
 
 extension SessionState {
