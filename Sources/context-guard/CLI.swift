@@ -1,3 +1,4 @@
+import ContextGuardCodexLink
 import ContextGuardCore
 import Darwin
 import Foundation
@@ -5,9 +6,11 @@ import Foundation
 @main
 struct CLI {
     static let usage = """
-    context-guard: Claude Code hook and control for Context Guard
+    context-guard: Claude Code hook, Codex link and control for Context Guard
 
       context-guard hook                         run as a Claude Code hook (reads the event on stdin)
+      context-guard codex [--only-cwd <folder>] [--verbose]
+                                                 keep Codex sessions guarded (runs until stopped; one at a time)
       context-guard status [--json]              list sessions and where each one stands
       context-guard answer <session> yes|later|skip
                                                  answer a session's question (id or id prefix)
@@ -24,6 +27,8 @@ struct CLI {
         switch args.first {
         case "hook":
             runHook(paths: paths, env: env)
+        case "codex":
+            runCodexLink(paths: paths, env: env, args: Array(args.dropFirst()))
         case "status":
             status(paths: paths, json: args.contains("--json"))
         case "answer":
@@ -78,6 +83,55 @@ struct CLI {
             if let text = result.text { FileHandle.standardError.write(Data(text.utf8)) }
             exit(result.exitCode)
         }
+    }
+
+    // MARK: codex
+
+    /// The link to the Codex app server. Runs until SIGTERM or SIGINT. A second copy (for the same
+    /// Context Guard folder) waits for the first to stop, so launchd has nothing to restart.
+    static func runCodexLink(paths: Paths, env: [String: String], args: [String]) -> Never {
+        var options = CodexLink.Options()
+        var verbose = false
+        var i = 0
+        while i < args.count {
+            switch args[i] {
+            case "--only-cwd":
+                guard i + 1 < args.count, !args[i + 1].isEmpty else { fail(usage) }
+                options.onlyCwd = args[i + 1]
+                i += 1
+            case "--verbose":
+                verbose = true
+            default:
+                fail(usage)
+            }
+            i += 1
+        }
+        do { try paths.ensureDirectories() } catch { fail("Couldn't make \(paths.root.path): \(error.localizedDescription)") }
+        let log = CodexLinkLog(url: paths.codexLinkLog, echo: verbose)
+        var lock = FileLock.acquire(paths.codexLinkLock, timeout: 0)
+        if lock == nil {
+            log.write("another context-guard codex is running for \(paths.root.path); waiting for it to stop")
+            lock = FileLock.wait(paths.codexLinkLock)
+        }
+        guard lock != nil else { fail("Couldn't open \(paths.codexLinkLock.path).") }
+
+        let connector = CodexSocketConnector(socketPath: CodexSocketConnector.defaultSocketPath(env))
+        let link = CodexLink(paths: paths, connector: connector, options: options, log: log)
+        // Stopped, it says so in codex-link.json first; one that doesn't stop in time just exits.
+        var stops: [DispatchSourceSignal] = []
+        for sig in [SIGTERM, SIGINT] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+            source.setEventHandler {
+                link.stop()
+                DispatchQueue.global().asyncAfter(deadline: .now() + 5) { exit(0) }
+            }
+            source.resume()
+            stops.append(source)
+        }
+        link.run()
+        withExtendedLifetime((lock, stops)) {}
+        exit(0)
     }
 
     // MARK: mod
@@ -146,26 +200,27 @@ struct CLI {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            let rows = sessions.map(StatusRow.init)
+            let rows = sessions.map { StatusRow($0, config: config.resolved(for: $0.state)) }
             if let data = try? encoder.encode(rows) { print(String(decoding: data, as: UTF8.self)) }
             return
         }
-        print("Context Guard is \(config.enabled ? "on" : "off") · asks at \(Format.tokens(config.askAt)) · compacts at \(Format.tokens(config.laterAt)) when told to wait")
-        let live = sessions.filter(\.isLive)
-        if live.isEmpty { print("No running sessions seen yet."); return }
-        for s in live {
-            let guarded = s.state.guarded ? "" : " (not guarded)"
-            let muted = s.muted ? " (not watching)" : ""
-            let waiter = s.waiterAlive ? " · waiting in background" : ""
-            let follow = s.state.followUp.map { " · compacting: \($0.stage.rawValue)\($0.note.map { " (\($0))" } ?? "")" } ?? ""
-            print("\(s.id.prefix(8))  \(Format.tokens(s.state.tokens).padding(toLength: 6, withPad: " ", startingAt: 0)) \(s.effectivePhase.rawValue.padding(toLength: 9, withPad: " ", startingAt: 0)) \(s.title)\(guarded)\(muted)\(waiter)\(follow)")
-        }
+        for line in StatusText.lines(config: config, sessions: sessions, link: CodexLinkStatus.load(paths)) { print(line) }
     }
 
     struct StatusRow: Encodable {
         var sessionId: String
+        /// `claude` or `codex`.
+        var tool: String
         var title: String
         var tokens: Int
+        /// The session's own window (Codex).
+        var window: Int?
+        /// Its thresholds: Codex's are shares of its window.
+        var askAt: Int
+        var laterAt: Int
+        var reachableNow: Bool
+        /// A terminal shows it (Codex), as far as the link can tell.
+        var attached: Bool?
         var phase: String
         var effectivePhase: String
         var guarded: Bool
@@ -179,10 +234,16 @@ struct CLI {
         var askTimedOut: Bool?
         var followUp: FollowUp?
 
-        init(_ s: SessionInfo) {
+        init(_ s: SessionInfo, config: Config) {
             sessionId = s.id
+            tool = s.host.rawValue
             title = s.title
             tokens = s.state.tokens
+            window = s.state.codex?.window
+            askAt = config.askAt
+            laterAt = config.laterAt
+            reachableNow = s.reachableNow
+            attached = s.state.codex?.attached
             phase = s.state.phase.rawValue
             effectivePhase = s.effectivePhase.rawValue
             guarded = s.state.guarded

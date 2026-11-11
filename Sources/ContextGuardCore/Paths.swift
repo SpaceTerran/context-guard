@@ -49,6 +49,8 @@ public struct Paths: Sendable, Equatable {
     public var codexLinkFile: URL { root.appendingPathComponent("codex-link.json") }
     /// Held by the running `context-guard codex`, so only one runs.
     public var codexLinkLock: URL { root.appendingPathComponent("codex-link.lock") }
+    /// What `context-guard codex` did, newest last (kept under a megabyte, the older part in `.1`).
+    public var codexLinkLog: URL { root.appendingPathComponent("codex-link.log") }
 
     public func ensureDirectories() throws {
         let fm = FileManager.default
