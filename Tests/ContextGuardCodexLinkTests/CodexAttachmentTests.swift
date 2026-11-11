@@ -1,0 +1,105 @@
+import ContextGuardTestSupport
+import XCTest
+@testable import ContextGuardCodexLink
+
+final class CodexAttachmentTests: XCTestCase {
+    let dir = TempDir()
+
+    func terminal(_ args: String..., in cwd: String = "/Users/demo/code") -> CodexTerminalProcess {
+        CodexTerminalProcess(pid: Int32.random(in: 100...9_999), cwd: cwd, args: ["codex"] + args)
+    }
+
+    func thread(_ id: String, in cwd: String? = "/Users/demo/code", at recency: Double = 0, originator: String? = "codex-tui") -> CodexThreadInfo {
+        CodexThreadInfo(id: id, path: "/r/\(id).jsonl", cwd: cwd, status: "idle", originator: originator, recencyAt: recency)
+    }
+
+    func testTheCommandWordsWithoutItsOptions() {
+        XCTAssertEqual(CodexAttachment.words(["codex", "-m", "gpt-6-luna", "resume", "t1"]), ["resume", "t1"])
+        XCTAssertEqual(CodexAttachment.words(["codex", "-c", "model=x", "--full-auto", "fix the tests"]), ["fix the tests"])
+        XCTAssertEqual(CodexAttachment.words(["codex", "--", "-not-an-option"]), ["-not-an-option"])
+        XCTAssertEqual(CodexAttachment.words(["codex"]), [])
+    }
+
+    func testWhichCommandsAreTheTerminalApp() {
+        XCTAssertTrue(CodexAttachment.isTerminalApp(["codex"]))
+        XCTAssertTrue(CodexAttachment.isTerminalApp(["codex", "fix the tests"]), "with a first prompt")
+        XCTAssertTrue(CodexAttachment.isTerminalApp(["codex", "resume", "--last"]))
+        XCTAssertTrue(CodexAttachment.isTerminalApp(["codex", "-m", "exec"]), "a model named like a command")
+        for other in ["exec", "e", "app-server", "mcp-server", "login", "apply", "cloud"] {
+            XCTAssertFalse(CodexAttachment.isTerminalApp(["codex", other, "x"]), other)
+        }
+    }
+
+    func testTheFolderItRunsIn() throws {
+        let work = dir.file("work")
+        try FileManager.default.createDirectory(at: work.appendingPathComponent("app"), withIntermediateDirectories: true)
+        let real = CodexAttachment.resolved(work.path)
+        XCTAssertTrue(real.hasPrefix("/private/"), "the temporary folder's real path")
+        XCTAssertEqual(CodexAttachment.sessionFolder(terminal(in: work.path)), real)
+        XCTAssertEqual(CodexAttachment.sessionFolder(terminal("-C", "app", in: work.path)), real + "/app")
+        XCTAssertEqual(CodexAttachment.sessionFolder(terminal("--cd", work.path + "/app", in: "/")), real + "/app")
+        XCTAssertEqual(CodexAttachment.sessionFolder(terminal("--cd=app", in: work.path)), real + "/app")
+        XCTAssertEqual(CodexAttachment.sessionFolder(terminal("-Capp", in: work.path)), real + "/app")
+        XCTAssertEqual(CodexAttachment.sessionFolder(terminal("-C", "~", in: "/")), CodexAttachment.resolved(NSHomeDirectory()))
+    }
+
+    func testTheSessionAResumeNames() {
+        XCTAssertEqual(CodexAttachment.namedSession(terminal("resume", "t1")), "t1")
+        XCTAssertEqual(CodexAttachment.namedSession(terminal("-m", "gpt-6-luna", "resume", "t1")), "t1")
+        XCTAssertNil(CodexAttachment.namedSession(terminal("resume", "--last")))
+        XCTAssertNil(CodexAttachment.namedSession(terminal("resume")))
+        XCTAssertNil(CodexAttachment.namedSession(terminal("fix", "t1")))
+    }
+
+    func testEachTerminalHoldsTheNewestSessionInItsFolder() {
+        let threads = [thread("old", at: 10), thread("new", at: 20), thread("newest", at: 30)]
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [terminal()]),
+                       ["old": false, "new": false, "newest": true])
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [terminal(), terminal()]),
+                       ["old": false, "new": true, "newest": true])
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: []),
+                       ["old": false, "new": false, "newest": false])
+    }
+
+    func testAResumeHoldsTheSessionItNames() {
+        let threads = [thread("old", at: 10), thread("new", at: 20)]
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [terminal("resume", "old")]),
+                       ["old": true, "new": false], "the named one, not the newest")
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [terminal("resume", "old"), terminal()]),
+                       ["old": true, "new": true])
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [terminal("resume", "gone")]),
+                       ["old": false, "new": true], "one naming a session not loaded holds its folder's newest")
+    }
+
+    func testOnlyTheTerminalAppsOwnSessionsCount() {
+        let threads = [thread("tui", at: 10), thread("desktop", at: 30, originator: "Codex Desktop"), thread("exec", at: 40, originator: nil)]
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [terminal()]),
+                       ["tui": true, "desktop": false, "exec": false])
+    }
+
+    func testFoldersAreKeptApart() {
+        let threads = [thread("here", in: "/Users/demo/code", at: 10), thread("there", in: "/Users/demo/other", at: 30), thread("nowhere", in: nil)]
+        let attached = CodexAttachment.attached(threads: threads, terminals: [terminal(in: "/Users/demo/code")])
+        XCTAssertEqual(attached["here"], true)
+        XCTAssertEqual(attached["there"], false)
+        XCTAssertNil(attached["nowhere"], "a folder that isn't known can't be told")
+    }
+
+    func testTheProgramNames() {
+        XCTAssertTrue(SystemCodexTerminals.isCodexProgram("codex"))
+        XCTAssertTrue(SystemCodexTerminals.isCodexProgram("codex-aarch64-apple-darwin"))
+        XCTAssertTrue(SystemCodexTerminals.isCodexProgram("codex-x86_64-apple-darwin"))
+        XCTAssertFalse(SystemCodexTerminals.isCodexProgram("codex-helper"))
+        XCTAssertFalse(SystemCodexTerminals.isCodexProgram("node"))
+    }
+
+    func testThisProcessReadsLikeAnyOther() throws {
+        // The probe's readers, on a process that's certainly there.
+        let me = getpid()
+        XCTAssertEqual(SystemCodexTerminals.name(me).map { !$0.isEmpty }, true)
+        XCTAssertEqual(SystemCodexTerminals.cwd(me), FileManager.default.currentDirectoryPath)
+        let args = try XCTUnwrap(SystemCodexTerminals.arguments(me))
+        XCTAssertEqual(args, CommandLine.arguments)
+        XCTAssertTrue(SystemCodexTerminals.pids().contains(me))
+    }
+}
