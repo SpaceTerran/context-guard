@@ -10,9 +10,10 @@
 #   live-test/ui-demo.sh link connected|waiting|watching|stopped   what the stand-in link says
 #   live-test/ui-demo.sh settings             open Settings (from the menu, through accessibility)
 #   live-test/ui-demo.sh tab <General|When to Ask|Messages>  show a Settings tab (pressed through accessibility)
-#   live-test/ui-demo.sh press "<label>"      press a button or switch in the app's windows, by its label
+#   live-test/ui-demo.sh press "<label>" [n]  press a button or switch in the app's windows, by its label
+#                                             (n: the nth with that label, in `controls` order)
 #   live-test/ui-demo.sh controls             list the controls in the app's windows and their labels
-#   live-test/ui-demo.sh type "<field>" <text> replace a Settings field's text, typed key by key
+#   live-test/ui-demo.sh type "<field>" <text> [n]  replace a Settings field's text, typed key by key
 #   live-test/ui-demo.sh windows              list the app's windows (id, bounds) for screenshots
 #   live-test/ui-demo.sh snap <folder> <name>  have the app draw each window to <folder>/<name>-<n>.png
 #                                             (works with the display asleep or the screen locked)
@@ -110,6 +111,7 @@ case "$cmd" in
     if [ "${3:-}" != no-codex ]; then
       "$0" link connected
       # The stand-in for `context-guard codex`: keeps codex-link.json fresh, saying what link.json says.
+      # shellcheck disable=SC2016  # the inner bash expands these
       nohup bash -c 'while :; do jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ".at = \$at" "$1/link.json" > "$2.tmp" && mv "$2.tmp" "$2"; sleep 4; done' \
         _ "$dir" "$home/codex-link.json" >/dev/null 2>&1 &
       printf '"link": %d,\n' $! >> "$dir/pids.json"
@@ -170,11 +172,11 @@ case "$cmd" in
     # ignores its menu shortcuts.
     field="${2:?field label}"; text="${3?text}"
     [ -x "$pkg/.build/typeto" ] || swiftc -O -o "$pkg/.build/typeto" "$here/type.swift"
-    ax clear "$field"
+    ax clear "$field" "${4:-1}"
     "$pkg/.build/typeto" "$(cat "$dir/app.pid")" "$text"
     ;;
   tab|press)
-    ax press "${2:?label}"
+    ax press "${2:?label}" "${3:-1}"
     ;;
   controls)
     ax list
