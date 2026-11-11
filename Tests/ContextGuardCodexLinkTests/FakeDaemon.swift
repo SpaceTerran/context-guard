@@ -32,6 +32,10 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
     private var order: [String] = []
     private var queues: [String: [JSONValue]] = [:]
     private var paused: Set<String> = []
+    /// The turn running in each thread.
+    private var running: [String: String] = [:]
+    /// What went into each running turn (`turn/steer`).
+    private var steered: [String: [JSONValue]] = [:]
     private var log: [(method: String, params: JSONValue)] = []
     private var nextId = 1
     private var isClosed = false
@@ -62,6 +66,22 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         threads[id]?.status = status
         threads[id]?.flags = flags
+    }
+
+    /// A turn of yours starts: the thread is active with `turnId` running.
+    func startTurn(_ id: String, turnId: String = "01a1c7f2-0000-7000-8000-000000000001") {
+        lock.lock(); defer { lock.unlock() }
+        threads[id]?.status = "active"
+        threads[id]?.flags = []
+        running[id] = turnId
+    }
+
+    /// The running turn ends.
+    func endTurn(_ id: String) {
+        lock.lock(); defer { lock.unlock() }
+        threads[id]?.status = "idle"
+        threads[id]?.flags = []
+        running[id] = nil
     }
 
     func unload(_ id: String) {
@@ -118,6 +138,12 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
         return queues[id] ?? []
     }
 
+    /// What went into the thread's running turns, oldest first.
+    func steeredInto(_ id: String) -> [JSONValue] {
+        lock.lock(); defer { lock.unlock() }
+        return steered[id] ?? []
+    }
+
     var closed: Bool {
         lock.lock(); defer { lock.unlock() }
         return isClosed
@@ -171,6 +197,17 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
             paused.remove(id)
             threads[id]?.status = "active"
             return [:]
+        case "thread/turns/list":
+            guard threads[id] != nil else { throw CodexLinkError.rpc(code: -32600, message: "thread not found") }
+            let newest: JSONValue = running[id].map { ["id": .string($0), "status": "inProgress", "items": []] }
+                ?? ["id": "01a1c7f1-0000-7000-8000-000000000009", "status": "completed", "items": []]
+            return ["data": [newest], "nextCursor": .null]
+        case "turn/steer":
+            guard let turn = running[id], turn == params["expectedTurnId"]?.string else {
+                throw CodexLinkError.rpc(code: -32600, message: "expected active turn id `\(params["expectedTurnId"]?.string ?? "")` but found none")
+            }
+            steered[id, default: []].append(["clientUserMessageId": params["clientUserMessageId"] ?? .null, "input": params["input"] ?? .null])
+            return ["turnId": .string(turn)]
         case "thread/compact/start":
             guard threads[id] != nil else { throw CodexLinkError.rpc(code: -32600, message: "thread not found") }
             threads[id]?.status = "active"

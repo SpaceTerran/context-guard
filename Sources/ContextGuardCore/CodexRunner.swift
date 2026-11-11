@@ -20,10 +20,12 @@ public struct CodexThreadLook: Equatable, Sendable {
     public var autoCompactAt: Int?
     /// Codex compacts after a turn above this share of the window, when set.
     public var postTurnCompactPercent: Int?
+    /// The link can send into a running turn (`turn/steer`). False on a Codex without it.
+    public var canSteer: Bool
 
     public init(threadId: String, path: String? = nil, cwd: String? = nil, name: String? = nil, status: String,
                 flags: [String] = [], ephemeral: Bool = false, attached: Bool? = nil, autoCompactAt: Int? = nil,
-                postTurnCompactPercent: Int? = nil) {
+                postTurnCompactPercent: Int? = nil, canSteer: Bool = true) {
         self.threadId = threadId
         self.path = path
         self.cwd = cwd
@@ -34,6 +36,7 @@ public struct CodexThreadLook: Equatable, Sendable {
         self.attached = attached
         self.autoCompactAt = autoCompactAt
         self.postTurnCompactPercent = postTurnCompactPercent
+        self.canSteer = canSteer
     }
 
     /// Between turns: a prompt starts a new turn, and the session can be compacted.
@@ -45,6 +48,9 @@ public enum CodexCommand: Equatable, Sendable {
     case none
     /// Send the save message as your prompt. Decided while the thread was idle.
     case deliver(nonce: String, text: String)
+    /// Send the save message into the running turn, as a prompt you type while Codex works:
+    /// Codex takes it at its next step (`turn/steer`).
+    case steer(nonce: String, text: String)
     /// Ask the judge `prompt`, then report the reply with `mark`.
     case judge(nonce: String, mark: UInt64, prompt: String)
     /// Compact the thread (`thread/compact/start`).
@@ -108,6 +114,7 @@ public struct CodexRunner: Sendable {
         if c.status != t.status || (c.flags ?? []) != t.flags { c.statusAt = now }
         c.status = t.status
         c.flags = t.flags.isEmpty ? nil : t.flags
+        if t.isIdle { c.steerRefused = nil }
         c.attached = t.attached
         if t.status != "notLoaded" {
             // The app server's settings for it; one it doesn't list keeps the last ones seen.
@@ -149,12 +156,13 @@ public struct CodexRunner: Sendable {
 
         // Nothing goes to a session that's closing or has no terminal showing it.
         let reachable = t.isIdle && t.attached != false && !s.ended
+        let midTurn = !reachable && canSendMidTurn(t, s)
         var command = CodexCommand.none
-        if reachable, s.guarded, s.phase == .queued {
+        if reachable || midTurn, s.guarded, s.phase == .queued {
             // Claimed and saved before the link sends it, so it can't go out twice.
             let nonce = Engine.makeNonce()
-            if let text = Engine.claimDelivery(&s, via: .turn, config: resolved, nonce: nonce, now: now) {
-                command = .deliver(nonce: nonce, text: text)
+            if let text = Engine.claimDelivery(&s, via: midTurn ? .step : .turn, config: resolved, nonce: nonce, now: now) {
+                command = midTurn ? .steer(nonce: nonce, text: text) : .deliver(nonce: nonce, text: text)
             }
         }
         if command == .none {
@@ -184,10 +192,16 @@ public struct CodexRunner: Sendable {
         update(r.sessionId) { s, now in Compactor.apply(r, to: &s, now: now) } ?? false
     }
 
-    /// Codex refused the save message outright: it never reached the session.
-    public func refused(threadId: String, nonce: String) {
+    /// Codex refused the save message outright: it never reached the session. One refused in the
+    /// middle of a turn goes in once that turn ends.
+    public func refused(threadId: String, nonce: String, midTurn: Bool = false) {
         _ = update(threadId) { s, _ in
-            if s.sentNonce == nonce { Engine.unclaim(&s) }
+            guard s.sentNonce == nonce else { return true }
+            Engine.unclaim(&s)
+            if midTurn, var c = s.codex {
+                c.steerRefused = c.turn?.startedAt
+                s.codex = c
+            }
             return true
         }
     }
@@ -215,6 +229,15 @@ public struct CodexRunner: Sendable {
             guard (try? s.save(paths)) != nil else { return nil }
         }
         return out
+    }
+
+    /// The save message can go into the running turn: Codex is working, not waiting on you (an
+    /// approval or a question), and a terminal shows it. Not into a turn that has only compacted so
+    /// far (`/compact`), and not into one that already refused it.
+    func canSendMidTurn(_ t: CodexThreadLook, _ s: SessionState) -> Bool {
+        guard t.canSteer, t.status == "active", t.flags.isEmpty, t.attached != false, !s.ended,
+              let c = s.codex, let turn = c.turn, turn.open, turn.hasContent, let started = turn.startedAt else { return false }
+        return c.steerRefused != started
     }
 
     /// Gone from the app server for `closedAfter`: closed. Loaded again (resumed): open.

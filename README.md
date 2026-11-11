@@ -163,11 +163,13 @@ Codex hooks can't start a turn or a compaction, so Codex sessions are reached an
 Codex hook or plugin to install. The link:
 
 - reads each session's size from its file in `~/.codex/sessions`;
-- puts the save and continue messages in the session's queue, so the terminal shows them as prompts
-  from you. The save message ends with a tag like `[cg-1a2b3c4d5e]`, which marks it as Context
-  Guard's;
-- compacts the session, as `/compact` does;
-- asks the judge whether the session has finished saving.
+- sends the save message as a prompt from you, and the terminal shows it like one. While Codex is
+  working, it goes into the running turn, as a prompt you type then does, and Codex takes it at its
+  next step; between turns, it starts a turn. It ends with a tag like `[cg-1a2b3c4d5e]`, which marks
+  it as Context Guard's;
+- asks the judge whether the session has finished saving;
+- compacts the session, as `/compact` does, then sends the continue message the same way, between
+  turns.
 
 It connects only while a Codex terminal has run in the last 5 minutes, and never starts or stops
 Codex's server. It doesn't care which terminal you use (tested in Warp and Terminal): it talks to
@@ -189,8 +191,6 @@ popup shows both numbers: "Context at 62% (160k)".
 
 What's different from Claude Code:
 
-- **Nothing goes in mid-turn.** The save message and the compaction wait for the turn to end. A very
-  long turn can reach Codex's own compaction first; a notice says so.
 - **The prompt box can't be read** from outside Codex, so text you've typed but not sent doesn't
   hold the compaction. It stays in the box.
 - **A terminal has to show the session.** Messages go out only to a session a terminal has open.
@@ -204,7 +204,7 @@ What's different from Claude Code:
   `--profile`, `--no-daemon` or `--oss` runs its session inside the terminal's own process, where
   nothing else can reach it. `codex exec`, the Codex app and subagents are left alone.
 - **An older Codex** missing something the link needs is only watched. Settings and `status` say
-  why.
+  why. One that can't take a prompt into a running turn gets the save message between turns.
 
 | File (in `~/.claude/context-guard/`) | Written by |
 |---|---|

@@ -97,7 +97,7 @@ struct QuestionView: View {
     private func countdownText(_ info: SessionInfo, deadline: Date, now: Date) -> String {
         let left = Int(deadline.timeIntervalSince(now).rounded(.up))
         if left > 0 { return "Compacts in \(Format.seconds(left)) unless you answer" }
-        // It goes out at the session's next step (or when its turn ends), or now if it can be reached.
+        // It goes out at the session's next step, or now if it can be reached.
         guard info.isIdle, !info.reachableNow else { return "Starting…" }
         return info.host == .codex ? "Starts \(info.host.whenOutOfReach)" : "Starts when this session next runs"
     }
@@ -137,7 +137,7 @@ struct QuestionView: View {
 
     private func statusText(_ progress: QuestionProgress, _ info: SessionInfo) -> String {
         switch progress {
-        case .nextStep: return "Asking it to save \(info.host.whenBusy)…"
+        case .nextStep: return "Asking it to save at its next step…"
         case .waking: return "Asking it to save…"
         case .nextRun: return "Asks it to save \(info.host.whenOutOfReach)"
         case .sent: return "Asked it to save, then it compacts"

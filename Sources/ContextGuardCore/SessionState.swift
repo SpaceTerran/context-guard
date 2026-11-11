@@ -21,7 +21,8 @@ public enum SendReason: String, Codable, Sendable {
 }
 
 public enum DeliveryChannel: String, Codable, Sendable {
-    /// Added as context after a main-thread step (PostToolBatch).
+    /// Added to the running turn at its next step: after a main-thread step (Claude Code's
+    /// PostToolBatch), or into Codex's running turn (`turn/steer`).
     case step
     /// Woke the idle session from the background Stop hook.
     case wake

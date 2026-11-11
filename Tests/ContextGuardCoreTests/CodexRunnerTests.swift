@@ -11,7 +11,9 @@ final class CodexRunnerTests: XCTestCase {
     var paths: Paths!
     var log: Transcript!
     var status = "idle"
+    var flags: [String] = []
     var attached: Bool? = true
+    var canSteer = true
 
     override func setUp() {
         paths = Paths(root: dir.file("home"), claudeDir: dir.file("claude"))
@@ -26,7 +28,7 @@ final class CodexRunnerTests: XCTestCase {
 
     var thread: CodexThreadLook {
         CodexThreadLook(threadId: id, path: log.path, cwd: "/Users/demo/code", name: "Settings screen", status: status,
-                        attached: attached)
+                        flags: flags, attached: attached, canSteer: canSteer)
     }
 
     var state: SessionState? { SessionState.load(id, paths) }
@@ -106,7 +108,7 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertNil(state)
     }
 
-    func testItAsksAtItsShareOfTheWindowAndSendsOnlyBetweenTurns() throws {
+    func testItAsksAtItsShareOfTheWindow() throws {
         try configure()
         log.append(CodexLine.turn("one", reply: "ok", tokens: 150_000))
         tick()
@@ -118,11 +120,133 @@ final class CodexRunnerTests: XCTestCase {
 
         try answer(.yes)
         status = "active"
-        XCTAssertEqual(tick(), .none, "not into a running turn")
+        XCTAssertEqual(tick(), .none, "a turn starting that the rollout doesn't show yet")
         XCTAssertEqual(state?.phase, .queued)
         status = "idle"
-        guard case .deliver = tick() else { return XCTFail("sent once the turn ends") }
+        guard case .deliver = tick() else { return XCTFail("sent as the next prompt") }
+        XCTAssertEqual(state?.sentVia, .turn)
         XCTAssertEqual(tick(), .none, "sent once")
+    }
+
+    /// A turn of yours running, at 160k: your prompt and a tool call so far.
+    func turnRunning(at tokens: Int = 160_000, startedAt: String = "2026-11-11T00:20:00.000Z") {
+        log.append(CodexLine.taskStarted(at: startedAt), CodexLine.prompt("Refactor the billing API"), CodexLine.toolCall(),
+                   CodexLine.tokens(tokens))
+        status = "active"
+    }
+
+    func testTheSaveMessageGoesIntoARunningTurn() throws {
+        try configure()
+        log.append(CodexLine.turn("one", reply: "ok", tokens: 100_000))
+        turnRunning()
+        tick()
+        XCTAssertEqual(state?.phase, .asking, "asked while the turn runs")
+        try answer(.yes)
+        guard case .steer(let nonce, let text) = tick() else { return XCTFail("into the running turn") }
+        XCTAssertEqual(text, "\(Config.defaultMessage) [\(nonce)]")
+        XCTAssertEqual(state?.phase, .sent)
+        XCTAssertEqual(state?.sentVia, .step)
+        XCTAssertEqual(tick(), .none, "sent once")
+
+        // Codex takes it at its next step, saves, and the turn ends: judged once it's idle.
+        log.append(CodexLine.prompt(text), CodexLine.toolCall(), CodexLine.toolOutput("main -> main"),
+                   CodexLine.reply("Pushed and saved. Ready for compaction."), CodexLine.tokens(171_000))
+        tick()
+        XCTAssertNotNil(state?.confirmedAt)
+        XCTAssertEqual(state?.followUp?.nonce, nonce)
+        log.append(CodexLine.taskComplete())
+        XCTAssertEqual(tick(), .none, "busy until the app server says idle")
+        status = "idle"
+        try settle()
+        guard case .judge(let n, _, let prompt) = tick() else { return XCTFail("expected the judge to be asked") }
+        XCTAssertEqual(n, nonce)
+        XCTAssertTrue(prompt.contains("Codex: Pushed and saved. Ready for compaction."))
+        XCTAssertFalse(prompt.contains("Refactor the billing API"), "only what came after the save message")
+    }
+
+    func testWaitUntilGoesIntoARunningTurnToo() throws {
+        try configure()
+        log.append(CodexLine.turn("one", reply: "ok", tokens: 160_000))
+        tick()
+        try answer(.later)
+        tick()
+        XCTAssertEqual(state?.phase, .later)
+        turnRunning(at: 207_000)
+        guard case .steer = tick() else { return XCTFail("80% reached mid-turn: sent at the next step") }
+        XCTAssertEqual(state?.sendReason, .later)
+    }
+
+    func testNotWhileCodexWaitsOnYou() throws {
+        try configure()
+        turnRunning()
+        tick()
+        try answer(.yes)
+        for waiting in ["waitingOnApproval", "waitingOnUserInput"] {
+            flags = [waiting]
+            XCTAssertEqual(tick(), .none, waiting)
+            XCTAssertEqual(state?.phase, .queued)
+        }
+        flags = []
+        attached = false
+        XCTAssertEqual(tick(), .none, "no terminal shows it")
+        attached = true
+        guard case .steer = tick() else { return XCTFail("once you've answered") }
+    }
+
+    func testNotIntoATurnThatOnlyCompacts() throws {
+        try configure()
+        log.append(CodexLine.turn("one", reply: "ok", tokens: 160_000))
+        tick()
+        try answer(.yes)
+        // `/compact`: a turn with nothing in it but the compaction.
+        log.append(CodexLine.taskStarted(at: "2026-11-11T00:20:00.000Z"))
+        status = "active"
+        XCTAssertEqual(tick(), .none)
+        XCTAssertEqual(state?.phase, .queued)
+    }
+
+    func testOneTheTurnRefusedGoesInOnceItEnds() throws {
+        try configure()
+        turnRunning()
+        tick()
+        try answer(.yes)
+        guard case .steer(let nonce, _) = tick() else { return XCTFail("into the running turn") }
+        runner.refused(threadId: id, nonce: nonce, midTurn: true)
+        XCTAssertEqual(state?.phase, .queued)
+        XCTAssertEqual(state?.resendCount, 0, "a refusal isn't a lost send")
+        XCTAssertNotNil(state?.codex?.steerRefused)
+        XCTAssertEqual(tick(), .none, "not into that turn again")
+
+        log.append(CodexLine.reply("Refactored."), CodexLine.tokens(170_000), CodexLine.taskComplete())
+        status = "idle"
+        guard case .deliver(let again, _) = tick() else { return XCTFail("as the next prompt once it ends") }
+        XCTAssertNotEqual(again, nonce)
+        XCTAssertNil(state?.codex?.steerRefused)
+    }
+
+    func testANewTurnCanTakeItAfterOneRefused() throws {
+        try configure()
+        turnRunning()
+        tick()
+        try answer(.yes)
+        guard case .steer(let nonce, _) = tick() else { return XCTFail("into the running turn") }
+        runner.refused(threadId: id, nonce: nonce, midTurn: true)
+        // That turn ends and yours starts before the link sees it idle.
+        log.append(CodexLine.taskComplete())
+        turnRunning(startedAt: "2026-11-11T00:25:00.000Z")
+        guard case .steer = tick() else { return XCTFail("the new turn can take it") }
+    }
+
+    func testACodexThatCantSendMidTurnWaitsForTheTurnToEnd() throws {
+        try configure()
+        canSteer = false
+        turnRunning()
+        tick()
+        try answer(.yes)
+        XCTAssertEqual(tick(), .none)
+        log.append(CodexLine.taskComplete())
+        status = "idle"
+        guard case .deliver = tick() else { return XCTFail("as the next prompt once it ends") }
     }
 
     func testNothingGoesToASessionNoTerminalShows() throws {

@@ -23,15 +23,6 @@ public enum SessionHost: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    /// When the save message reaches a session that's in the middle of a turn. Claude Code takes it
-    /// at its next step; Codex only between turns.
-    public var whenBusy: String {
-        switch self {
-        case .claude: return "at its next step"
-        case .codex: return "when this turn ends"
-        }
-    }
-
     /// When the save message reaches an idle session nothing can reach right now: Claude Code
     /// hears it on its next turn; the Codex link sends it once a terminal shows the session.
     public var whenOutOfReach: String {
