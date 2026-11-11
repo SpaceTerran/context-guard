@@ -88,8 +88,10 @@ public struct Config: Codable, Equatable, Sendable {
         c.askAt = window * codexAskPercent / 100
         c.laterAt = window * codexLaterPercent / 100
         if let itself = s.codex?.compactsItselfAt {
-            // Some room before Codex's own compaction, which would cut the save short.
-            c.laterAt = min(c.laterAt, itself - window / 50)
+            // Room before Codex's own compaction, which would cut the save short. Codex compacts
+            // when the next request would pass its limit, and one tool result can add tens of
+            // thousands of tokens, so the room is a tenth of the window.
+            c.laterAt = min(c.laterAt, itself - window / 10)
         }
         c.askAt = max(1_000, min(c.askAt, c.laterAt - window / 20))
         c.laterAt = max(c.laterAt, c.askAt + 1_000)
