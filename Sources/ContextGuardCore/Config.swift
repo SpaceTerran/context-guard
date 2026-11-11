@@ -8,6 +8,8 @@ public struct Config: Codable, Equatable, Sendable {
     public static let defaultLaterAt = 500_000
     public static let defaultAutoYesSeconds = 60
     public static let defaultContinueMessage = "continue now"
+    public static let defaultCodexAskPercent = 60
+    public static let defaultCodexLaterPercent = 80
 
     public var schemaVersion: Int = Config.schema
     public var enabled: Bool = true
@@ -25,12 +27,17 @@ public struct Config: Codable, Equatable, Sendable {
     /// turning it back on doesn't answer an old question at once. nil (a config from before the
     /// countdown existed) holds every countdown until the app stamps it.
     public var enabledAt: Date?
+    /// Codex sessions ask once their context reaches this share of the session's own window.
+    public var codexAskPercent: Int = Config.defaultCodexAskPercent
+    /// For Codex sessions, "Wait" sends once the context reaches this share of the window.
+    public var codexLaterPercent: Int = Config.defaultCodexLaterPercent
 
     public init() {}
 
     public init(enabled: Bool = true, askAt: Int = Config.defaultAskAt, laterAt: Int = Config.defaultLaterAt,
                 message: String = Config.defaultMessage, autoYesSeconds: Int = Config.defaultAutoYesSeconds,
-                continueMessage: String = Config.defaultContinueMessage, enabledAt: Date? = nil) {
+                continueMessage: String = Config.defaultContinueMessage, enabledAt: Date? = nil,
+                codexAskPercent: Int = Config.defaultCodexAskPercent, codexLaterPercent: Int = Config.defaultCodexLaterPercent) {
         self.enabled = enabled
         self.askAt = askAt
         self.laterAt = laterAt
@@ -38,6 +45,8 @@ public struct Config: Codable, Equatable, Sendable {
         self.autoYesSeconds = autoYesSeconds
         self.continueMessage = continueMessage
         self.enabledAt = enabledAt
+        self.codexAskPercent = codexAskPercent
+        self.codexLaterPercent = codexLaterPercent
     }
 
     // Missing or wrong-typed keys fall back to defaults instead of failing the whole file.
@@ -52,6 +61,8 @@ public struct Config: Codable, Equatable, Sendable {
         autoYesSeconds = (try? c.decode(Int.self, forKey: .autoYesSeconds)) ?? d.autoYesSeconds
         continueMessage = (try? c.decode(String.self, forKey: .continueMessage)) ?? d.continueMessage
         enabledAt = try? c.decode(Date.self, forKey: .enabledAt)
+        codexAskPercent = (try? c.decode(Int.self, forKey: .codexAskPercent)) ?? d.codexAskPercent
+        codexLaterPercent = (try? c.decode(Int.self, forKey: .codexLaterPercent)) ?? d.codexLaterPercent
     }
 
     /// Values the rules can rely on: thresholds positive and ordered, messages never empty.
@@ -62,6 +73,26 @@ public struct Config: Codable, Equatable, Sendable {
         if c.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { c.message = Config.defaultMessage }
         c.autoYesSeconds = min(max(0, c.autoYesSeconds), 3_600)
         if c.continueMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { c.continueMessage = Config.defaultContinueMessage }
+        c.codexAskPercent = min(max(10, c.codexAskPercent), 85)
+        c.codexLaterPercent = min(max(c.codexAskPercent + 5, c.codexLaterPercent), 90)
+        return c
+    }
+
+    /// The settings as they apply to one session. Claude Code's thresholds are the token counts
+    /// set. Codex's are shares of the session's own window, kept below the point where Codex
+    /// compacts by itself. A Codex session whose window isn't known yet keeps the token counts;
+    /// it isn't guarded until its window is known.
+    public func resolved(for s: SessionState) -> Config {
+        guard s.hostKind == .codex, let window = s.codex?.window, window > 0 else { return self }
+        var c = self
+        c.askAt = window * codexAskPercent / 100
+        c.laterAt = window * codexLaterPercent / 100
+        if let itself = s.codex?.compactsItselfAt {
+            // Some room before Codex's own compaction, which would cut the save short.
+            c.laterAt = min(c.laterAt, itself - window / 50)
+        }
+        c.askAt = max(1_000, min(c.askAt, c.laterAt - window / 20))
+        c.laterAt = max(c.laterAt, c.askAt + 1_000)
         return c
     }
 

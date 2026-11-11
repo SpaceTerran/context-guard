@@ -222,3 +222,112 @@ final class RequeueTests: XCTestCase {
         XCTAssertEqual(waiting.resendCount, 0)
     }
 }
+
+final class ThresholdTests: XCTestCase {
+    func codex(window: Int?, autoCompactAt: Int? = nil) -> SessionState {
+        var s = SessionState(sessionId: "s1", host: .codex, now: Date())
+        s.codex = CodexFacts(window: window, autoCompactAt: autoCompactAt)
+        return s
+    }
+
+    func testClaudeCodeKeepsTheTokenCountsAsSet() {
+        let c = Config(askAt: 250_000, laterAt: 400_000)
+        XCTAssertEqual(c.resolved(for: SessionState.guarded(10)), c)
+    }
+
+    func testCodexAsksAtAShareOfTheSessionsOwnWindow() {
+        let c = Config()
+        let most = c.resolved(for: codex(window: 258_400))
+        XCTAssertEqual(most.askAt, 155_040, "60%")
+        XCTAssertEqual(most.laterAt, 206_720, "80%")
+        let big = c.resolved(for: codex(window: 475_000))
+        XCTAssertEqual(big.askAt, 285_000)
+        XCTAssertEqual(big.laterAt, 380_000)
+        XCTAssertEqual(c.askAt, Config.defaultAskAt, "Claude Code's own numbers are unchanged")
+    }
+
+    func testWaitStaysBelowWhereCodexCompactsByItself() {
+        // Its default: 90% of the model's window, of which the session reports 95%.
+        XCTAssertEqual(CodexFacts(window: 258_400).compactsItselfAt, 244_800)
+        let late = Config(codexAskPercent: 85, codexLaterPercent: 90).normalized
+        let r = late.resolved(for: codex(window: 258_400))
+        XCTAssertEqual(r.laterAt, 232_560, "90% is still below 244.8k")
+        // A low limit of your own wins, with room for the save to finish first.
+        let low = Config().resolved(for: codex(window: 258_400, autoCompactAt: 180_000))
+        XCTAssertEqual(low.laterAt, 180_000 - 5_168)
+        XCTAssertLessThan(low.askAt, low.laterAt)
+        XCTAssertEqual(low.askAt, 155_040)
+    }
+
+    func testAnUnknownWindowKeepsTheTokenCounts() {
+        let c = Config()
+        XCTAssertEqual(c.resolved(for: codex(window: nil)), c)
+        XCTAssertEqual(c.resolved(for: codex(window: 0)), c)
+    }
+
+    func testPercentagesAreKeptSensible() {
+        let c = Config(codexAskPercent: 2, codexLaterPercent: 1).normalized
+        XCTAssertEqual(c.codexAskPercent, 10)
+        XCTAssertEqual(c.codexLaterPercent, 15)
+        let high = Config(codexAskPercent: 99, codexLaterPercent: 150).normalized
+        XCTAssertEqual(high.codexAskPercent, 85)
+        XCTAssertEqual(high.codexLaterPercent, 90)
+    }
+
+    func testASettingsFileWithoutThemReadsTheDefaults() throws {
+        let old = #"{"schemaVersion":1,"enabled":true,"askAt":300000,"laterAt":500000,"codexAskPercent":"sixty"}"#
+        let c = try FileIO.decoder().decode(Config.self, from: Data(old.utf8))
+        XCTAssertEqual(c.codexAskPercent, 60)
+        XCTAssertEqual(c.codexLaterPercent, 80)
+        XCTAssertEqual(c.askAt, 300_000)
+    }
+
+    func testCodexFactsThatDoNotReadAreLeftUnknown() throws {
+        let f = try FileIO.decoder().decode(CodexFacts.self, from: Data(#"{"window":"big","model":"gpt-6-luna","flags":["waitingOnApproval"]}"#.utf8))
+        XCTAssertNil(f.window)
+        XCTAssertEqual(f.model, "gpt-6-luna")
+        XCTAssertEqual(f.flags, ["waitingOnApproval"])
+    }
+}
+
+final class WordingTests: XCTestCase {
+    let now = Date()
+
+    func session(_ host: SessionHost) -> SessionState {
+        var s = SessionState(sessionId: "s1", host: host, now: now)
+        s.guarded = true
+        s.tokens = 160_000
+        s.phase = .queued
+        s.sendReason = .yes
+        s.askedTokens = 160_000
+        return s
+    }
+
+    func testCodexGetsTheMessageAsYourOwnWords() {
+        var s = session(.codex)
+        let text = Engine.claimDelivery(&s, via: .wake, config: Config(message: "Save your work."), nonce: "cg-1", now: now)
+        XCTAssertEqual(text, "Save your work. [cg-1]")
+        var c = session(.claude)
+        XCTAssertTrue(Engine.claimDelivery(&c, via: .wake, config: Config(message: "Save your work."), nonce: "cg-1", now: now)?
+            .hasPrefix("Context Guard (a Claude Code hook") ?? false)
+    }
+
+    func testTheJudgeIsToldWhichToolTheSessionRunsIn() {
+        XCTAssertTrue(JudgePrompt.make(message: "m", conversation: "c", idleFor: 0, host: .codex).hasPrefix("You are checking on a Codex session"))
+        XCTAssertTrue(JudgePrompt.make(message: "m", conversation: "c", idleFor: 0).hasPrefix("You are checking on a Claude Code session"))
+    }
+
+    func testNotesNameTheTool() {
+        var s = session(.codex)
+        s.followUp = FollowUp(nonce: "cg-1", now: now)
+        Compactor.compacted(&s, trigger: "auto", preTokens: 245_000, postTokens: 30_000, now: now)
+        XCTAssertEqual(s.followUp?.note, "Codex compacted it by itself")
+
+        var f = FollowUp(nonce: "cg-1", now: now)
+        for _ in 0..<Compactor.maxJudgeFailures { Compactor.failJudge(&f, "timed out", host: .codex, now: now) }
+        XCTAssertEqual(f.note, "The judge model didn't answer (timed out)")
+        var h = FollowUp(nonce: "cg-1", now: now)
+        for _ in 0..<Compactor.maxJudgeFailures { Compactor.failJudge(&h, "timed out", now: now) }
+        XCTAssertEqual(h.note, "Haiku didn't answer (timed out)")
+    }
+}
