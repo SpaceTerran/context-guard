@@ -19,14 +19,6 @@ const PROGRAM_TIMEOUT_MS = 15_000
 /** A turn waits for its start to be noted, so this is short. */
 const NOTE_TIMEOUT_MS = 5_000
 
-/**
- * Runs `context-guard mod <command>` (the command is `$0`): the installed program, or the one
- * CONTEXT_GUARD_PROGRAM names (the live tests use that). Exits 127 when there is none.
- */
-const RUN =
-  'f="${CONTEXT_GUARD_PROGRAM:-$HOME/.claude/hooks/context-guard/context-guard}"; [ -x "$f" ] || exit 127; exec "$f" mod "$0"'
-const NOT_INSTALLED = 127
-
 /** What the program asks for. */
 type Step =
   | { action: 'none' }
@@ -196,23 +188,42 @@ async function hasDraft($: EngineInterface): Promise<boolean | undefined> {
   }
 }
 
-/** Runs `context-guard mod <command>` with `input` as JSON and returns its JSON answer. */
+/**
+ * The program: the one CONTEXT_GUARD_PROGRAM names (the live tests use that), or the installed one
+ * in the home folder. Undefined when there's no home folder to look in.
+ */
+async function programPath($: EngineInterface): Promise<string | undefined> {
+  const named = await $.env.get('CONTEXT_GUARD_PROGRAM')
+  if (named) return named
+  if ((await $.env.get('OS')) === 'Windows_NT') {
+    const home = await $.env.get('USERPROFILE')
+    return home ? `${home}\\.claude\\hooks\\context-guard\\context-guard.exe` : undefined
+  }
+  const home = await $.env.get('HOME')
+  return home ? `${home}/.claude/hooks/context-guard/context-guard` : undefined
+}
+
+/**
+ * Runs `context-guard mod <command>` with `input` as JSON and returns its JSON answer. The program
+ * runs directly, with no shell. Without it, nothing runs for a minute.
+ */
 async function program(
   $: EngineInterface,
   command: 'tick' | 'report' | 'turn',
   input: object,
   timeoutMs = PROGRAM_TIMEOUT_MS,
 ): Promise<Record<string, unknown> | undefined> {
-  const r = await $.process.run(['/bin/sh', '-c', RUN, command], {
+  const exe = await programPath($)
+  if (exe === undefined || !(await $.fs.exists(exe))) {
+    waitUntil = (await $.clock.now()) + NOT_INSTALLED_WAIT_MS
+    return undefined
+  }
+  const r = await $.process.run([exe, 'mod', command], {
     stdin: JSON.stringify(input),
     timeoutMs,
     // The session's folder may be gone (a removed worktree), and the program doesn't need it.
     cwd: '/',
   })
-  if (r.exitCode === NOT_INSTALLED) {
-    waitUntil = (await $.clock.now()) + NOT_INSTALLED_WAIT_MS
-    return undefined
-  }
   if (r.exitCode !== 0) throw new Error(`context-guard mod ${command} exited ${r.exitCode}: ${r.stderr.trim()}`)
   try {
     const answer: unknown = JSON.parse(r.stdout)

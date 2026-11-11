@@ -18,7 +18,11 @@ type World = {
   agents: AgentInfo[]
   /** What the prompt box holds, read afresh each time. */
   draft: () => string
-  /** The program's exit code (127 means it isn't installed). */
+  /** Whether the program's file is there. */
+  installed: boolean
+  /** The files the mod looked for. */
+  looked: string[]
+  /** The program's exit code. */
   exitCode: number
   /** What the program answers to `mod tick`, one per call, then "none". */
   steps: unknown[]
@@ -42,11 +46,16 @@ const USAGE = { input_tokens: 900, output_tokens: 20, cache_read_input_tokens: 0
 const TYPED = { kind: 'composer' } as const
 const JUDGE = { action: 'judge', nonce: 'cg-1', mark: 4200, prompt: 'Has it finished?', model: 'haiku', maxTokens: 300, timeoutMs: 30_000 }
 
-function world(on: On): World {
+/** The Mac's environment, unless a test gives another. */
+const MAC_ENV = { HOME: '/Users/x' }
+
+function world(on: On, env: Record<string, string> = MAC_ENV): World {
   const w: World = {
     sessionId: 's1',
     agents: [],
     draft: () => '',
+    installed: true,
+    looked: [],
     exitCode: 0,
     steps: [],
     replies: [],
@@ -57,6 +66,11 @@ function world(on: On): World {
     compact: () => ({ messages: [SUMMARY], tokensBefore: 311_000, tokensAfter: 24_000 }),
     submitted: [],
   }
+  mock.env(on, env)
+  on('fs.exists', (_, e) => {
+    w.looked.push(e.path)
+    return { value: w.installed }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('session.id', () => ({ value: w.sessionId }))
@@ -124,8 +138,9 @@ test('every 10 seconds it tells the program how the session stands', async ($, o
   await clock.advance(1)
   expect(w.runs).toHaveLength(1)
   const run = w.runs[0]!
-  expect(run.argv.slice(0, 2)).toEqual(['/bin/sh', '-c'])
-  expect(run.argv[2]).toContain('$HOME/.claude/hooks/context-guard/context-guard')
+  // The program itself, with no shell.
+  expect(run.argv).toEqual(['/Users/x/.claude/hooks/context-guard/context-guard', 'mod', 'tick'])
+  expect(w.looked).toEqual(['/Users/x/.claude/hooks/context-guard/context-guard'])
   expect(run.command).toBe('tick')
   expect(run.input).toEqual({ sessionId: 's1', agents: 2, draft: false })
   expect(run.cwd).toBe('/')
@@ -226,15 +241,43 @@ test('something typed in the prompt box stops the continue message', async ($, o
 test('without the program it looks again a minute later', async ($, on) => {
   const clock = mock.clock(on)
   const w = world(on)
-  w.exitCode = 127
+  w.installed = false
   await start($)
   await clock.advance(10_000)
-  expect(w.runs).toHaveLength(1)
+  expect(w.looked).toHaveLength(1)
+  expect(w.runs).toEqual([])
   await clock.advance(50_000)
-  expect(w.runs).toHaveLength(1)
-  w.exitCode = 0
+  expect(w.looked).toHaveLength(1)
+  w.installed = true
   await clock.advance(10_000)
-  expect(w.runs).toHaveLength(2)
+  expect(w.looked).toHaveLength(2)
+  expect(commands(w)).toEqual(['tick'])
+})
+
+test('on Windows it runs the program in the user profile', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on, { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\x', HOME: 'C:\\Users\\x' })
+  await start($)
+  await clock.advance(10_000)
+  expect(w.runs[0]!.argv).toEqual(['C:\\Users\\x\\.claude\\hooks\\context-guard\\context-guard.exe', 'mod', 'tick'])
+  expect(w.runs[0]!.cwd).toBe('/')
+})
+
+test('the live tests name their own program', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on, { HOME: '/Users/x', CONTEXT_GUARD_PROGRAM: '/work/.build/debug/context-guard' })
+  await start($)
+  await clock.advance(10_000)
+  expect(w.runs[0]!.argv).toEqual(['/work/.build/debug/context-guard', 'mod', 'tick'])
+})
+
+test('with no home folder it runs nothing', async ($, on) => {
+  const clock = mock.clock(on)
+  const w = world(on, {})
+  await start($)
+  await clock.advance(10_000)
+  expect(w.runs).toEqual([])
+  expect(w.looked).toEqual([])
 })
 
 test('a program that fails is tried again at the next tick', async ($, on) => {
