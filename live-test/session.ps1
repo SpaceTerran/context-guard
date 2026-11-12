@@ -18,6 +18,9 @@
 #   session.ps1 state <name>                    context-guard status for that home
 #   session.ps1 answer <name> yes|later|skip    answer as the popup would
 #   session.ps1 stop <name>
+#   session.ps1 open <name>     start the console host for a folder another script set up (its
+#                               launch.json: commandLine, cwd, env), as codex-session.ps1 does
+#   session.ps1 close <name>    end the console host and its task, and the program in it
 #
 # Keeps everything in %USERPROFILE%\cg-live\<name>: home\ (CONTEXT_GUARD_HOME), settings.json (the
 # hooks, given with --settings), screen.txt, raw.log (everything the session wrote), host.log.
@@ -99,10 +102,7 @@ function Start-Session {
     if ($PluginDir) { $PluginDir = (Resolve-Path -LiteralPath $PluginDir).Path }
     if (Get-HostPid) { throw "$Name is running; stop it first" }
     $claude = (Get-Command claude -CommandType Application).Source | Select-Object -First 1
-    $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    $signedIn = @(quser 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match "^\W?$([regex]::Escape($env:USERNAME))\s" })
-    $ErrorActionPreference = $saved
-    if (-not $signedIn) { throw "$env:USERNAME isn't signed in to a desktop session here" }
+    Assert-SignedIn
 
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
     New-Item -ItemType Directory -Path $home2, (Join-Path $dir 'control') | Out-Null
@@ -156,7 +156,22 @@ function Start-Session {
         env = [ordered]@{ CONTEXT_GUARD_HOME = $home2; CONTEXT_GUARD_PROGRAM = $Program; CONTEXT_GUARD_WAITER_POLL = "$Poll" }
     }
     Write-Utf8 (Join-Path $dir 'launch.json') ($launch | ConvertTo-Json -Depth 5)
+    Open-Session
+}
 
+function Assert-SignedIn {
+    $saved = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $signedIn = @(quser 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match "^\W?$([regex]::Escape($env:USERNAME))\s" })
+    $ErrorActionPreference = $saved
+    if (-not $signedIn) { throw "$env:USERNAME isn't signed in to a desktop session here" }
+}
+
+# Starts the host for $dir (its launch.json and control folder in place).
+function Open-Session {
+    if (Get-HostPid) { throw "$Name is running; stop it first" }
+    Assert-SignedIn
+    foreach ($f in 'screen.txt', 'host.pid') { $p = Join-Path $dir $f; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p } }
+    New-Item -ItemType Directory -Path (Join-Path $dir 'control') -Force | Out-Null
     # The host runs in the signed-in user's desktop session, not elevated. conhost --headless gives
     # it a console without a window (any other way, Windows Terminal may open one).
     $script = $PSCommandPath
@@ -175,7 +190,8 @@ function Start-Session {
     Write-Host "started $Name in $dir"
 }
 
-function Stop-Session {
+# Ends the host (closing its console ends the program in it) and removes its task.
+function Close-Session {
     $id = Get-HostPid
     if ($id) {
         Send-Control 'quit'
@@ -183,6 +199,10 @@ function Stop-Session {
         if (Get-Process -Id $id -ErrorAction SilentlyContinue) { Stop-Process -Id $id -Force }
     }
     if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) { Unregister-ScheduledTask -TaskName $task -Confirm:$false }
+}
+
+function Stop-Session {
+    Close-Session
     $settings = Join-Path $dir 'settings.json'
     $left = @(Get-CimInstance Win32_Process -Filter "Name='claude.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($settings) })
     foreach ($p in $left) { Stop-Process -Id $p.ProcessId -Force }
@@ -445,5 +465,7 @@ switch ($Command) {
         & (Get-Launch).env.CONTEXT_GUARD_PROGRAM answer $live.sessionId $Text
     }
     'stop' { Stop-Session }
+    'open' { Open-Session }
+    'close' { Close-Session }
     default { throw "unknown command $Command" }
 }
