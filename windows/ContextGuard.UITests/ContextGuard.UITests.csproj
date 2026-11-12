@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The published app (CONTEXT_GUARD_APP names ContextGuard.exe), driven through UI Automation in a signed-in
+       desktop session, with StandIn.ps1 in place of `context-guard ui`. Not in the .slnx: it needs the app
+       published first, and a desktop. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="StandIn.ps1" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
