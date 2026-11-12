@@ -27,7 +27,21 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
+      - id: swift
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
+        continue-on-error: true
+        with:
+          swift-version: swift-6.4.2-release
+          swift-build: 6.4.2-RELEASE
+      # Swift's installer stops with 1618 when another installation runs at the same time, as one
+      # sometimes does on a new runner: wait for Windows Installer, then install it again.
+      - name: Wait for Windows Installer
+        if: steps.swift.outcome == 'failure'
+        shell: pwsh
+        run: .github/wait-for-installer.ps1
+      - name: Install Swift again
+        if: steps.swift.outcome == 'failure'
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
         with:
           swift-version: swift-6.4.2-release
           swift-build: 6.4.2-RELEASE
