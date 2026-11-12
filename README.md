@@ -2,10 +2,10 @@
 
 ![Context Guard asking whether to compact a session](docs/popup.png)
 
-A small Mac menu bar app for [Claude Code](https://code.claude.com/docs/en/overview) and the
-[Codex CLI](https://github.com/openai/codex). When a session's context gets big, it asks before
-compacting. If you say yes, the session saves its work first, then it's compacted and told to carry
-on.
+A small app for [Claude Code](https://code.claude.com/docs/en/overview) and the
+[Codex CLI](https://github.com/openai/codex), in the Mac menu bar or on the
+[Windows](#windows) taskbar. When a session's context gets big, it asks before compacting. If you
+say yes, the session saves its work first, then it's compacted and told to carry on.
 
 There are about a thousand ways to handle context in Claude Code: `/compact` by hand, auto-compact,
 and plenty of other tools. This is just the one I like. The story behind it is on the blog:
@@ -103,6 +103,82 @@ block. `install.sh` does the following:
 
 Running sessions pick up the hooks within a few seconds, and the mod at `/reload-plugins` or their
 next start. Uninstalling keeps your settings and session records in `~/.claude/context-guard`.
+
+## Windows
+
+On Windows 11, Context Guard is an icon in the notification area, at the right of the taskbar. It
+asks, saves and compacts the same way, with the same words and settings; what's different is listed
+below. `~` in the paths here is your user folder, `%USERPROFILE%`.
+
+![Context Guard asking whether to compact a session, on Windows](docs/windows-popup.png)
+
+| The menu | Settings |
+|---|---|
+| ![The menu from the notification area, a session opened](docs/windows-flyout.png) | ![Settings, the messages it sends, on Windows](docs/windows-settings.png) |
+
+### Requirements on Windows
+
+- Windows 11 on x64.
+- Claude Code 2.1.287 or newer (tested with 2.1.322), signed in as usual.
+- For Codex sessions: the Codex CLI 0.154 or newer (tested with 0.167.2), signed in as usual.
+  Without it, nothing changes.
+- Smart App Control not on (Windows Security > App & browser control). Context Guard isn't signed,
+  and Smart App Control blocks unsigned programs it doesn't know, even ones built on the same PC.
+- To build it: Swift 6.4.2, Visual Studio 2022 Build Tools with the C++ workload and a Windows 11
+  SDK, and the .NET 10 SDK. A PC you only install it on needs none of them.
+
+### Install, update, uninstall on Windows
+
+In PowerShell:
+
+```
+git clone https://github.com/SpaceTerran/context-guard.git
+cd context-guard
+powershell -ExecutionPolicy Bypass -File build.ps1
+powershell -ExecutionPolicy Bypass -File dist\context-guard\install.ps1
+```
+
+`build.ps1` builds everything into `dist\context-guard`, and zips that folder as
+`dist\context-guard-windows-x64-<build>.zip`. `install.ps1` installs what's in its folder, or
+updates what's installed (after a `git pull`, run both again). Add `-NoCodex` to install without
+the Codex link (it removes one installed before), or `-Uninstall` to remove the hooks, the hook
+program, the mod, the Codex link and the app. Context Guard's Uninstall in Settings > Apps >
+Installed apps does the same.
+
+To install on another PC, copy the zip there, extract it, and run the `install.ps1` in its
+`context-guard` folder the same way. That PC needs none of the build tools.
+
+`install.ps1` does the following:
+
+- puts the hook program, `context-guard.exe`, and the Swift runtime DLLs it runs on in
+  `~\.claude\hooks\context-guard`;
+- adds the hooks to `~\.claude\settings.json`, as on the Mac. They run the program directly, with no
+  shell in between;
+- copies the mod to `~\.claude\hooks\context-guard\mod` and installs it as the user plugin
+  `context-guard@context-guard`;
+- adds a scheduled task, "Context Guard Codex link", that keeps the Codex link running while you're
+  signed in (`context-guard-link.exe`, which has no window);
+- installs the app in `%LOCALAPPDATA%\Programs\Context Guard`, with a Start menu shortcut and an
+  entry in Settings > Apps, sets it to open at sign-in, and starts it.
+
+Uninstalling keeps your settings and session records in `~\.claude\context-guard`.
+
+### Differences from the Mac
+
+- **The icon** sits under ^ in the notification area until you pin it to the taskbar. Clicking it
+  opens the menu. A right-click gives **Context Guard On**, **Settings…** and **Quit Context
+  Guard**.
+- **Popups** stack at the bottom right, above the taskbar, where Windows shows its notifications.
+  They never take the focus: what you type keeps going to the window you're typing in.
+- **A question** plays Windows' notification sound (the Mac plays Glass).
+- **Open at login** can also be turned off in Windows' Settings > Apps > Startup. Turning it on in
+  Context Guard's Settings again wins.
+- **Opening Context Guard from Start** while it runs opens its Settings.
+- **The Codex link** is kept running by the scheduled task, in place of the LaunchAgent.
+- **Codex sessions in a terminal run as administrator** aren't reached: Codex runs them outside its
+  shared server.
+- **The hook program** from PowerShell:
+  `& "$env:USERPROFILE\.claude\hooks\context-guard\context-guard.exe" status`.
 
 ## How it works
 
@@ -240,6 +316,22 @@ trust a folder it doesn't know and saves the answer in your settings, so `CG_TES
 be a folder inside a project Codex already trusts, not a git repo of its own. The test folder gets
 Codex settings of its own: gpt-6-luna and no update check. Codex itself may note first-run flags in
 `~/.codex/config.toml`; `stop` says when it did. The script's header lists its other commands.
+
+On Windows, in PowerShell from the repo root:
+
+```
+swift test                                     # the Swift tests, as on the Mac
+powershell -ExecutionPolicy Bypass -File build.ps1
+cd windows; dotnet test -c Release             # the app's side of the ui feed
+```
+
+The app's UI tests (`dotnet test -c Release` in `windows\ContextGuard.UITests`) drive the app
+`build.ps1` made through UI Automation, so set `CONTEXT_GUARD_APP` to the full path of
+`dist\context-guard\app\ContextGuard.exe` first. They open its windows on your desktop and bring
+them to the front while they run. With `CONTEXT_GUARD_PROGRAM` set to the full path of
+`dist\context-guard\context-guard.exe`, both test projects also run their tests against the real
+program. `live-test\session.ps1` and `live-test\codex-session.ps1` are the live tests for Windows;
+their headers say how to run them.
 
 ## License
 
