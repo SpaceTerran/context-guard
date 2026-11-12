@@ -102,7 +102,8 @@ block. `install.sh` does the following:
 - installs `~/Applications/Context Guard.app`, sets it to open at login, and starts it.
 
 Running sessions pick up the hooks within a few seconds, and the mod at `/reload-plugins` or their
-next start. Uninstalling keeps your settings and session records in `~/.claude/context-guard`.
+next start. Uninstalling stops the hooks waiting in the background, so none sends a save message
+afterwards, and keeps your settings and session records in `~/.claude/context-guard`.
 
 ## Windows
 
@@ -161,7 +162,9 @@ To install on another PC, copy the zip there, extract it, and run the `install.p
 - installs the app in `%LOCALAPPDATA%\Programs\Context Guard`, with a Start menu shortcut and an
   entry in Settings > Apps, sets it to open at sign-in, and starts it.
 
-Uninstalling keeps your settings and session records in `~\.claude\context-guard`.
+Uninstalling stops the hooks waiting in the background, so their files can be deleted and none
+sends a save message afterwards, and keeps your settings and session records in
+`~\.claude\context-guard`.
 
 ### Differences from the Mac
 

@@ -59,6 +59,14 @@ remove_hooks() {
   "$prog" setup --uninstall
 }
 
+# Tells the hooks waiting in the background after each turn to stop, so none sends a save message
+# once Context Guard is gone. Stdin is empty: a program from before `hook --stop` reads it as a hook
+# would, finds nothing and exits.
+stop_waiters() {
+  [ -x "$hook_bin" ] || return 0
+  "$hook_bin" hook --stop </dev/null || true
+}
+
 # Copies the mod's files (not its tests) and swaps the folder in whole. Claude Code reads the
 # plugin from this folder in place, so a copy is all an update needs.
 copy_mod() {
@@ -172,6 +180,7 @@ uninstall() {
   say "removed $app"
   remove_hooks
   uninstall_mod
+  stop_waiters
   rm -f "$hook_bin"
   rmdir "$hook_dir" 2>/dev/null || true
   say "removed $hook_bin and $mod_dir"

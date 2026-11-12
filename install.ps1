@@ -323,6 +323,24 @@ function Remove-Hooks {
     if ((Invoke-Program $program @('setup', '--uninstall')) -ne 0) { exit 1 }
 }
 
+# Tells the hooks waiting in the background after each turn to stop, so none sends a save message
+# once Context Guard is gone or keeps the program open. With the program next to this script when
+# there is one (it may be newer than the installed one), else the installed one. Stdin is empty: a
+# program from before `hook --stop` reads its stdin as a hook would, finds nothing and exits.
+function Stop-Waiters {
+    $program = @($fromExe, $hookExe) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $program) { return }
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $lines = @($null | & $program hook --stop 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+    foreach ($line in $lines) { if ($code -eq 0) { Say $line } else { [Console]::Error.WriteLine("warning: $line") } }
+}
+
 # Asks the app running in this session to quit, as Quit in its menu does (its program ends with it),
 # with whichever copy of it is here; it waits up to 5 seconds for that. One still running from the
 # installed folder after that is ended.
@@ -465,11 +483,19 @@ function Uninstall-All {
     Uninstall-App
     Remove-Hooks
     Uninstall-Mod
+    # Last before the files go: running sessions take a few seconds to drop the hooks, and a turn
+    # that ends meanwhile starts a waiter again.
+    Stop-Waiters
     if (Test-Path -LiteralPath $hookDir) {
         foreach ($file in @(Get-ChildItem -LiteralPath $hookDir -File | Where-Object { $_.Name -eq 'context-guard.exe' -or $_.Name -eq 'context-guard-link.exe' -or $_.Extension -eq '.dll' })) {
             Set-Aside $file.FullName
         }
         Remove-SetAside
+        # A hook or mod call that was running when they were set aside ends within seconds.
+        for ($i = 0; $i -lt 10 -and @(Get-ChildItem -LiteralPath $hookDir -Force -Filter '.*.old').Count -gt 0; $i++) {
+            Start-Sleep -Seconds 1
+            Remove-SetAside
+        }
         $left = @(Get-ChildItem -LiteralPath $hookDir -Force)
         if ($left.Count -eq 0) { Remove-Item -LiteralPath $hookDir }
     }
