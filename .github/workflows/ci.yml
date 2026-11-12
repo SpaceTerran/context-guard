@@ -27,3 +27,62 @@ jobs:
         run: swift test
       - name: Build the app and the hook program
         run: ./build.sh
+
+  test-windows:
+    name: test (windows-2025)
+    # GitHub-hosted too. Windows Server 2025 is the hosted image nearest Windows 11. No hosted image
+    # has Swift, so it comes from swift.org. cmd, because Windows PowerShell can turn a program's
+    # stderr output into errors.
+    runs-on: windows-2025
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: cmd
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: swift
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
+        continue-on-error: true
+        with:
+          swift-version: swift-6.4.2-release
+          swift-build: 6.4.2-RELEASE
+      # Swift's installer stops with 1618 when another installation runs at the same time, as one
+      # sometimes does on a new runner: wait for Windows Installer, then install it again.
+      - name: Wait for Windows Installer
+        if: steps.swift.outcome == 'failure'
+        shell: pwsh
+        run: .github/wait-for-installer.ps1
+      - name: Install Swift again
+        if: steps.swift.outcome == 'failure'
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f # v0.5.1
+        with:
+          swift-version: swift-6.4.2-release
+          swift-build: 6.4.2-RELEASE
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: windows/global.json
+      - name: Toolchain
+        run: swift --version && dotnet --version
+      - name: Build
+        run: swift build --build-tests
+      - name: Tests
+        run: swift test
+      # Also publishes the app as it ships (Native AOT) into dist\context-guard\app, and zips the folder.
+      - name: Build the hook program, the Codex link, their DLLs, the mod and the app
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+      # The Windows app's side of the ui feed: the contract files, and the client against the program
+      # just built. From windows\, where global.json picks the test runner.
+      - name: Feed tests (.NET)
+        working-directory: windows
+        env:
+          CONTEXT_GUARD_PROGRAM: ${{ github.workspace }}\dist\context-guard\context-guard.exe
+        run: dotnet test -c Release
+      # The Windows app as build.ps1 published it, driven through UI Automation in the runner's desktop
+      # session, with a stand-in for the program. Not in the .slnx: the app is x64 only and the UI
+      # tests need it published.
+      - name: App UI tests
+        working-directory: windows\ContextGuard.UITests
+        env:
+          CONTEXT_GUARD_APP: ${{ github.workspace }}\dist\context-guard\app\ContextGuard.exe
+          CONTEXT_GUARD_PROGRAM: ${{ github.workspace }}\dist\context-guard\context-guard.exe
+        run: dotnet test -c Release
