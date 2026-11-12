@@ -1,0 +1,327 @@
+{
+  "board": {
+    "menu": {
+      "empty": "No sessions running",
+      "heading": "Sessions",
+      "lines": [
+        "Claude Code: asks at 300k · Wait until 500k",
+        "Codex: asks at 65% · Wait until 80%"
+      ],
+      "on": {
+        "label": "Context Guard On",
+        "on": true
+      },
+      "quit": "Quit Context Guard",
+      "sessions": [],
+      "settings": "Settings…"
+    },
+    "popups": [],
+    "settings": {
+      "tabs": [
+        {
+          "blocks": [
+            {
+              "card": {
+                "rows": [
+                  {
+                    "toggle": {
+                      "id": "enabled",
+                      "label": "Watch sessions",
+                      "on": true
+                    }
+                  },
+                  {
+                    "login": {
+                      "label": "Open at login"
+                    }
+                  }
+                ],
+                "title": "Context Guard"
+              }
+            },
+            {
+              "note": {
+                "text": "When off, nothing pops up and nothing compacts by itself. Compact Now in a session's menu still works.",
+                "tone": "muted"
+              }
+            },
+            {
+              "card": {
+                "rows": [
+                  {
+                    "status": {
+                      "help": "Follow each Claude Code session and send it the save and continue messages",
+                      "label": "Hooks",
+                      "status": {
+                        "symbol": "warning",
+                        "text": "Not installed: run install.ps1",
+                        "tone": "warning"
+                      }
+                    }
+                  },
+                  {
+                    "status": {
+                      "help": "Compacts each Claude Code session once it has saved",
+                      "label": "Mod",
+                      "status": {
+                        "symbol": "warning",
+                        "text": "Not installed: run install.ps1",
+                        "tone": "warning"
+                      }
+                    }
+                  },
+                  {
+                    "status": {
+                      "help": "Reads what the session does after the save message and says when it has saved",
+                      "label": "Judge",
+                      "status": {
+                        "symbol": "success",
+                        "text": "Haiku",
+                        "tone": "success"
+                      }
+                    }
+                  }
+                ],
+                "title": "Claude Code"
+              }
+            },
+            {
+              "note": {
+                "text": "No API key: the judge uses your Claude Code sign-in.",
+                "tone": "muted"
+              }
+            },
+            {
+              "card": {
+                "rows": [
+                  {
+                    "status": {
+                      "help": "Follows each Codex session, sends it the save and continue messages and compacts it. It connects to Codex while a Codex session runs in a terminal.",
+                      "label": "Link",
+                      "status": {
+                        "symbol": "warning",
+                        "text": "Only watching",
+                        "tone": "warning"
+                      }
+                    }
+                  },
+                  {
+                    "note": {
+                      "text": "Only watching, not compacting: this Codex can't start a turn from outside. A newer Codex may fix this.",
+                      "tone": "warning"
+                    }
+                  },
+                  {
+                    "status": {
+                      "help": "Reads what the session does after the save message and says when it has saved",
+                      "label": "Judge",
+                      "status": {
+                        "symbol": "success",
+                        "text": "Each session's own model",
+                        "tone": "success"
+                      }
+                    }
+                  }
+                ],
+                "title": "Codex"
+              }
+            },
+            {
+              "note": {
+                "text": "No API key: the judge uses your Codex sign-in.",
+                "tone": "muted"
+              }
+            }
+          ],
+          "id": "general",
+          "title": "General"
+        },
+        {
+          "blocks": [
+            {
+              "card": {
+                "rows": [
+                  {
+                    "field": {
+                      "id": "askK",
+                      "invalid": true,
+                      "label": "Ask at",
+                      "text": "",
+                      "unit": "k tokens",
+                      "value": 0
+                    }
+                  },
+                  {
+                    "field": {
+                      "id": "laterK",
+                      "invalid": false,
+                      "label": "If you choose Wait, compact at",
+                      "text": "500",
+                      "unit": "k tokens",
+                      "value": 500
+                    }
+                  }
+                ],
+                "status": {
+                  "symbol": "warning",
+                  "text": "Not saved",
+                  "tone": "danger"
+                },
+                "title": "Claude Code"
+              }
+            },
+            {
+              "note": {
+                "text": "“Ask at” needs a number, like 300.",
+                "tone": "danger"
+              }
+            },
+            {
+              "card": {
+                "rows": [
+                  {
+                    "field": {
+                      "id": "codexAsk",
+                      "invalid": false,
+                      "label": "Ask at",
+                      "text": "65",
+                      "unit": "%",
+                      "value": 65
+                    }
+                  },
+                  {
+                    "field": {
+                      "id": "codexLater",
+                      "invalid": false,
+                      "label": "If you choose Wait, compact at",
+                      "text": "80",
+                      "unit": "%",
+                      "value": 80
+                    }
+                  }
+                ],
+                "status": {
+                  "symbol": "success",
+                  "text": "Saved 3:41 PM",
+                  "tone": "success"
+                },
+                "title": "Codex"
+              }
+            },
+            {
+              "note": {
+                "text": "When a session reaches 65% of its window, a popup asks whether to compact it. If you choose Wait, it compacts at 80%. In a 258k window, that's 167k and 206k.",
+                "tone": "muted"
+              }
+            },
+            {
+              "card": {
+                "rows": [
+                  {
+                    "field": {
+                      "id": "autoYes",
+                      "invalid": false,
+                      "label": "Compact after",
+                      "text": "60",
+                      "unit": "seconds",
+                      "value": 60
+                    }
+                  }
+                ],
+                "status": {
+                  "symbol": "saved",
+                  "text": "Saved",
+                  "tone": "muted"
+                },
+                "title": "If you don't answer"
+              }
+            },
+            {
+              "note": {
+                "text": "If you don't answer a popup within 60 seconds, it compacts the session, whichever tool it runs in.",
+                "tone": "muted"
+              }
+            }
+          ],
+          "id": "asking",
+          "title": "When to Ask"
+        },
+        {
+          "blocks": [
+            {
+              "card": {
+                "rows": [
+                  {
+                    "text": {
+                      "id": "message",
+                      "label": "Before compacting, send",
+                      "note": {
+                        "text": "Asks the session to save its work first.",
+                        "tone": "muted"
+                      },
+                      "restore": {
+                        "enabled": false,
+                        "help": "Put back the default save message",
+                        "label": "Restore Default"
+                      },
+                      "text": "I'm about to compact this conversation. Check in, push, or save anything else you need before I complete compaction, and then I will let you know when to resume."
+                    }
+                  }
+                ],
+                "status": {
+                  "symbol": "saved",
+                  "text": "Saved",
+                  "tone": "muted"
+                },
+                "title": "Before compacting, send"
+              }
+            },
+            {
+              "card": {
+                "rows": [
+                  {
+                    "text": {
+                      "id": "continueMessage",
+                      "label": "After compacting, send",
+                      "note": {
+                        "text": "Tells the session to carry on.",
+                        "tone": "muted"
+                      },
+                      "restore": {
+                        "enabled": false,
+                        "help": "Put back the default continue message",
+                        "label": "Restore Default"
+                      },
+                      "text": "continue now"
+                    }
+                  }
+                ],
+                "status": {
+                  "symbol": "saved",
+                  "text": "Saved",
+                  "tone": "muted"
+                },
+                "title": "After compacting, send"
+              }
+            },
+            {
+              "note": {
+                "text": "Changes save as you type. Both go to the session as your words. The judge (Haiku for Claude Code, each session's own model for Codex) reads what the session does after the first one; once it has saved and is idle, Context Guard compacts it, then sends the second. If you type in the session first, it leaves the rest to you.",
+                "tone": "muted"
+              }
+            }
+          ],
+          "id": "messages",
+          "title": "Messages"
+        }
+      ],
+      "title": "Context Guard Settings"
+    },
+    "tray": {
+      "label": "Context Guard",
+      "state": "on"
+    }
+  },
+  "type": "board",
+  "v": 1
+}

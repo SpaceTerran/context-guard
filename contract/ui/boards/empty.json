@@ -1,0 +1,25 @@
+{
+  "board": {
+    "menu": {
+      "empty": "No sessions running",
+      "heading": "Sessions",
+      "lines": [
+        "Asks at 300k · Wait until 500k"
+      ],
+      "on": {
+        "label": "Context Guard On",
+        "on": true
+      },
+      "quit": "Quit Context Guard",
+      "sessions": [],
+      "settings": "Settings…"
+    },
+    "popups": [],
+    "tray": {
+      "label": "Context Guard",
+      "state": "on"
+    }
+  },
+  "type": "board",
+  "v": 1
+}
