@@ -37,7 +37,7 @@
           "caption": "",
           "captionWraps": false,
           "close": "Close",
-          "detail": "Turn it back on from its icon in the taskbar.",
+          "detail": "Turn it back on from its icon on the taskbar.",
           "symbol": "off",
           "title": "Context Guard is off",
           "tone": "muted"
