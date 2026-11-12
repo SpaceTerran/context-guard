@@ -169,6 +169,7 @@ sealed unsafe class Tray
             Add();
             return true;
         }
+        if (msg is Native.WM_SETTINGCHANGE or Native.WM_DISPLAYCHANGE) app.SettingsChanged();
         if (msg == Native.WM_DISPLAYCHANGE && added && TaskbarDpi() != iconDpi)
         {
             MakeIcon();
