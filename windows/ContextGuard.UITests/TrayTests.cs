@@ -11,7 +11,7 @@ namespace ContextGuard.UITests;
 
 /// <summary>
 /// The tray icon, its flyout and its right-click menu, in the published app, against the contract's boards.
-/// Esc in the flyout needs a real key press, so it is checked by hand (QMP on win-build), not here.
+/// Esc in the flyout needs a real key press, so it is checked by hand with a real keyboard, not here.
 /// </summary>
 public sealed class TrayTests
 {
