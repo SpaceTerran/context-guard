@@ -4,19 +4,25 @@ using System.Text.Json;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Exceptions;
 using FlaUI.UIA3;
+using Microsoft.Win32;
 
 namespace ContextGuard.UITests;
 
 /// <summary>
 /// The published app (<c>CONTEXT_GUARD_APP</c>), started with StandIn.ps1 printing a contract board, and what
 /// it sent back. Everything goes through UI Automation and the app's own window messages: no synthesized
-/// mouse or keyboard input. Quits the app when disposed.
+/// mouse or keyboard input. Its Open at login goes under <see cref="LoginKey"/>, never Windows' own. Quits the
+/// app when disposed.
 /// </summary>
 sealed partial class RunningApp : IDisposable
 {
     public const string TrayClass = "ContextGuardTray";
     const string WinUIWindowClass = "WinUIDesktopWin32WindowClass";
     const uint WM_CLOSE = 0x0010, WM_TRAY = 0x8001, NIN_SELECT = 0x0400, WM_CONTEXTMENU = 0x007B;
+    /// <summary>Where the app under test keeps Open at login (in place of Software\Microsoft\Windows\CurrentVersion).</summary>
+    public const string LoginKey = @"Software\ContextGuardTests";
+    /// <summary>The Settings window's title, as the program words it.</summary>
+    public const string SettingsTitle = "Context Guard Settings";
 
     readonly string folder = Path.Combine(Path.GetTempPath(), "cg-uitest-" + Guid.NewGuid().ToString("N")[..8]);
 
@@ -24,14 +30,20 @@ sealed partial class RunningApp : IDisposable
     /// <param name="program">In place of the stand-in: a program that isn't there, say.</param>
     /// <param name="next">Boards the stand-in prints after each intent, in turn.</param>
     /// <param name="chime">A chime after the first board, as the program sends when a question opens.</param>
-    public RunningApp(string board = "asking", string? program = null, string[]? next = null, bool chime = false)
+    /// <param name="programArgs">The arguments for <paramref name="program"/>.</param>
+    /// <param name="environment">More environment for the app and its program.</param>
+    public RunningApp(string board = "asking", string? program = null, string[]? next = null, bool chime = false,
+        string[]? programArgs = null, IReadOnlyDictionary<string, string>? environment = null)
     {
         // Left over from a test that failed: one app per session, so it would stop this one.
         foreach (var old in System.Diagnostics.Process.GetProcessesByName("ContextGuard")) Quit(old);
+        Registry.CurrentUser.DeleteSubKeyTree(LoginKey, throwOnMissingSubKey: false);
         Directory.CreateDirectory(folder);
         IntentLog = Path.Combine(folder, "intents.log");
         Board = ReadBoard(board);
-        Process = System.Diagnostics.Process.Start(Start(board, program, next, chime))!;
+        var start = Start(board, program, next, chime, programArgs);
+        foreach (var (name, value) in environment ?? new Dictionary<string, string>()) start.Environment[name] = value;
+        Process = System.Diagnostics.Process.Start(start)!;
         TrayWindow = Until(() => Native.FindWindow(TrayClass, null) is var h && h != 0 ? (nint?)h : null, "the tray window");
     }
 
@@ -53,13 +65,20 @@ sealed partial class RunningApp : IDisposable
         JsonDocument.Parse(File.ReadAllText(Path.Combine(Contract, "boards", name + ".json"))).RootElement.GetProperty("board").Clone();
 
     /// <summary>The app's command line for a board (or for another program in place of the stand-in).</summary>
-    public ProcessStartInfo Start(string board, string? program = null, string[]? next = null, bool chime = false)
+    public ProcessStartInfo Start(string board, string? program = null, string[]? next = null, bool chime = false, string[]? programArgs = null)
     {
         var info = new ProcessStartInfo(App) { UseShellExecute = false };
+        info.ArgumentList.Add("--login-key");
+        info.ArgumentList.Add(LoginKey);
         if (program is not null)
         {
             info.ArgumentList.Add("--program");
             info.ArgumentList.Add(program);
+            foreach (var arg in programArgs ?? [])
+            {
+                info.ArgumentList.Add("--program-arg");
+                info.ArgumentList.Add(arg);
+            }
             return info;
         }
         info.ArgumentList.Add("--program");
@@ -138,10 +157,34 @@ sealed partial class RunningApp : IDisposable
 
     // Popups and notices
 
-    /// <summary>The popups and notices showing: the app's windows but the flyout.</summary>
+    /// <summary>The popups and notices showing: the app's windows but the flyout and Settings.</summary>
     public AutomationElement[] Popups() =>
         Desktop.FindAllChildren(cf => cf.ByProcessId(Process.Id).And(cf.ByClassName(WinUIWindowClass)))
-            .Where(w => w.Name != "Context Guard" && IsVisible(w)).ToArray();
+            .Where(w => w.Name != "Context Guard" && w.Name != SettingsTitle && IsVisible(w)).ToArray();
+
+    // Settings
+
+    /// <summary>The Settings window, once it shows.</summary>
+    public AutomationElement Settings() =>
+        Until(() => SettingsWindow() is { } w && IsVisible(w) ? w : null, "the Settings window");
+
+    /// <summary>The Settings window, shown or hidden (null before it was first opened).</summary>
+    public AutomationElement? SettingsWindow() =>
+        Desktop.FindFirstChild(cf => cf.ByProcessId(Process.Id).And(cf.ByName(SettingsTitle)));
+
+    /// <summary>Open at login's command, where the app keeps it under <see cref="LoginKey"/>; null when off.</summary>
+    public static string? LoginCommand()
+    {
+        using var run = Registry.CurrentUser.OpenSubKey(LoginKey + @"\Run");
+        return run?.GetValue("Context Guard") as string;
+    }
+
+    /// <summary>Windows' Startup apps switch for it (byte 0 odd = off there), null when Windows has none.</summary>
+    public static byte[]? StartupApproved()
+    {
+        using var approved = Registry.CurrentUser.OpenSubKey(LoginKey + @"\Explorer\StartupApproved\Run");
+        return approved?.GetValue("Context Guard") as byte[];
+    }
 
     /// <summary>A popup by its window's name (what a screen reader calls it), once it shows.</summary>
     public AutomationElement Popup(string name) =>
@@ -228,6 +271,7 @@ sealed partial class RunningApp : IDisposable
         {
         }
         if (!Process.HasExited && !Close()) Process.Kill(entireProcessTree: true);
+        Registry.CurrentUser.DeleteSubKeyTree(LoginKey, throwOnMissingSubKey: false);
         Automation.Dispose();
         Process.Dispose();
         try
