@@ -140,6 +140,7 @@ public enum CodexRollout {
                         r.transcript.compaction = .compaction(trigger: trigger, preTokens: pre, postTokens: total)
                         r.sizeAfterCompactionUnknown = false
                     }
+                    if r.transcript.firstTokens == nil { r.transcript.firstTokens = total }
                     r.transcript.latest = .response(tokens: total)
                     lastTokens = total
                 case "task_started":
@@ -174,6 +175,7 @@ public enum CodexRollout {
                                                            preTokens: lastTokens, postTokens: nil)
                 r.transcript.compaction = c
                 r.transcript.latest = c
+                r.transcript.firstTokens = nil
                 r.sizeAfterCompactionUnknown = true
                 lastTokens = nil
             default:

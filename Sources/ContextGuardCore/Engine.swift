@@ -30,6 +30,10 @@ public enum Engine {
             s.tokensAt = now
             s.awaitingCompactionRecord = false
         }
+        if s.awaitingSizeAfter == true, let first = r.firstTokens {
+            s.lastCompaction?.sizeAfter = first
+            s.awaitingSizeAfter = nil
+        }
         if let title = r.title { s.title = title }
         if s.phase == .sent, s.confirmedAt == nil, let nonce = s.sentNonce, r.markersSeen.contains(nonce) {
             s.confirmedAt = now
@@ -51,7 +55,8 @@ public enum Engine {
         return min(config.askAt, sent) / 2
     }
 
-    /// A compaction happened: note what it interrupted and start over.
+    /// A compaction happened: note what it interrupted and start over. How small it got the session
+    /// comes with its next response (`Compaction.sizeAfter`).
     public static func compacted(_ s: inout SessionState, trigger: String?, preTokens: Int?, postTokens: Int?, now: Date) {
         s.lastCompaction = Compaction(
             at: now, trigger: trigger, preTokens: preTokens ?? s.tokens, postTokens: postTokens,
@@ -61,6 +66,7 @@ public enum Engine {
             s.tokens = postTokens
             s.tokensAt = now
         }
+        s.awaitingSizeAfter = true
         rearm(&s)
     }
 

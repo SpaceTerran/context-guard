@@ -370,6 +370,28 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertFalse(state?.awaitingCompactionRecord ?? true)
     }
 
+    func testACompactionThatLeavesItAboveAskAtDoesntAskAgainRightAway() throws {
+        try configure { $0.codexAskPercent = 10; $0.codexLaterPercent = 15 }
+        log.append(CodexLine.turn("Add retries", reply: "Added them.", tokens: 30_000))
+        try settle()
+        tick()
+        XCTAssertEqual(state?.phase, .asking)
+
+        log.append([CodexLine.taskStarted()] + CodexLine.compacted() + [CodexLine.tokens(28_000), CodexLine.taskComplete()])
+        tick()
+        XCTAssertEqual(state?.lastCompaction?.sizeAfter, 28_000)
+        XCTAssertEqual(state?.phase, .watching, "not asked again at once")
+        XCTAssertEqual(state?.cycle, 1)
+
+        log.append(CodexLine.turn("And tests", reply: "Done.", tokens: 40_919))
+        tick()
+        XCTAssertEqual(state?.phase, .watching)
+        log.append(CodexLine.turn("Run them", reply: "Pass.", tokens: 40_920))
+        tick()
+        XCTAssertEqual(state?.phase, .asking, "once it has grown by half of Ask (12,920)")
+        XCTAssertEqual(state?.cycle, 2)
+    }
+
     func testEscDuringTheCompactionStopsIt() throws {
         let nonce = try askAndSend()
         log.append(CodexLine.reply("Ready."), CodexLine.taskComplete())

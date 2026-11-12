@@ -138,24 +138,26 @@ public struct HookRunner: Sendable {
             let reading = TranscriptReader.read(path: path, cursor: s.cursor, markers: s.sentNonce.map { [$0] } ?? [])
             if let cursor = reading.cursor { s.cursor = cursor }
             sawCompaction = reading.compaction != nil
-            Engine.observe(&s, reading, config: config, now: now)
+            Engine.observe(&s, reading, config: config.resolved(for: s), now: now)
         }
         if event == .sessionStart, input.source == "compact", !sawCompaction {
             Engine.compactionStarted(&s, now: now)
         }
 
+        // The thresholds as they apply to this session, now that its size after a compaction may be known.
+        let resolved = config.resolved(for: s)
         Engine.apply(Answer.load(input.sessionId, paths), to: &s)
-        Engine.advance(&s, config: config, watched: !Mute.isMuted(s, paths), now: now)
+        Engine.advance(&s, config: resolved, watched: !Mute.isMuted(s, paths), now: now)
         if event == .stop { Engine.noteStop(&s) }
 
         var outcome = HookOutcome.silent
         switch event {
         case .postToolBatch:
-            if let text = Engine.claimDelivery(&s, via: .step, config: config, nonce: Engine.makeNonce(), now: now) {
+            if let text = Engine.claimDelivery(&s, via: .step, config: resolved, nonce: Engine.makeNonce(), now: now) {
                 outcome = .addContext(event: HookEvent.postToolBatch.rawValue, text: text)
             }
         case .stop:
-            if let text = Engine.claimDelivery(&s, via: .wake, config: config, nonce: Engine.makeNonce(), now: now) {
+            if let text = Engine.claimDelivery(&s, via: .wake, config: resolved, nonce: Engine.makeNonce(), now: now) {
                 outcome = .wake(text: text)
                 s.waiterToken = nil
             } else if Engine.wantsWaiter(s) {
@@ -231,7 +233,7 @@ public struct HookRunner: Sendable {
             // Settings can change while waiting (a lower later-threshold, a shorter countdown, Off).
             let snapConfig = Config.load(paths)
             let watched = !Mute.isMuted(snap, paths)
-            let laterDue = watched && snap.phase == .later && snap.tokens >= snapConfig.laterAt
+            let laterDue = watched && snap.phase == .later && snap.tokens >= snapConfig.resolved(for: snap).laterAt
             let autoYesDue = Engine.autoYesDeadline(snap, config: snapConfig, watched: watched, now: clock()).map { clock() >= $0 } ?? false
             // Stopped watching while a question was up: drop the question now, not at the next turn.
             let unwatchedQuestion = !watched && (snap.phase == .asking || snap.phase == .later)
@@ -244,7 +246,7 @@ public struct HookRunner: Sendable {
                 lock.release()
                 return done
             }
-            let config = Config.load(paths)
+            let config = Config.load(paths).resolved(for: s)
             let now = clock()
             let before = s
             Engine.apply(answer, to: &s)
