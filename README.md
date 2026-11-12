@@ -130,7 +130,24 @@ below. `~` in the paths here is your user folder, `%USERPROFILE%`.
 
 ### Install, update, uninstall on Windows
 
-In PowerShell:
+Download `context-guard-windows-x64.zip` from the
+[latest release](https://github.com/SpaceTerran/context-guard/releases/latest), extract it, and run
+the `install.ps1` in its `context-guard` folder. In PowerShell:
+
+```
+cd ~\Downloads
+curl.exe -LO https://github.com/SpaceTerran/context-guard/releases/latest/download/context-guard-windows-x64.zip
+Get-FileHash context-guard-windows-x64.zip   # the same as in the release's .sha256 file
+Expand-Archive context-guard-windows-x64.zip -Force
+powershell -ExecutionPolicy Bypass -File context-guard-windows-x64\context-guard\install.ps1
+```
+
+`install.ps1` installs what's in its folder, or updates what's installed, so doing the same with a
+newer release updates it. Add `-NoCodex` to install without the Codex link (it removes one installed
+before), or `-Uninstall` to remove the hooks, the hook program, the mod, the Codex link and the app.
+Context Guard's Uninstall in Settings > Apps > Installed apps does the same.
+
+To build it yourself instead, with the build tools above:
 
 ```
 git clone https://github.com/SpaceTerran/context-guard.git
@@ -140,14 +157,8 @@ powershell -ExecutionPolicy Bypass -File dist\context-guard\install.ps1
 ```
 
 `build.ps1` builds everything into `dist\context-guard`, and zips that folder as
-`dist\context-guard-windows-x64-<build>.zip`. `install.ps1` installs what's in its folder, or
-updates what's installed (after a `git pull`, run both again). Add `-NoCodex` to install without
-the Codex link (it removes one installed before), or `-Uninstall` to remove the hooks, the hook
-program, the mod, the Codex link and the app. Context Guard's Uninstall in Settings > Apps >
-Installed apps does the same.
-
-To install on another PC, copy the zip there, extract it, and run the `install.ps1` in its
-`context-guard` folder the same way. That PC needs none of the build tools.
+`dist\context-guard-windows-x64-<build>.zip`, which installs on another PC the same way. After a
+`git pull`, run both again to update.
 
 `install.ps1` does the following:
 
@@ -335,6 +346,10 @@ them to the front while they run. With `CONTEXT_GUARD_PROGRAM` set to the full p
 `dist\context-guard\context-guard.exe`, both test projects also run their tests against the real
 program. `live-test\session.ps1` and `live-test\codex-session.ps1` are the live tests for Windows;
 their headers say how to run them.
+
+A tag `v*` runs the Release workflow: it builds the Windows zip on a GitHub-hosted runner and drafts
+a GitHub Release with the zip and its SHA-256. Check the draft, then publish it. The version the
+apps show is in `build.sh` and `build.ps1`.
 
 ## License
 
