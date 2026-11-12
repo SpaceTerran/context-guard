@@ -25,11 +25,13 @@ struct CLI {
       context-guard codex [--only-cwd <folder>] [--verbose]
                                                  keep Codex sessions guarded (runs until stopped; one at a time)
     \(stopLine)  context-guard status [--json]              list sessions and where each one stands
-      context-guard answer <session> yes|later|skip
-                                                 answer a session's question (id or id prefix)
+      context-guard answer <session> yes|later|skip [--source popup|menu|cli]
+                                                 answer a session's question (id or id prefix); from the
+                                                 menu, yes is Compact Now
       context-guard watch <session> on|off       watch a session's tab, or stop watching it
       context-guard on | off                     turn Context Guard on or off
       context-guard setup [--uninstall]          add Context Guard's hooks to Claude Code's settings, or remove them
+      context-guard ui                           for the Windows app: what to show, as JSON lines (until stdin closes)
       context-guard mod tick | report | turn     for the Context Guard mod (JSON on stdin and stdout)
     """
 
@@ -55,6 +57,9 @@ struct CLI {
             runMod(paths: paths, args: Array(args.dropFirst()))
         case "setup":
             setup(env: env, args: Array(args.dropFirst()))
+        case "ui":
+            guard args.count == 1 else { fail(usage) }
+            UIFeed(paths: paths, env: env).run()
         case "on", "off":
             var config = Config.load(paths)
             config.setEnabled(args.first == "on", now: Date())
@@ -294,10 +299,13 @@ struct CLI {
     // MARK: answer
 
     static func answer(paths: Paths, args: [String]) {
-        guard args.count == 2, let action = Answer.Action(rawValue: args[1]) else { fail(usage) }
+        var source = Answer.Source.cli
+        if args.count == 4, args[2] == "--source", let named = Answer.Source(rawValue: args[3]) { source = named }
+        guard args.count == 2 || args.count == 4 && args[2] == "--source" && Answer.Source(rawValue: args[3]) != nil,
+              let action = Answer.Action(rawValue: args[1]) else { fail(usage) }
         let target = session(paths: paths, prefix: args[0])
         do {
-            try Answer(cycle: target.state.cycle, action: action, source: .cli, at: Date()).save(for: target.id, paths)
+            try Answer(cycle: target.state.cycle, action: action, source: source, at: Date()).save(for: target.id, paths)
         } catch {
             fail("Couldn't save the answer: \(error.localizedDescription)")
         }
