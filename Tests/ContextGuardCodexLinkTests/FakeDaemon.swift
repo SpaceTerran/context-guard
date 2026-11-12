@@ -305,23 +305,52 @@ final class FakeDaemon: CodexDaemon, @unchecked Sendable {
     }
 }
 
-/// Hands out one daemon.
+/// Hands out one daemon. Tests change it while the link runs.
 final class FakeConnector: CodexConnecting, @unchecked Sendable {
     let daemon: FakeDaemon
-    var isAvailable = true
-    var connects = 0
-    /// When each connection was made.
-    var connectedAt: [Date] = []
+    private let lock = NSLock()
+    private var made: Date? = Date.distantPast
+    private var refusing = false
+    private var refusals = 0
+    private var times: [Date] = []
 
     init(_ daemon: FakeDaemon) {
         self.daemon = daemon
     }
 
-    func available() -> Bool { isAvailable }
+    private func locked<T>(_ body: () throws -> T) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body()
+    }
+
+    /// When the app server made its socket (long ago unless a test says otherwise); nil: no socket.
+    var socketMade: Date? {
+        get { locked { made } }
+        set { locked { made = newValue } }
+    }
+
+    /// Connecting fails, as it does to a socket left by a server that's gone.
+    var isRefusing: Bool {
+        get { locked { refusing } }
+        set { locked { refusing = newValue } }
+    }
+
+    var refused: Int { locked { refusals } }
+    var connects: Int { locked { times.count } }
+    /// When each connection was made.
+    var connectedAt: [Date] { locked { times } }
+
+    func socketTime() -> Date? { socketMade }
 
     func connect(onEvent: @escaping @Sendable (CodexEvent) -> Void) throws -> CodexDaemon {
-        connects += 1
-        connectedAt.append(Date())
+        try locked {
+            if refusing {
+                refusals += 1
+                throw CodexLinkError.closed("connection refused")
+            }
+            times.append(Date())
+        }
         daemon.reopen()
         daemon.onEvent = onEvent
         return daemon
