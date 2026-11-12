@@ -6,27 +6,37 @@
 #   - puts the mod (the part that compacts once the session has saved) in
 #     %USERPROFILE%\.claude\hooks\context-guard\mod and installs it as a Claude Code plugin for
 #     this user
+#   - adds a scheduled task, "Context Guard Codex link", that keeps the Codex link
+#     (context-guard-link.exe, no window) running while you're signed in; it guards Codex sessions
 #
 # It installs what build.ps1 made, so run it from that folder (dist\context-guard) or next to it:
 #
 #   powershell -ExecutionPolicy Bypass -File install.ps1              install, or update in place
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -NoCodex     the same, without the Codex
+#       link (and removes one installed before)
 #   powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall   remove the hooks, the hook
-#       program and the mod; keeps your settings and session records in
+#       program, the mod and the Codex link; keeps your settings and session records in
 #       %USERPROFILE%\.claude\context-guard
 #
 # Windows PowerShell 5.1 and PowerShell 7 both run it. ASCII only: 5.1 reads a file without a BOM
 # as ANSI.
-param([switch]$Uninstall)
+param([switch]$Uninstall, [switch]$NoCodex)
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
+if ($Uninstall -and $NoCodex) {
+    [Console]::Error.WriteLine('usage: install.ps1 [-NoCodex | -Uninstall]')
+    exit 1
+}
 
 $from = $PSScriptRoot
 if (-not (Test-Path -LiteralPath (Join-Path $from 'context-guard.exe'))) { $from = Join-Path $PSScriptRoot 'dist\context-guard' }
 $fromExe = Join-Path $from 'context-guard.exe'
+$fromLink = Join-Path $from 'context-guard-link.exe'
 $claude = Join-Path $env:USERPROFILE '.claude'
 $settings = Join-Path $claude 'settings.json'
 $hookDir = Join-Path $claude 'hooks\context-guard'
 $hookExe = Join-Path $hookDir 'context-guard.exe'
+$linkExe = Join-Path $hookDir 'context-guard-link.exe'
 $modDir = Join-Path $hookDir 'mod'
 # The plugin and the marketplace (the mod's own folder) are both named context-guard.
 $plugin = 'context-guard@context-guard'
@@ -35,6 +45,11 @@ $markers = @('hooks/context-guard/context-guard', 'hooks\\context-guard\\context
 if ($env:CONTEXT_GUARD_HOME) { $state = $env:CONTEXT_GUARD_HOME }
 elseif ($env:CLAUDE_CONFIG_DIR) { $state = Join-Path $env:CLAUDE_CONFIG_DIR 'context-guard' }
 else { $state = Join-Path $claude 'context-guard' }
+$linkStatus = Join-Path $state 'codex-link.json'
+# The task that keeps the Codex link running. CONTEXT_GUARD_TASK_NAME names another one, so tests
+# never touch the real task.
+if ($env:CONTEXT_GUARD_TASK_NAME) { $taskName = $env:CONTEXT_GUARD_TASK_NAME }
+else { $taskName = 'Context Guard Codex link' }
 
 function Say([string]$Text) { Write-Host $Text }
 
@@ -92,7 +107,8 @@ function Install-File([string]$Source, [string]$Target) {
     Rename-Item -LiteralPath $new -NewName (Split-Path $Target -Leaf)
 }
 
-# The program and its DLLs: the DLLs first, so the program never starts with half of them.
+# The programs and their DLLs: the DLLs first, so a program never starts with half of them; then the
+# Codex link (unless -NoCodex), then the hook program.
 function Install-Program {
     New-Item -ItemType Directory -Path $hookDir -Force | Out-Null
     Remove-SetAside
@@ -102,6 +118,10 @@ function Install-Program {
     # Any an earlier version needed and this one doesn't.
     foreach ($dll in @(Get-ChildItem -LiteralPath $hookDir -Filter '*.dll')) {
         if (-not (Test-Path -LiteralPath (Join-Path $from $dll.Name))) { Set-Aside $dll.FullName }
+    }
+    if (-not $NoCodex) {
+        Install-File $fromLink $linkExe
+        Say "installed $linkExe"
     }
     Install-File $fromExe $hookExe
     Say "installed $hookExe"
@@ -149,6 +169,124 @@ function Uninstall-Mod {
     if (Test-Path -LiteralPath $modDir) { Set-Aside $modDir }
 }
 
+# One argument as a Windows program reads it back (quotes around it when it needs them, and the
+# backslashes before a quote doubled).
+function ConvertTo-Argument([string]$Text) {
+    if ($Text -and $Text -notmatch '[\s"]') { return $Text }
+    $quoted = '"'
+    $slashes = 0
+    foreach ($c in $Text.ToCharArray()) {
+        if ($c -eq [char]'\') { $slashes++; continue }
+        if ($c -eq [char]'"') { $quoted += ('\' * (2 * $slashes + 1)) + '"' }
+        else { $quoted += ('\' * $slashes) + $c }
+        $slashes = 0
+    }
+    return $quoted + ('\' * (2 * $slashes)) + '"'
+}
+
+# Task Scheduler through its COM API: a standard user can use it, where the ScheduledTasks cmdlets
+# need more.
+function Get-TaskService {
+    $service = New-Object -ComObject Schedule.Service
+    $service.Connect()
+    return $service
+}
+
+function Get-LinkTask {
+    try { return (Get-TaskService).GetFolder('\').GetTask($taskName) } catch { return $null }
+}
+
+# Registers the task, or updates it to run the link with this run's settings. It runs the link in
+# your own session, unelevated, while you're signed in: started at sign-in, and every minute
+# when it isn't running (after a crash, a kill or a stop), never two at once.
+function Register-LinkTask {
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $service = Get-TaskService
+    $task = $service.NewTask(0)
+    $task.RegistrationInfo.Description = "Keeps Context Guard's Codex link running (context-guard-link.exe), which guards Codex sessions. Installed by Context Guard's install.ps1."
+    $task.Principal.UserId = $me
+    $task.Principal.LogonType = 3              # interactive token: your own session
+    $task.Principal.RunLevel = 0               # least privilege
+    $options = $task.Settings
+    $options.MultipleInstances = 2             # a start while it runs is ignored
+    $options.ExecutionTimeLimit = 'PT0S'       # no time limit
+    $options.DisallowStartIfOnBatteries = $false
+    $options.StopIfGoingOnBatteries = $false
+    $options.StartWhenAvailable = $true
+    $options.RestartCount = 999
+    $options.RestartInterval = 'PT1M'
+    $options.Priority = 5                      # normal, as the Mac's LaunchAgent
+    $logon = $task.Triggers.Create(9)          # at sign-in
+    $logon.UserId = $me
+    $every = $task.Triggers.Create(1)          # from now on, every minute
+    $every.StartBoundary = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
+    $every.Repetition.Interval = 'PT1M'
+    $action = $task.Actions.Create(0)
+    $action.Path = $linkExe
+    $action.WorkingDirectory = $hookDir
+    # A task has no environment of its own: the folders set for this run go to the link.
+    $arguments = @()
+    foreach ($name in @('CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'CONTEXT_GUARD_HOME')) {
+        $value = [Environment]::GetEnvironmentVariable($name)
+        if ($value) { $arguments += @('--env', (ConvertTo-Argument "$name=$value")) }
+    }
+    $action.Arguments = $arguments -join ' '
+    # 6: create or update; 3: run as the signed-in user, no password.
+    $null = $service.GetFolder('\').RegisterTaskDefinition($taskName, $task, 6, $null, $null, 3)
+}
+
+# Asks the running link to stop (deleting or updating its task doesn't), with the program that is
+# here: the installed one, or the one next to this script.
+function Stop-Link {
+    if (Test-Path -LiteralPath $hookExe) { $program = $hookExe }
+    elseif (Test-Path -LiteralPath $fromExe) { $program = $fromExe }
+    else { return }
+    if ((Invoke-Program $program @('codex', '--stop') -Quiet) -ne 0) {
+        $script:output | ForEach-Object { [Console]::Error.WriteLine("warning: $_") }
+    }
+}
+
+# Ends the link the task is running: asked first (so it says so in codex-link.json), then ended by
+# Task Scheduler if it's still running two seconds later. One installed with other settings keeps
+# its files in another folder, and doesn't hear a request for this one.
+function Stop-LinkTask($Task) {
+    Stop-Link
+    if (-not $Task) { return }
+    for ($i = 0; $i -lt 20 -and $Task.State -eq 4; $i++) { Start-Sleep -Milliseconds 100 }
+    if ($Task.State -eq 4) { $Task.Stop(0) }
+}
+
+# Registers the task, then restarts the link on the program just installed, and waits a moment
+# for its first report so the status below shows it.
+function Install-Link {
+    try { Register-LinkTask } catch { Fail "couldn't register the scheduled task `"$taskName`": $($_.Exception.Message)" }
+    Stop-LinkTask (Get-LinkTask)
+    Remove-SetAside
+    $started = [DateTime]::UtcNow
+    $null = (Get-LinkTask).Run($null)
+    Say "installed the scheduled task `"$taskName`" (runs context-guard-link.exe while you're signed in)"
+    for ($i = 0; $i -lt 30; $i++) {
+        if ((Test-Path -LiteralPath $linkStatus) -and (Get-Item -LiteralPath $linkStatus).LastWriteTimeUtc -ge $started) { break }
+        Start-Sleep -Milliseconds 100
+    }
+}
+
+# Removes the task, stops the link and removes what it last said, so `status` goes back to showing
+# Claude Code alone. Its log stays with the session records.
+function Uninstall-Link {
+    $task = Get-LinkTask
+    if (-not $task -and -not (Test-Path -LiteralPath $linkExe) -and -not (Test-Path -LiteralPath $linkStatus)) { return }
+    # Disabled first, so it can't start the link again while it's being removed.
+    if ($task) { $task.Enabled = $false }
+    Stop-LinkTask $task
+    if ($task) { (Get-TaskService).GetFolder('\').DeleteTask($taskName, 0) }
+    foreach ($file in @($linkStatus, (Join-Path $state 'codex-link.lock'))) {
+        if (Test-Path -LiteralPath $file) { try { Remove-Item -LiteralPath $file -Force } catch { } }
+    }
+    if (Test-Path -LiteralPath $linkExe) { Set-Aside $linkExe }
+    Say "removed the Codex link (the scheduled task `"$taskName`")"
+}
+
 # Takes Context Guard's hooks out of settings.json, with the program that put them there: the
 # installed one, or the one next to this script when that's gone.
 function Remove-Hooks {
@@ -162,10 +300,11 @@ function Remove-Hooks {
 }
 
 function Uninstall-All {
+    Uninstall-Link
     Remove-Hooks
     Uninstall-Mod
     if (Test-Path -LiteralPath $hookDir) {
-        foreach ($file in @(Get-ChildItem -LiteralPath $hookDir -File | Where-Object { $_.Name -eq 'context-guard.exe' -or $_.Extension -eq '.dll' })) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $hookDir -File | Where-Object { $_.Name -eq 'context-guard.exe' -or $_.Name -eq 'context-guard-link.exe' -or $_.Extension -eq '.dll' })) {
             Set-Aside $file.FullName
         }
         Remove-SetAside
@@ -181,6 +320,7 @@ function Uninstall-All {
 
 function Install-All {
     if (-not (Test-Path -LiteralPath $fromExe)) { Fail "no context-guard.exe next to install.ps1 or in dist\context-guard; run build.ps1 first" }
+    if (-not $NoCodex -and -not (Test-Path -LiteralPath $fromLink)) { Fail "no context-guard-link.exe next to context-guard.exe; run build.ps1 again, or install with -NoCodex" }
     # The program first, so the hooks never point at a missing file.
     Install-Program
     # Backs up settings.json, then removes and adds the hooks, so running this again leaves exactly
@@ -188,6 +328,7 @@ function Install-All {
     if ((Invoke-Program $hookExe @('setup')) -ne 0) { exit 1 }
     Copy-Mod
     Install-Mod
+    if ($NoCodex) { Uninstall-Link } else { Install-Link }
     $null = Invoke-Program $hookExe @('status')
 }
 

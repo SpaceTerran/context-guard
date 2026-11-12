@@ -1,5 +1,6 @@
-# Builds Context Guard for Windows into dist\context-guard\: the hook program (context-guard.exe)
-# with the Swift runtime DLLs it runs on, the mod, and install.ps1, which installs them from there.
+# Builds Context Guard for Windows into dist\context-guard\: the hook program (context-guard.exe),
+# the Codex link the background task runs (context-guard-link.exe), the Swift runtime DLLs they run
+# on, the mod, and install.ps1, which installs them from there.
 # Needs Swift and Visual Studio's C++ build tools (their dumpbin finds the DLLs).
 #
 #   powershell -ExecutionPolicy Bypass -File build.ps1
@@ -35,9 +36,11 @@ function Invoke-Program {
     return $lines
 }
 
-Invoke-Program 'swift' @('build', '-c', 'release', '--product', 'context-guard', '--package-path', $pkg) -Show | Out-Null
+$programs = @('context-guard.exe', 'context-guard-link.exe')
+foreach ($product in $programs) {
+    Invoke-Program 'swift' @('build', '-c', 'release', '--product', [IO.Path]::GetFileNameWithoutExtension($product), '--package-path', $pkg) -Show | Out-Null
+}
 $bin = (Invoke-Program 'swift' @('build', '-c', 'release', '--show-bin-path', '--package-path', $pkg) | Select-Object -Last 1).Trim()
-$exe = Join-Path $bin 'context-guard.exe'
 
 # The Swift runtime: the folder on PATH that has swiftCore.dll.
 $runtime = $null
@@ -52,13 +55,13 @@ $dumpbin = Invoke-Program $vswhere @('-latest', '-products', '*', '-requires', '
     '-find', 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe') | Select-Object -Last 1
 if (-not $dumpbin) { throw "can't find dumpbin: install Visual Studio's C++ build tools" }
 
-# Every DLL the program loads, and theirs in turn: those in the Swift runtime folder ship with it
+# Every DLL the programs load, and theirs in turn: those in the Swift runtime folder ship with it
 # (the C++ runtime among them, so no redistributable is needed); the rest must be part of Windows.
 $system32 = Join-Path $env:SystemRoot 'System32'
 $ship = New-Object 'System.Collections.Generic.SortedDictionary[string,string]' ([StringComparer]::OrdinalIgnoreCase)
 $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 $queue = New-Object 'System.Collections.Generic.Queue[string]'
-$queue.Enqueue($exe)
+foreach ($program in $programs) { $queue.Enqueue((Join-Path $bin $program)) }
 while ($queue.Count -gt 0) {
     $file = $queue.Dequeue()
     foreach ($line in (Invoke-Program $dumpbin @('/nologo', '/dependents', $file))) {
@@ -77,7 +80,7 @@ while ($queue.Count -gt 0) {
 
 if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
 New-Item -ItemType Directory -Path $out | Out-Null
-Copy-Item -LiteralPath $exe -Destination $out
+foreach ($program in $programs) { Copy-Item -LiteralPath (Join-Path $bin $program) -Destination $out }
 foreach ($path in $ship.Values) { Copy-Item -LiteralPath $path -Destination $out }
 # The mod's manifests and hooks, not its tests.
 $plugin = Join-Path $out 'mod\.claude-plugin'
@@ -86,14 +89,27 @@ Copy-Item -LiteralPath (Join-Path $pkg 'mod\.claude-plugin\plugin.json'), (Join-
 Copy-Item -LiteralPath (Join-Path $pkg 'mod\hooks') -Destination (Join-Path $out 'mod\hooks') -Recurse
 Copy-Item -LiteralPath (Join-Path $pkg 'install.ps1') -Destination $out
 
-# It runs from the folder alone, with nothing on PATH but Windows.
+# Both run from the folder alone, with nothing on PATH but Windows. The link has no console, so it
+# is given an argument it refuses: it says so in its log (in a scratch folder) and exits 1, which it
+# can only do once its DLLs have loaded.
 $savedPath = $env:Path
+$savedHome = $env:CONTEXT_GUARD_HOME
+$scratch = Join-Path ([IO.Path]::GetTempPath()) ('context-guard-build-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
 $env:Path = "$system32;$env:SystemRoot"
+$env:CONTEXT_GUARD_HOME = $scratch
 try {
     Invoke-Program (Join-Path $out 'context-guard.exe') @('--help') | Out-Null
+    $link = Start-Process -FilePath (Join-Path $out 'context-guard-link.exe') -ArgumentList '--env', 'BUILD_CHECK=1' -Wait -PassThru
+    $log = Join-Path $scratch 'codex-link.log'
+    $said = if (Test-Path -LiteralPath $log) { (Get-Content -LiteralPath $log) -join ' ' } else { '' }
+    if ($link.ExitCode -ne 1 -or $said -notlike '*not started: --env BUILD_CHECK*') {
+        throw "context-guard-link.exe didn't run from $out (exit $($link.ExitCode); log: $said)"
+    }
 } finally {
     $env:Path = $savedPath
+    $env:CONTEXT_GUARD_HOME = $savedHome
+    if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
 }
 
 $mb = [math]::Round(((Get-ChildItem -LiteralPath $out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
-Write-Host "built $out (context-guard.exe, $($ship.Count) DLLs, the mod; $mb MB)"
+Write-Host "built $out (context-guard.exe, context-guard-link.exe, $($ship.Count) DLLs, the mod; $mb MB)"
