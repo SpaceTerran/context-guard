@@ -1,0 +1,26 @@
+{
+  "symbols": [
+    "watching",
+    "asking",
+    "waiting",
+    "sending",
+    "sent",
+    "skipped",
+    "notWatching",
+    "needsYou",
+    "compacting",
+    "success",
+    "saved",
+    "warning",
+    "failed",
+    "off",
+    "saving"
+  ],
+  "tones": [
+    "accent",
+    "success",
+    "warning",
+    "danger",
+    "muted"
+  ]
+}
