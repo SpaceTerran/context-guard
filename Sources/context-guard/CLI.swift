@@ -9,13 +9,22 @@ import Foundation
 
 @main
 struct CLI {
+    #if os(Windows)
+    static let stopLine = """
+      context-guard codex --stop                 stop the running Codex link
+
+    """
+    #else
+    static let stopLine = ""
+    #endif
+
     static let usage = """
     context-guard: Claude Code hook, Codex link and control for Context Guard
 
       context-guard hook                         run as a Claude Code hook (reads the event on stdin)
       context-guard codex [--only-cwd <folder>] [--verbose]
                                                  keep Codex sessions guarded (runs until stopped; one at a time)
-      context-guard status [--json]              list sessions and where each one stands
+    \(stopLine)  context-guard status [--json]              list sessions and where each one stands
       context-guard answer <session> yes|later|skip
                                                  answer a session's question (id or id prefix)
       context-guard watch <session> on|off       watch a session's tab, or stop watching it
@@ -49,7 +58,7 @@ struct CLI {
         case "on", "off":
             var config = Config.load(paths)
             config.setEnabled(args.first == "on", now: Date())
-            do { try config.save(paths) } catch { fail("Couldn't save \(paths.configFile.path): \(error.localizedDescription)") }
+            do { try config.save(paths) } catch { fail("Couldn't save \(PathRules.native(paths.configFile.path)): \(error.localizedDescription)") }
             print("Context Guard is \(config.enabled ? "on" : "off").")
         case "-h", "--help", "help", nil:
             print(usage)
@@ -95,9 +104,16 @@ struct CLI {
 
     // MARK: codex
 
-    /// The link to the Codex app server. Runs until SIGTERM or SIGINT. A second copy (for the same
+    /// The link to the Codex app server. Runs until it is told to stop (SIGTERM or SIGINT on the
+    /// Mac; Ctrl+C, its console closing or `codex --stop` on Windows). A second copy (for the same
     /// Context Guard folder) waits for the first to stop, so launchd has nothing to restart.
     static func runCodexLink(paths: Paths, env: [String: String], args: [String]) -> Never {
+        #if os(Windows)
+        if args.first == "--stop" {
+            guard args.count == 1 else { fail(usage) }
+            stopCodexLink(paths: paths)
+        }
+        #endif
         var options = CodexLink.Options()
         var verbose = false
         var i = 0
@@ -114,41 +130,21 @@ struct CLI {
             }
             i += 1
         }
-        do { try paths.ensureDirectories() } catch { fail("Couldn't make \(paths.root.path): \(error.localizedDescription)") }
-        let log = CodexLinkLog(url: paths.codexLinkLog, echo: verbose)
-        var lock = FileLock.acquire(paths.codexLinkLock, timeout: 0)
-        if lock == nil {
-            log.write("another context-guard codex is running for \(paths.root.path); waiting for it to stop")
-            lock = FileLock.wait(paths.codexLinkLock)
-        }
-        guard lock != nil else { fail("Couldn't open \(paths.codexLinkLock.path).") }
+        CodexLinkService.run(paths: paths, env: env, options: options, verbose: verbose, fail: fail)
+    }
 
-        let connector = CodexSocketConnector(socketPath: CodexSocketConnector.defaultSocketPath(env))
-        let link = CodexLink(paths: paths, connector: connector, options: options, log: log)
-        // Stopped, it says so in codex-link.json first; one that doesn't stop in time just exits.
-        let stopping: @Sendable () -> Void = {
-            link.stop()
-            DispatchQueue.global().asyncAfter(deadline: .now() + 5) { exit(0) }
+    #if os(Windows)
+    /// What the installer runs before replacing or removing the link: Windows has no signals, and
+    /// deleting the link's task leaves it running.
+    static func stopCodexLink(paths: Paths) -> Never {
+        switch CodexLinkService.stop(paths: paths) {
+        case .stopped: print("stopped the Codex link")
+        case .notRunning: print("no Codex link is running")
+        case .stillRunning: fail("the Codex link was asked to stop but is still running")
         }
-        #if os(Windows)
-        let stops = CodexLinkStop.Listener(root: paths.root, stopping)
-        #else
-        var stops: [DispatchSourceSignal] = []
-        for sig in [SIGTERM, SIGINT] {
-            signal(sig, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
-            source.setEventHandler(handler: stopping)
-            source.resume()
-            stops.append(source)
-        }
-        #endif
-        link.run()
-        #if os(Windows)
-        stops?.stopped()
-        #endif
-        withExtendedLifetime((lock, stops)) {}
         exit(0)
     }
+    #endif
 
     // MARK: mod
 

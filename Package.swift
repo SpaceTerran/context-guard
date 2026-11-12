@@ -23,6 +23,16 @@ products.append(.executable(name: "ContextGuardApp", targets: ["ContextGuardApp"
 targets.append(.executableTarget(name: "ContextGuardApp", dependencies: ["ContextGuardCore"]))
 #endif
 
+// The Codex link the Windows background task runs: `context-guard codex`'s code, linked as a GUI
+// program so it opens no console window. The Mac's LaunchAgent runs `context-guard codex` itself.
+#if os(Windows)
+products.append(.executable(name: "context-guard-link", targets: ["context-guard-link"]))
+targets.append(.executableTarget(
+    name: "context-guard-link",
+    dependencies: ["ContextGuardCore", "ContextGuardCodexLink"],
+    linkerSettings: [.unsafeFlags(["-Xlinker", "/SUBSYSTEM:WINDOWS", "-Xlinker", "/ENTRY:mainCRTStartup"])]))
+#endif
+
 let package = Package(
     name: "ContextGuard",
     platforms: [.macOS(.v14)],
