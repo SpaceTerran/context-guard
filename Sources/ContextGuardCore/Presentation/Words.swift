@@ -43,7 +43,7 @@ public enum Words {
         public static let turnBackOn = turnBackOn(windows: PathRules.isWindows)
 
         public static func turnBackOn(windows: Bool) -> String {
-            windows ? "Turn it back on from its icon in the taskbar." : "Turn it back on from the gauge in the menu bar."
+            windows ? "Turn it back on from its icon on the taskbar." : "Turn it back on from the gauge in the menu bar."
         }
         public static let saving = "Saving, then compacting"
     }
