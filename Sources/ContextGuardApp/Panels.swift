@@ -17,12 +17,9 @@ final class PanelController: @MainActor PanelHost {
     static let width: CGFloat = 400
     static let margin: CGFloat = 12
     static let spacing: CGFloat = 10
-    /// More than this many at once would run off a laptop screen; the rest wait their turn.
-    static let maxOpen = 5
-
     var openKeys: [String] { stack.map(\.key) }
 
-    var hasRoom: Bool { stack.count < Self.maxOpen }
+    var hasRoom: Bool { stack.count < Presenter.maxOpen }
 
     /// Opens with a sound, unless five are already up.
     func openQuestion(_ id: String) -> Bool {

@@ -311,11 +311,10 @@ final class PresenterTests: XCTestCase {
     func testTurningOffSaysHowToTurnItBackOn() throws {
         let p = presenter()
         p.announceOff(host)
-        let key = try XCTUnwrap(host.noticeKeys.first)
-        XCTAssertTrue(key.hasPrefix("notice:off:"))
-        XCTAssertEqual(host.notices[key], NoticeContent(symbol: .off, tone: .muted, title: "Context Guard is off", detail: Words.Notice.turnBackOn))
+        XCTAssertEqual(host.noticeKeys, ["notice:off:1"])
+        XCTAssertEqual(host.notices["notice:off:1"], NoticeContent(symbol: .off, tone: .muted, title: "Context Guard is off", detail: Words.Notice.turnBackOn))
         p.announceOff(host)
-        XCTAssertEqual(host.noticeKeys.count, 2, "each time")
+        XCTAssertEqual(host.noticeKeys, ["notice:off:1", "notice:off:2"], "each time")
     }
 
     // MARK: Reading

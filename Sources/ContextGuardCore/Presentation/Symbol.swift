@@ -34,7 +34,7 @@ public enum Symbol: String, Sendable, CaseIterable {
 
 /// What an icon's color says. Status colors only ever mean status; accent is Context Guard itself
 /// at work.
-public enum Tone: Sendable {
+public enum Tone: String, Sendable, CaseIterable {
     case accent, success, warning, danger, muted
 }
 

@@ -11,6 +11,16 @@ public enum SettingsText {
         public var unit: String
         public var step: Int
         public var range: ClosedRange<Int>
+
+        /// What a field holds as typed: a number, or 0 when it doesn't hold one.
+        public static func parse(_ typed: String) -> Int {
+            max(Int(typed.trimmingCharacters(in: .whitespaces)) ?? 0, 0)
+        }
+
+        /// The value after its − or + button: to the step below or above, within the range.
+        public func stepped(_ value: Int, up: Bool) -> Int {
+            up ? min((value / step + 1) * step, range.upperBound) : max((value - 1) / step * step, range.lowerBound)
+        }
     }
 
     public static let askField = Field(label: Words.Settings.askAt, unit: Words.Settings.kTokens, step: 50, range: 50...10_000)
@@ -188,11 +198,16 @@ public enum SaveStatus: Equatable, Sendable {
         }
     }
 
+    /// The time a save shows: "3:41 PM", as this computer writes times.
+    public static let shortTime: @Sendable (Date) -> String = { $0.formatted(date: .omitted, time: .shortened) }
+
     /// The header: "Saved", "Saved 3:41 PM" or "Not saved".
-    public var line: StatusLine {
+    public var line: StatusLine { line(time: Self.shortTime) }
+
+    public func line(time: (Date) -> String) -> StatusLine {
         switch self {
         case .unchanged: return StatusLine(text: "Saved", symbol: .saved, tone: .muted)
-        case .saved(let at): return StatusLine(text: "Saved \(at.formatted(date: .omitted, time: .shortened))", symbol: .success, tone: .success)
+        case .saved(let at): return StatusLine(text: "Saved \(time(at))", symbol: .success, tone: .success)
         case .notSaved: return StatusLine(text: "Not saved", symbol: .warning, tone: .danger)
         }
     }

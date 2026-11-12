@@ -11,7 +11,7 @@ final class SettingsWindow {
     static func makeWindow() -> NSWindow {
         let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .fullSizeContentView],
                          backing: .buffered, defer: true)
-        w.title = "Context Guard Settings"
+        w.title = Words.Settings.windowTitle
         // The brand's background runs under the title bar.
         w.titlebarAppearsTransparent = true
         w.backgroundColor = Theme.windowBackground
@@ -56,19 +56,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 struct SettingsView: View {
     let model: AppModel
     @State private var tab = SettingsTab.general
-    @State private var askK: Int
-    @State private var laterK: Int
-    @State private var codexAsk: Int
-    @State private var codexLater: Int
-    @State private var autoYes: Int
-    @State private var message: String
-    @State private var continueMessage: String
-    /// Whether each card's changes are on disk, for its header.
-    @State private var thresholdsSaved = SaveStatus.unchanged
-    @State private var codexSaved = SaveStatus.unchanged
-    @State private var countdownSaved = SaveStatus.unchanged
-    @State private var messageSaved = SaveStatus.unchanged
-    @State private var continueSaved = SaveStatus.unchanged
+    /// Each field as typed, and whether each card's changes are on disk.
+    @State private var form: SettingsForm
     @State private var login = LoginItem.state
     @State private var loginError: String?
     private let hooksInstalled: Bool
@@ -82,17 +71,10 @@ struct SettingsView: View {
     init(model: AppModel, tab: SettingsTab = .general) {
         self.model = model
         _tab = State(initialValue: tab)
-        let c = model.config
-        _askK = State(initialValue: c.askAt / 1_000)
-        _laterK = State(initialValue: c.laterAt / 1_000)
-        _codexAsk = State(initialValue: c.codexAskPercent)
-        _codexLater = State(initialValue: c.codexLaterPercent)
-        _autoYes = State(initialValue: c.autoYesSeconds)
-        _message = State(initialValue: c.message)
-        _continueMessage = State(initialValue: c.continueMessage)
+        _form = State(initialValue: SettingsForm(model.config))
         hooksInstalled = HookInstall.isInstalled(model.paths)
         modInstalled = ModInstall.isInstalled(model.paths)
-        codexLinkInstalled = CodexLinkInstall.isInstalled
+        codexLinkInstalled = CodexLinkInstall.isInstalled(model.paths)
     }
 
     var body: some View {
@@ -117,13 +99,6 @@ struct SettingsView: View {
         .background(Theme.bg)
         .toggleStyle(BrandSwitchStyle())
         .tint(Theme.primary)
-        .onChange(of: askK) { saveThresholds() }
-        .onChange(of: laterK) { saveThresholds() }
-        .onChange(of: codexAsk) { saveCodex() }
-        .onChange(of: codexLater) { saveCodex() }
-        .onChange(of: autoYes) { countdownSaved = update { $0.autoYesSeconds = autoYes } }
-        .onChange(of: message) { messageSaved = update { $0.message = message } }
-        .onChange(of: continueMessage) { continueSaved = update { $0.continueMessage = continueMessage } }
     }
 
     @ViewBuilder
@@ -212,95 +187,65 @@ struct SettingsView: View {
             // Each tool's thresholds, then the countdown both share.
             VStack(alignment: .leading, spacing: 10) {
                 Card(title: SessionHost.claude.name) {
-                    askField
+                    numberField(.askK)
                     Rule()
-                    laterField
+                    numberField(.laterK)
                 } accessory: {
-                    SaveStatusLabel(status: thresholdProblem.map(SaveStatus.notSaved) ?? thresholdsSaved)
+                    SaveStatusLabel(status: form.claudeStatus)
                 }
-                problemOr(thresholdProblem, SettingsText.claudeThresholdsNote(askK: askK, laterK: laterK))
+                note(form.claudeNote)
                     .padding(.bottom, 14)
                 Card(title: SessionHost.codex.name) {
-                    NumberField(SettingsText.codexAskField, value: $codexAsk, invalid: SettingsText.codexAskInvalid(codexAsk))
+                    numberField(.codexAsk)
                     Rule()
-                    NumberField(SettingsText.codexLaterField, value: $codexLater,
-                                invalid: SettingsText.codexLaterInvalid(ask: codexAsk, later: codexLater))
+                    numberField(.codexLater)
                 } accessory: {
-                    SaveStatusLabel(status: codexProblem.map(SaveStatus.notSaved) ?? codexSaved)
+                    SaveStatusLabel(status: form.codexStatus)
                 }
-                problemOr(codexProblem, SettingsText.codexThresholdsNote(ask: codexAsk, later: codexLater))
+                note(form.codexNote)
                     .padding(.bottom, 14)
                 Card(title: Words.Settings.ifYouDontAnswer) {
-                    autoYesField
+                    numberField(.autoYes)
                 } accessory: {
-                    SaveStatusLabel(status: countdownSaved)
+                    SaveStatusLabel(status: form.countdownStatus)
                 }
-                Note(SettingsText.countdownNote(autoYes))
-                    .padding(.horizontal, 2)
+                note(form.countdownNote)
             }
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 Card(title: Words.Settings.whenToAskCard) {
-                    askField
+                    numberField(.askK)
                     Rule()
-                    autoYesField
+                    numberField(.autoYes)
                     Rule()
-                    laterField
+                    numberField(.laterK)
                 } accessory: {
                     // Thresholds that don't make sense aren't saved; the note under the card says why.
-                    SaveStatusLabel(status: thresholdProblem.map(SaveStatus.notSaved) ?? .latest(thresholdsSaved, countdownSaved))
+                    SaveStatusLabel(status: form.whenToAskStatus)
                 }
-                problemOr(thresholdProblem, SettingsText.whenToAskNote(askK: askK, laterK: laterK, autoYes: autoYes))
+                note(form.whenToAskNote)
             }
         }
     }
 
-    private var askField: some View {
-        NumberField(SettingsText.askField, value: $askK, invalid: SettingsText.askInvalid(askK: askK, laterK: laterK))
-    }
-
-    private var laterField: some View {
-        NumberField(SettingsText.laterField, value: $laterK, invalid: SettingsText.laterInvalid(askK: askK, laterK: laterK))
-    }
-
-    private var autoYesField: some View {
-        NumberField(SettingsText.countdownField(showsCodex: model.showsCodex), value: $autoYes)
+    private func numberField(_ f: SettingsForm.Field) -> some View {
+        NumberField(form.field(f, showsCodex: model.showsCodex),
+                    value: Binding(get: { form.number(f) }, set: { form.set(f, number: $0, save: { save($0) }) }),
+                    invalid: form.invalid(f))
     }
 
     /// The note under a card: why it isn't saved, or what it does.
-    private func problemOr(_ problem: String?, _ text: String) -> some View {
-        Note(problem ?? text, color: problem == nil ? Theme.muted : Theme.danger)
+    private func note(_ n: SettingsNote) -> some View {
+        Note(n.text, color: Theme.color(n.tone))
             .padding(.horizontal, 2)
-    }
-
-    private var thresholdProblem: String? { SettingsText.thresholdProblem(askK: askK, laterK: laterK) }
-
-    private var codexProblem: String? { SettingsText.codexProblem(ask: codexAsk, later: codexLater) }
-
-    private func saveCodex() {
-        guard codexProblem == nil else { return }
-        codexSaved = update {
-            $0.codexAskPercent = codexAsk
-            $0.codexLaterPercent = codexLater
-        }
-    }
-
-    private func saveThresholds() {
-        guard thresholdProblem == nil else { return }
-        thresholdsSaved = update {
-            $0.askAt = askK * 1_000
-            $0.laterAt = laterK * 1_000
-        }
     }
 
     // MARK: Messages
 
     private var messages: some View {
         VStack(alignment: .leading, spacing: 10) {
-            messageCard(Words.Settings.beforeCompacting, text: $message, original: Config.defaultMessage,
-                        about: Words.Settings.beforeCompactingAbout, what: Words.Settings.saveMessage, status: messageSaved)
-            messageCard(Words.Settings.afterCompacting, text: $continueMessage, original: Config.defaultContinueMessage,
-                        about: Words.Settings.afterCompactingAbout, what: Words.Settings.continueMessage, status: continueSaved)
+            messageCard(.message, title: Words.Settings.beforeCompacting, what: Words.Settings.saveMessage)
+            messageCard(.continueMessage, title: Words.Settings.afterCompacting, what: Words.Settings.continueMessage)
                 .padding(.top, 10)
             Note(SettingsText.messagesNote(showsCodex: model.showsCodex,
                                            codexJudgeName: SettingsText.codexJudgeName(model.codexJudge, link: model.codexLink)))
@@ -309,33 +254,33 @@ struct SettingsView: View {
     }
 
     /// A message box, what it's for (or why it isn't saved) and Restore Default.
-    private func messageCard(_ title: String, text: Binding<String>, original: String, about: String,
-                             what: String, status: SaveStatus) -> some View {
+    private func messageCard(_ f: SettingsForm.Field, title: String, what: String) -> some View {
         Card(title: title) {
             VStack(alignment: .leading, spacing: 10) {
-                BrandTextEditor(label: title, text: text, height: Self.editorHeight)
+                BrandTextEditor(label: title, text: Binding(get: { form.text(f) }, set: { form.set(f, typed: $0, save: { save($0) }) }),
+                                height: Self.editorHeight)
                 HStack(alignment: .center) {
-                    let note = SettingsText.messageNote(text.wrappedValue, status: status, about: about)
+                    let note = form.messageNote(f)
                     Note(note.text, color: Theme.color(note.tone))
-                    Button(Words.Settings.restoreDefault) { text.wrappedValue = original }
+                    Button(Words.Settings.restoreDefault) { form.restore(f, save: { save($0) }) }
                         .buttonStyle(BrandButtonStyle(kind: .ghost, height: 28))
-                        .disabled(text.wrappedValue == original)
+                        .disabled(!form.canRestore(f))
                         .help(SettingsText.restoreHelp(what))
                 }
             }
             .padding(16)
         } accessory: {
-            SaveStatusLabel(status: status)
+            SaveStatusLabel(status: form.status(f))
         }
     }
 
     // MARK: Saving
 
-    /// Changes the settings and saves them at once, and says whether that worked.
-    private func update(_ change: (inout Config) -> Void) -> SaveStatus {
+    /// Changes the settings and saves them at once; why that didn't work, or nil.
+    private func save(_ change: (inout Config) -> Void) -> String? {
         var c = model.config
         change(&c)
-        return model.save(c).map(SaveStatus.notSaved) ?? .saved(Date())
+        return model.save(c)
     }
 
     private func setLogin(_ on: Bool) {
@@ -373,20 +318,4 @@ enum LoginItem {
     static func set(_ on: Bool) throws {
         if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
     }
-}
-
-enum CodexLinkInstall {
-    /// install.sh writes this LaunchAgent, which keeps `context-guard codex` running.
-    static let label = "com.spaceterran.ContextGuard.codex"
-
-    /// `CONTEXT_GUARD_LAUNCH_AGENTS` moves the folder it's looked for in, so `live-test/ui-demo.sh`
-    /// shows the same thing whatever this Mac has installed.
-    static var plist: URL {
-        let moved = ProcessInfo.processInfo.environment["CONTEXT_GUARD_LAUNCH_AGENTS"].flatMap { $0.isEmpty ? nil : $0 }
-        let dir = moved.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true) }
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-        return dir.appendingPathComponent("\(label).plist")
-    }
-
-    static var isInstalled: Bool { FileManager.default.fileExists(atPath: plist.path) }
 }
