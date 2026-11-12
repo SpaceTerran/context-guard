@@ -14,7 +14,7 @@ public sealed class ContractTests
 {
     const string Session = "00000000-0000-4000-8000-000000000001";
 
-    static readonly string Contract = FindContract();
+    internal static readonly string Contract = FindContract();
 
     /// <summary>What each file in intents/ says.</summary>
     static readonly Dictionary<string, Intent> Intents = new()
