@@ -7,11 +7,9 @@ public enum Words {
     public static let appOff = "Context Guard (off)"
 
     /// Where you run the installer: Settings says to run it when something is missing.
-    #if os(Windows)
-    public static let installer = "install.ps1"
-    #else
-    public static let installer = "install.sh"
-    #endif
+    public static let installer = installer(windows: PathRules.isWindows)
+
+    public static func installer(windows: Bool) -> String { windows ? "install.ps1" : "install.sh" }
 
     public enum Menu {
         public static let on = "Context Guard On"
@@ -42,15 +40,16 @@ public enum Words {
 
     public enum Notice {
         public static let off = "Context Guard is off"
-        #if os(Windows)
-        public static let turnBackOn = "Turn it back on from its icon in the taskbar."
-        #else
-        public static let turnBackOn = "Turn it back on from the gauge in the menu bar."
-        #endif
+        public static let turnBackOn = turnBackOn(windows: PathRules.isWindows)
+
+        public static func turnBackOn(windows: Bool) -> String {
+            windows ? "Turn it back on from its icon in the taskbar." : "Turn it back on from the gauge in the menu bar."
+        }
         public static let saving = "Saving, then compacting"
     }
 
     public enum Settings {
+        public static let windowTitle = "Context Guard Settings"
         public static let general = "General"
         public static let whenToAsk = "When to Ask"
         public static let messages = "Messages"

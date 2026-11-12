@@ -218,14 +218,20 @@ struct BrandTextEditor: View {
 
 /// A whole number with its unit and − | + buttons that step along multiples of `step`.
 struct NumberField: View {
-    let label: String
+    /// Its label, unit, step and range, as Core describes it.
+    let field: SettingsText.Field
     /// 0 while the field doesn't hold a number.
     @Binding var value: Int
-    let unit: String
-    let step: Int
-    let range: ClosedRange<Int>
     var invalid = false
     @State private var text = ""
+
+    init(_ field: SettingsText.Field, value: Binding<Int>, invalid: Bool = false) {
+        self.field = field
+        _value = value
+        self.invalid = invalid
+    }
+
+    private var label: String { field.label }
 
     var body: some View {
         Row(label: label) {
@@ -234,16 +240,16 @@ struct NumberField: View {
                 // leaving it, so closing the window right after typing would drop it.
                 BrandTextField(label: label, text: $text, alignment: .trailing, invalid: invalid)
                     .frame(width: 64)
-                Text(unit)
+                Text(field.unit)
                     .font(Theme.font(13))
                     .foregroundStyle(Theme.muted)
                     .lineLimit(1)
                     .fixedSize()
                     .frame(width: 72, alignment: .leading)
                 Steps(label: label, decrement: {
-                    value = max((value - 1) / step * step, range.lowerBound)
+                    value = field.stepped(value, up: false)
                 }, increment: {
-                    value = min((value / step + 1) * step, range.upperBound)
+                    value = field.stepped(value, up: true)
                 })
             }
         }
@@ -253,7 +259,7 @@ struct NumberField: View {
         .onChange(of: value) { if typed != value { text = String(value) } }
     }
 
-    private var typed: Int { max(Int(text.trimmingCharacters(in: .whitespaces)) ?? 0, 0) }
+    private var typed: Int { SettingsText.Field.parse(text) }
 
     /// − | + joined in one bordered control.
     private struct Steps: View {
@@ -385,13 +391,6 @@ struct TabBar<Tab: Hashable & Identifiable>: View {
             Spacer(minLength: 0)
         }
         .overlay(alignment: .bottom) { Rule() }
-    }
-}
-
-extension NumberField {
-    /// A Settings field as Core describes it.
-    init(_ field: SettingsText.Field, value: Binding<Int>, invalid: Bool = false) {
-        self.init(label: field.label, value: value, unit: field.unit, step: field.step, range: field.range, invalid: invalid)
     }
 }
 

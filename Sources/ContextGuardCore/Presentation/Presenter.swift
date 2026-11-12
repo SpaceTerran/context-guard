@@ -77,10 +77,15 @@ public final class Presenter {
     private var hidden: [String: Int] = [:]
     /// When each open popup reached what it shows now, for closing it after a moment.
     private var shownSince: [String: (QuestionProgress, Date)] = [:]
+    /// "Is off" notices so far: each one is its own, and the same run of clicks names them the same.
+    private var offNotices = 0
 
     /// Session files of sessions gone this long are removed, an hour apart.
     public static let pruneAge: TimeInterval = 7 * 86_400
     public static let pruneEvery: TimeInterval = 3_600
+    /// Popups and notices open at once: more would run off a laptop screen, and the rest wait
+    /// their turn.
+    public static let maxOpen = 5
 
     /// - Parameter codexLinkInstalled: whether the Codex link's background task is installed
     ///   (a LaunchAgent on the Mac).
@@ -260,8 +265,9 @@ public final class Presenter {
 
     /// After "Turn Off" in a popup: a notice says how to turn it back on.
     public func announceOff(_ host: PanelHost) {
+        offNotices += 1
         show(NoticeContent(symbol: .off, tone: .muted, title: Words.Notice.off, detail: Words.Notice.turnBackOn),
-             key: "notice:off:\(UUID().uuidString)", host)
+             key: "notice:off:\(offNotices)", host)
     }
 
     /// ✕ on a popup: hidden for this cycle. The menu can show it again. Then `sync`.

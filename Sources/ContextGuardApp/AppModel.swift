@@ -30,7 +30,7 @@ final class AppModel {
     init(paths: Paths) {
         self.paths = paths
         presenter = Presenter(paths: paths, registry: FileRegistry(dir: paths.registryDir),
-                              codexLinkInstalled: { CodexLinkInstall.isInstalled })
+                              codexLinkInstalled: { CodexLinkInstall.isInstalled(paths) })
         config = presenter.config
         panels.question = { [unowned self] id in AnyView(QuestionView(model: self, sessionID: id)) }
         panels.onRecheck = { [weak self] in self?.syncPanels() }
