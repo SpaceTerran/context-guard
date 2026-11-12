@@ -27,7 +27,10 @@ public protocol CodexDaemon: AnyObject, Sendable {
 
 /// Makes connections. The app server is never started for you: no socket, no connection.
 public protocol CodexConnecting: Sendable {
-    func available() -> Bool
+    /// When the app server behind the socket started (it makes the socket as it starts), or nil
+    /// when there's no socket. A socket left by a server that's gone keeps its old time, and
+    /// connecting to it fails: Windows keeps one through a restart.
+    func socketTime() -> Date?
     /// Events arrive on `onEvent` until `.closed`.
     func connect(onEvent: @escaping @Sendable (CodexEvent) -> Void) throws -> CodexDaemon
 }
@@ -56,19 +59,26 @@ public struct CodexSocketConnector: CodexConnecting {
         #endif
     }
 
-    /// A socket is there. On the Mac, Codex 0.167.1 keeps the socket itself under
-    /// `/private/tmp/codex-daemon-<uid>/` and links to it from `app-server-control/`, so the link is
-    /// followed. On Windows the socket is the file itself: a reparse point tagged as a Unix socket.
-    public func available() -> Bool {
+    /// The socket's last-write time, if a socket is there. On the Mac, Codex 0.167.1 keeps the
+    /// socket itself under `/private/tmp/codex-daemon-<uid>/` and links to it from
+    /// `app-server-control/`, so the link is followed. On Windows the socket is the file itself: a
+    /// reparse point tagged as a Unix socket. Its creation time can't be used there: a starting
+    /// server replaces the file a gone one left, and Windows gives a file the creation time of one
+    /// of the same name deleted just before it (seen on Windows 11 with Codex 0.167.2: created
+    /// hours before, written 66 ms after the server's process started).
+    public func socketTime() -> Date? {
         #if os(Windows)
         var data = WIN32_FIND_DATAW()
         let h = socketPath.withCString(encodedAs: UTF16.self) { FindFirstFileW($0, &data) }
-        guard let h, h != INVALID_HANDLE_VALUE else { return false }
+        guard let h, h != INVALID_HANDLE_VALUE else { return nil }
         FindClose(h)
-        return data.dwFileAttributes & DWORD(FILE_ATTRIBUTE_REPARSE_POINT) != 0 && data.dwReserved0 == Self.unixSocketTag
+        guard data.dwFileAttributes & DWORD(FILE_ATTRIBUTE_REPARSE_POINT) != 0, data.dwReserved0 == Self.unixSocketTag else { return nil }
+        let written = ProcessStart(windowsFileTime: UInt64(data.ftLastWriteTime.dwHighDateTime) << 32 | UInt64(data.ftLastWriteTime.dwLowDateTime))
+        return Date(timeIntervalSince1970: Double(written.seconds) + Double(written.microseconds) / 1_000_000)
         #else
         var st = stat()
-        return stat(socketPath, &st) == 0 && (st.st_mode & S_IFMT) == S_IFSOCK
+        guard stat(socketPath, &st) == 0, (st.st_mode & S_IFMT) == S_IFSOCK else { return nil }
+        return Date(timeIntervalSince1970: Double(st.st_mtimespec.tv_sec) + Double(st.st_mtimespec.tv_nsec) / 1_000_000_000)
         #endif
     }
 

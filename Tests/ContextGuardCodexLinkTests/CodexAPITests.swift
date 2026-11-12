@@ -66,15 +66,15 @@ final class CodexAPITests: XCTestCase {
         #if os(Windows)
         XCTAssertEqual(CodexSocketConnector.defaultSocketPath(["CODEX_HOME": "C:/ch/"]), "C:\\ch\\app-server-control\\app-server-control.sock")
         XCTAssertEqual(CodexSocketConnector.defaultSocketPath([:]), NSHomeDirectory() + "\\.codex\\app-server-control\\app-server-control.sock")
-        XCTAssertFalse(CodexSocketConnector(socketPath: "C:\\nonexistent\\x.sock").available())
+        XCTAssertNil(CodexSocketConnector(socketPath: "C:\\nonexistent\\x.sock").socketTime())
         // A file that isn't a socket isn't one.
-        XCTAssertFalse(CodexSocketConnector(socketPath: ProcessInfo.processInfo.arguments[0]).available())
+        XCTAssertNil(CodexSocketConnector(socketPath: ProcessInfo.processInfo.arguments[0]).socketTime())
         #else
         XCTAssertEqual(CodexSocketConnector.defaultSocketPath(["CODEX_HOME": "/tmp/ch"]), "/tmp/ch/app-server-control/app-server-control.sock")
         XCTAssertTrue(CodexSocketConnector.defaultSocketPath([:]).hasSuffix("/.codex/app-server-control/app-server-control.sock"))
-        XCTAssertFalse(CodexSocketConnector(socketPath: "/nonexistent/x.sock").available())
+        XCTAssertNil(CodexSocketConnector(socketPath: "/nonexistent/x.sock").socketTime())
         // A file that isn't a socket isn't one.
-        XCTAssertFalse(CodexSocketConnector(socketPath: "/etc/hosts").available())
+        XCTAssertNil(CodexSocketConnector(socketPath: "/etc/hosts").socketTime())
         #endif
     }
 
@@ -83,15 +83,34 @@ final class CodexAPITests: XCTestCase {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let path = dir.appendingPathComponent("app-server-control.sock").path
-        XCTAssertFalse(CodexSocketConnector(socketPath: path).available(), "not there yet")
+        XCTAssertNil(CodexSocketConnector(socketPath: path).socketTime(), "not there yet")
         let listener = try SocketListener(path: path)
-        XCTAssertTrue(CodexSocketConnector(socketPath: path).available())
+        XCTAssertNotNil(CodexSocketConnector(socketPath: path).socketTime())
         XCTAssertNoThrow(try SocketStream.connect(unixPath: path).close())
         listener.close()
-        XCTAssertFalse(CodexSocketConnector(socketPath: path).available(), "gone with its listener")
+        XCTAssertNil(CodexSocketConnector(socketPath: path).socketTime(), "gone with its listener")
         let file = dir.appendingPathComponent("plain").path
         XCTAssertTrue(FileManager.default.createFile(atPath: file, contents: Data("x".utf8)))
-        XCTAssertFalse(CodexSocketConnector(socketPath: file).available(), "a plain file")
+        XCTAssertNil(CodexSocketConnector(socketPath: file).socketTime(), "a plain file")
+    }
+
+    func testTheSocketsTimeIsWhenItsServerStarted() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("cg-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("app-server-control.sock").path
+        let connector = CodexSocketConnector(socketPath: path)
+        let before = Date()
+        let first = try SocketListener(path: path)
+        let made = try XCTUnwrap(connector.socketTime())
+        XCTAssertLessThan(abs(made.timeIntervalSince(before)), 2, "about now")
+        first.close()
+        Thread.sleep(forTimeInterval: 0.05)
+        // The next server's socket in its place: Windows gives it the creation time of the one
+        // just deleted, and its time must still be its own.
+        let second = try SocketListener(path: path)
+        defer { second.close() }
+        XCTAssertGreaterThan(try XCTUnwrap(connector.socketTime()), made)
     }
 
     #if !os(Windows)
@@ -105,16 +124,16 @@ final class CodexAPITests: XCTestCase {
         defer { listener.close() }
         let link = dir.appendingPathComponent("app-server-control.sock").path
         try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: real)
-        XCTAssertTrue(CodexSocketConnector(socketPath: real).available())
-        XCTAssertTrue(CodexSocketConnector(socketPath: link).available())
+        XCTAssertNotNil(CodexSocketConnector(socketPath: real).socketTime())
+        XCTAssertNotNil(CodexSocketConnector(socketPath: link).socketTime())
         XCTAssertNoThrow(try SocketStream.connect(unixPath: link).close())
 
         let toFile = dir.appendingPathComponent("to-file").path
         try FileManager.default.createSymbolicLink(atPath: toFile, withDestinationPath: "/etc/hosts")
-        XCTAssertFalse(CodexSocketConnector(socketPath: toFile).available())
+        XCTAssertNil(CodexSocketConnector(socketPath: toFile).socketTime())
         let dangling = dir.appendingPathComponent("dangling").path
         try FileManager.default.createSymbolicLink(atPath: dangling, withDestinationPath: dir.appendingPathComponent("gone").path)
-        XCTAssertFalse(CodexSocketConnector(socketPath: dangling).available())
+        XCTAssertNil(CodexSocketConnector(socketPath: dangling).socketTime())
     }
     #endif
 

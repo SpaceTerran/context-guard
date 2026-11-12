@@ -588,7 +588,7 @@ final class CodexLinkLoopTests: XCTestCase {
 
     func testNoAppServerNoConnection() {
         let connector = FakeConnector(daemon)
-        connector.isAvailable = false
+        connector.socketMade = nil
         let (_, reached) = running(connector, terminals: codex) { $0 != nil }
         XCTAssertTrue(reached)
         XCTAssertEqual(connector.connects, 0)
@@ -619,6 +619,48 @@ final class CodexLinkLoopTests: XCTestCase {
         // the server should be that client, not the link.
         let connector = FakeConnector(daemon)
         let start = Date()
+        connector.socketMade = start
+        let (_, reached) = running(connector, terminals: codex, newServerWait: 0.4) { $0?.connected == true }
+        XCTAssertTrue(reached)
+        XCTAssertGreaterThanOrEqual(connector.connectedAt.first?.timeIntervalSince(start) ?? 0, 0.4)
+    }
+
+    func testASocketLeftBehindGivesTheNextServerNoHeadStart() {
+        // Windows keeps the socket of a server that's gone through a restart. The link sees it
+        // long before a terminal starts the next server, and that server is still left to its
+        // terminal first.
+        let connector = FakeConnector(daemon)
+        connector.socketMade = Date().addingTimeInterval(-3_600)
+        connector.isRefusing = true
+        let start = Date()
+        var serverStarted: Date?
+        let (_, reached) = running(connector, terminals: codex, newServerWait: 0.4) { status in
+            if serverStarted == nil, connector.refused > 0, Date().timeIntervalSince(start) > 0.6 {
+                let now = Date()
+                serverStarted = now
+                connector.socketMade = now
+                connector.isRefusing = false
+            }
+            return status?.connected == true
+        }
+        XCTAssertTrue(reached)
+        guard let started = serverStarted, let connected = connector.connectedAt.first else {
+            return XCTFail("no server started, or no connection")
+        }
+        XCTAssertGreaterThanOrEqual(connected.timeIntervalSince(started), 0.4)
+    }
+
+    func testAServerUpAWhileIsJoinedAtOnce() {
+        let connector = FakeConnector(daemon)
+        connector.socketMade = Date().addingTimeInterval(-3_600)
+        let (_, reached) = running(connector, terminals: codex, newServerWait: 10) { $0?.connected == true }
+        XCTAssertTrue(reached, "no wait for a server that's been there an hour")
+    }
+
+    func testASocketTimeAheadOfTheClockCountsFromWhenItWasSeen() {
+        let connector = FakeConnector(daemon)
+        let start = Date()
+        connector.socketMade = start.addingTimeInterval(3_600)
         let (_, reached) = running(connector, terminals: codex, newServerWait: 0.4) { $0?.connected == true }
         XCTAssertTrue(reached)
         XCTAssertGreaterThanOrEqual(connector.connectedAt.first?.timeIntervalSince(start) ?? 0, 0.4)
