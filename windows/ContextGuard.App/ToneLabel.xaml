@@ -1,0 +1,49 @@
+<UserControl
+    x:Class="ContextGuard.App.ToneLabel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsTabStop="False">
+    <!-- Words in a tone, with or without a symbol before them: the Mac's Note and StatusLabel. The tone is a visual
+         state, so a live switch of light, dark or high contrast recolors it (a brush set from code keeps the theme it
+         was set in, W9). -->
+    <Grid x:Name="Root">
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="ToneStates">
+                <VisualState x:Name="Muted" />
+                <VisualState x:Name="Accent">
+                    <VisualState.Setters>
+                        <Setter Target="Glyph.Foreground" Value="{ThemeResource BrandAccentBrush}" />
+                        <Setter Target="Words.Foreground" Value="{ThemeResource BrandAccentBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="Success">
+                    <VisualState.Setters>
+                        <Setter Target="Glyph.Foreground" Value="{ThemeResource BrandSuccessBrush}" />
+                        <Setter Target="Words.Foreground" Value="{ThemeResource BrandSuccessBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="Warning">
+                    <VisualState.Setters>
+                        <Setter Target="Glyph.Foreground" Value="{ThemeResource BrandWarningBrush}" />
+                        <Setter Target="Words.Foreground" Value="{ThemeResource BrandWarningBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="Danger">
+                    <VisualState.Setters>
+                        <Setter Target="Glyph.Foreground" Value="{ThemeResource BrandDangerBrush}" />
+                        <Setter Target="Words.Foreground" Value="{ThemeResource BrandDangerBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <FontIcon x:Name="Glyph" Margin="0,0,6,0" VerticalAlignment="Center" Visibility="Collapsed"
+                  FontFamily="Segoe Fluent Icons" Foreground="{ThemeResource BrandMutedBrush}"
+                  AutomationProperties.AccessibilityView="Raw" />
+        <TextBlock x:Name="Words" Grid.Column="1" VerticalAlignment="Center" FontFamily="{StaticResource BrandFont}"
+                   Foreground="{ThemeResource BrandMutedBrush}" />
+    </Grid>
+</UserControl>

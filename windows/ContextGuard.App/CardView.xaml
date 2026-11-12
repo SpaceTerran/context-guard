@@ -1,0 +1,26 @@
+<UserControl
+    x:Class="ContextGuard.App.CardView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:ContextGuard.App"
+    IsTabStop="False">
+    <!-- A card, as the Mac's Card: its title in small capitals with whether it's saved on the right (drawn over the
+         header, so the header is as tall with a status as without), a rule, then its rows with a rule between each.
+         As on the Mac, the 1 px border is drawn inside the card, over its content's outer pixel (margin -1), so the
+         16 px insets count from the card's edge. The title's line is the Mac's 11-point line, 14 high. -->
+    <Border Background="{ThemeResource BrandSurfaceBrush}" BorderBrush="{ThemeResource BrandBorderBrush}" BorderThickness="1"
+            CornerRadius="{StaticResource BrandPanelRadius}">
+        <StackPanel Margin="-1">
+            <Grid Padding="16,10,16,10">
+                <TextBlock x:Name="Title" VerticalAlignment="Center" FontFamily="{StaticResource BrandFont}" FontSize="11"
+                           LineHeight="14" LineStackingStrategy="BlockLineHeight"
+                           FontWeight="Bold" CharacterSpacing="100" Foreground="{ThemeResource BrandMutedBrush}"
+                           AutomationProperties.HeadingLevel="Level2" />
+                <local:ToneLabel x:Name="SaveStatus" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,-6,0,-6"
+                                 Visibility="Collapsed" />
+            </Grid>
+            <Border Style="{StaticResource BrandRuleStyle}" />
+            <StackPanel x:Name="Rows" />
+        </StackPanel>
+    </Border>
+</UserControl>

@@ -1,0 +1,22 @@
+<UserControl
+    x:Class="ContextGuard.App.MessageRowView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:ContextGuard.App"
+    IsTabStop="False">
+    <!-- A message in a card, as the Mac's messageCard: a box five lines tall that wraps and scrolls, then what it's
+         for (or why it isn't saved) and Restore Default on one line under it. -->
+    <StackPanel Padding="16" Spacing="10">
+        <RichEditBox x:Name="Box" Height="112" Style="{StaticResource BrandEditorStyle}" TextChanged="OnTextChanged"
+                     Paste="OnPaste" />
+        <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <local:ToneLabel x:Name="Note" VerticalAlignment="Center" />
+            <Button x:Name="Restore" Grid.Column="1" VerticalAlignment="Center" MinHeight="28"
+                    Style="{StaticResource BrandGhostButtonStyle}" Click="OnRestore" />
+        </Grid>
+    </StackPanel>
+</UserControl>

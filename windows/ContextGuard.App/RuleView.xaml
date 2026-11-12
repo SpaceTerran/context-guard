@@ -1,0 +1,9 @@
+<UserControl
+    x:Class="ContextGuard.App.RuleView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsTabStop="False">
+    <!-- A 1 px rule in the brand's border color, for code that adds one (between a card's rows). Its brush comes from
+         {ThemeResource}, so it follows a live theme switch; under Native AOT code can't look the style up itself. -->
+    <Border Style="{StaticResource BrandRuleStyle}" />
+</UserControl>
