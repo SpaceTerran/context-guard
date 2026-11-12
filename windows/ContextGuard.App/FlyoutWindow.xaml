@@ -34,7 +34,7 @@
                                AutomationProperties.AutomationId="Empty" />
                     <StackPanel x:Name="SessionList" />
                     <Border Style="{StaticResource SeparatorStyle}" />
-                    <Button x:Name="SettingsButton" Style="{StaticResource MenuRowButtonStyle}" IsEnabled="False"
+                    <Button x:Name="SettingsButton" Style="{StaticResource MenuRowButtonStyle}" Click="OnSettings"
                             AutomationProperties.AutomationId="Settings" />
                 </StackPanel>
 

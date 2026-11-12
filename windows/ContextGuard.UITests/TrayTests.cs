@@ -40,7 +40,7 @@ public sealed class TrayTests
         }
         Assert.False(RunningApp.Has(flyout, "Empty"));
         Assert.False(RunningApp.Has(flyout, "NotRunning"));
-        Assert.False(app.Find(flyout, "Settings").IsEnabled);
+        Assert.True(app.Find(flyout, "Settings").IsEnabled);
         Assert.Equal(menu.GetProperty("quit").GetString(), app.Find(flyout, "Quit").Name);
         Assert.Empty(app.Intents());
 
@@ -186,7 +186,7 @@ public sealed class TrayTests
             return found.Length >= 3 ? found : null;
         }, "the menu's items");
         Assert.Equal(new[] { "Context Guard On", "Settings…", "Quit Context Guard" }, items.Select(i => i.Name).ToArray());
-        Assert.False(items[1].IsEnabled);
+        Assert.True(items[1].IsEnabled);
         RunningApp.Press(items[0]);
 
         Assert.False(app.Sent("enable").GetProperty("on").GetBoolean());

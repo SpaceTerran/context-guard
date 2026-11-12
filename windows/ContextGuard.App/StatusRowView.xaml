@@ -1,0 +1,17 @@
+<UserControl
+    x:Class="ContextGuard.App.StatusRowView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:ContextGuard.App"
+    IsTabStop="False">
+    <!-- A card's row that says how something stands ("Hooks  ✓ Installed"), what it does as its tooltip. -->
+    <Grid x:Name="Row" Padding="16,0,16,0" MinHeight="44" ColumnSpacing="32" Background="Transparent">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock x:Name="Label" VerticalAlignment="Center" TextWrapping="Wrap" FontFamily="{StaticResource BrandFont}"
+                   FontSize="13" Foreground="{ThemeResource BrandHeadingBrush}" />
+        <local:ToneLabel x:Name="Value" Grid.Column="1" VerticalAlignment="Center" />
+    </Grid>
+</UserControl>

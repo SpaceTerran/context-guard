@@ -12,7 +12,7 @@ static unsafe partial class Native
     public const uint NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4, NIF_SHOWTIP = 0x80;
     public const uint MF_STRING = 0, MF_CHECKED = 0x8, MF_SEPARATOR = 0x800;
     public const uint TPM_RIGHTBUTTON = 0x2, TPM_BOTTOMALIGN = 0x20, TPM_RETURNCMD = 0x100;
-    public const int SM_CXSMICON = 49;
+    public const int SM_CXICON = 11, SM_CXSMICON = 49;
     public const uint MB_OK = 0;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -107,6 +107,13 @@ static unsafe partial class Native
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool PostMessage(nint hwnd, uint msg, nint wParam, nint lParam);
 
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageW")]
+    public static partial nint SendMessage(nint hwnd, uint msg, nint wParam, nint lParam);
+
+    /// <summary>A window's icons: the small one (title bar, Alt+Tab) and the big one (taskbar).</summary>
+    public const uint WM_SETICON = 0x0080;
+    public const nint ICON_SMALL = 0, ICON_BIG = 1;
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SetForegroundWindow(nint hwnd);
@@ -178,6 +185,18 @@ static unsafe partial class Native
 
     [LibraryImport("user32.dll")]
     public static partial nint MonitorFromPoint(POINT point, uint flags);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetCursorPos(out POINT point);
+
+    /// <summary>The effective DPI of the monitor at a point (the nearest one if none), where a window opens.</summary>
+    public static uint MonitorDpiAt(POINT point)
+    {
+        uint x, y;
+        var monitor = MonitorFromPoint(point, 2);   // MONITOR_DEFAULTTONEAREST
+        return GetDpiForMonitor(monitor, 0, &x, &y) == 0 ? x : 96;
+    }
 
     /// <summary>The primary monitor's effective DPI, where the popups stack.</summary>
     public static uint PrimaryMonitorDpi()

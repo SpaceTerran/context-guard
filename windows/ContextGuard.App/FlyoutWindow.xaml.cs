@@ -53,6 +53,7 @@ public sealed partial class FlyoutWindow : Window
             Hide();
         };
         Body.SizeChanged += (_, _) => { if (visible) Fit(); };
+        Root.ActualThemeChanged += (_, _) => FocusBox.Redraw(Root.XamlRoot);
         Root.Loaded += (_, _) =>
         {
             Root.XamlRoot.Changed += (_, _) => { if (visible) Fit(); };
@@ -211,6 +212,12 @@ public sealed partial class FlyoutWindow : Window
     {
         // Only you, never a new board, switches it.
         if (!rendering) app.Send(Feed.Intent.Enable(OnSwitch.IsOn));
+    }
+
+    void OnSettings(object sender, RoutedEventArgs e)
+    {
+        Hide();
+        app.OpenSettings();
     }
 
     void OnQuit(object sender, RoutedEventArgs e) => app.Quit();

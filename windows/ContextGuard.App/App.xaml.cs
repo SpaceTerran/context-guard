@@ -23,9 +23,11 @@ public partial class App : Application
     FeedClient? client;
     FlyoutWindow? flyout;
     Popups? popups;
+    SettingsWindow? settings;
+    LoginItem? login;
     DispatcherQueue? queue;
     Board? board;
-    bool programDown, quitting;
+    bool programDown, quitting, openingSettings;
 
     public App()
     {
@@ -48,6 +50,7 @@ public partial class App : Application
         Log.Write($"started: {options.Program} {string.Join(' ', options.Arguments)}");
 
         queue = DispatcherQueue.GetForCurrentThread();
+        login = new LoginItem(options.LoginKey, Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "ContextGuard.exe"));
         tray = new Tray(this);
         tray.Show("on", Name);
         popups = new Popups(Send);
@@ -60,6 +63,7 @@ public partial class App : Application
             programDown = true;
             tray?.Show("off", NotRunning);
             flyout?.Render(board, programDown);
+            settings?.Render(board, programDown);
             // Its questions can't be answered until it's back; the next board brings them again.
             popups?.Show([]);
         };
@@ -75,11 +79,21 @@ public partial class App : Application
 
     void OnBoard(Board newBoard)
     {
-        board = newBoard;
-        programDown = false;
-        tray?.Show(newBoard.Tray.State, newBoard.Tray.Label);
-        flyout?.Render(newBoard, programDown);
-        popups?.Show(newBoard.Popups);
+        try
+        {
+            board = newBoard;
+            programDown = false;
+            tray?.Show(newBoard.Tray.State, newBoard.Tray.Label);
+            flyout?.Render(newBoard, programDown);
+            popups?.Show(newBoard.Popups);
+            settings?.Render(newBoard, programDown);
+        }
+        catch (Exception e)
+        {
+            // It runs from the dispatcher, where an exception ends the app without UnhandledException: say what it was.
+            Log.Write($"drawing a board: {e}");
+            throw;
+        }
     }
 
     /// <summary>A question popup just opened: Windows' notification sound (the Mac plays Glass).</summary>
@@ -93,17 +107,51 @@ public partial class App : Application
     /// The theme, high contrast, the work area or the display changed (the tray's window hears it): the popups'
     /// edges and places, once Windows has finished telling every window.
     /// </summary>
-    internal void SettingsChanged() => queue?.TryEnqueue(() => popups?.SettingsChanged());
+    internal void SettingsChanged() => queue?.TryEnqueue(() =>
+    {
+        popups?.SettingsChanged();
+        settings?.SettingsChanged();
+    });
 
     /// <summary>Sends what you clicked; beeps if it couldn't be done.</summary>
-    internal async void Send(Intent intent)
+    internal async void Send(Intent intent) => await SendAsync(intent);
+
+    /// <summary>Sends what you did and returns what became of it; beeps if it couldn't be done.</summary>
+    internal async Task<FeedResult> SendAsync(Intent intent)
     {
-        if (client is null) return;
-        var result = await client.SendAsync(intent);
+        var result = client is null ? new FeedResult(null, NotRunning) : await client.SendAsync(intent);
         if (result.Problem is { } problem)
         {
             Log.Write($"{intent.Do}: {problem}");
             Native.MessageBeep(Native.MB_OK);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Settings…, from the flyout or the right-click menu: the program opens a fresh draft and the window shows
+    /// on its board; if Settings is open already, it comes to the front.
+    /// </summary>
+    internal async void OpenSettings()
+    {
+        if (quitting || login is null || openingSettings) return;
+        flyout?.Hide();
+        settings ??= new SettingsWindow(this, login);
+        if (settings.Wanted)
+        {
+            settings.Front();
+            return;
+        }
+        openingSettings = true;
+        try
+        {
+            var result = await SendAsync(Intent.SettingsOpen());
+            // The board that has Settings follows its result; it may be the one shown now.
+            if (result.Succeeded && !quitting) settings.Open(board, programDown);
+        }
+        finally
+        {
+            openingSettings = false;
         }
     }
 
@@ -125,8 +173,7 @@ public partial class App : Application
         if (menu is not null)
         {
             items.Add(new(MenuOn, menu.On.Label, Checked: menu.On.On));
-            // Settings opens in 6c.
-            items.Add(new(MenuSettings, menu.Settings, Enabled: false));
+            items.Add(new(MenuSettings, menu.Settings));
             items.Add(TrayMenuItem.Separator);
         }
         items.Add(new(MenuQuit, menu?.Quit ?? QuitFallback));
@@ -134,6 +181,9 @@ public partial class App : Application
         {
             case MenuOn when menu is not null:
                 Send(Intent.Enable(!menu.On.On));
+                break;
+            case MenuSettings when menu is not null:
+                OpenSettings();
                 break;
             case MenuQuit:
                 Quit();
@@ -148,6 +198,7 @@ public partial class App : Application
         quitting = true;
         Log.Write("quit");
         flyout?.CloseForQuit();
+        settings?.CloseForQuit();
         popups?.Show([]);
         tray?.Remove();
         if (client is not null) await client.DisposeAsync();

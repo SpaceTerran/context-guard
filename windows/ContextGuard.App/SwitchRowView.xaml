@@ -1,0 +1,25 @@
+<UserControl
+    x:Class="ContextGuard.App.SwitchRowView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:ContextGuard.App"
+    IsTabStop="False">
+    <!-- A card's row with a switch on its right, as the Mac's Row: Context Guard itself, or Open at login (with why it
+         couldn't be changed under it, as the Mac shows). -->
+    <StackPanel>
+        <Grid Padding="16,0,16,0" MinHeight="44" ColumnSpacing="32">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="Label" VerticalAlignment="Center" TextWrapping="Wrap" FontFamily="{StaticResource BrandFont}"
+                       FontSize="13" Foreground="{ThemeResource BrandHeadingBrush}" />
+            <ToggleButton x:Name="Switch" Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource BrandSwitchStyle}"
+                          Checked="OnChanged" Unchecked="OnChanged" />
+        </Grid>
+        <StackPanel x:Name="ProblemPart" Visibility="Collapsed">
+            <Border Style="{StaticResource BrandRuleStyle}" />
+            <local:ToneLabel x:Name="Problem" Margin="16,12,16,12" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>
