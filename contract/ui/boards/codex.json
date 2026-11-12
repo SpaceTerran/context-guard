@@ -1,0 +1,91 @@
+{
+  "board": {
+    "menu": {
+      "heading": "Sessions",
+      "lines": [
+        "Claude Code: asks at 300k · Wait until 500k",
+        "Codex: asks at 60% · Wait until 80%"
+      ],
+      "on": {
+        "label": "Context Guard On",
+        "on": true
+      },
+      "quit": "Quit Context Guard",
+      "sessions": [
+        {
+          "compactNow": {
+            "enabled": true,
+            "label": "Compact Now"
+          },
+          "deferral": {
+            "answer": "later",
+            "label": "Wait until 80%"
+          },
+          "id": "01a1c7f0-4d8a-7870-aab2-07bc76ea7401",
+          "showQuestion": "Show the Question",
+          "status": "Waiting for your answer · compacts after 60 seconds",
+          "subtitle": "Codex · C:\\code\\sync",
+          "symbol": "asking",
+          "title": "Add retries to the sync job",
+          "tokens": "160k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        },
+        {
+          "compactNow": {
+            "enabled": true,
+            "label": "Compact Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000002",
+          "status": "Asks at 300k",
+          "subtitle": "C:\\code\\tests",
+          "symbol": "watching",
+          "title": "Tidy the test helpers",
+          "tokens": "88k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        }
+      ],
+      "settings": "Settings…"
+    },
+    "popups": [
+      {
+        "key": "question:01a1c7f0-4d8a-7870-aab2-07bc76ea7401",
+        "question": {
+          "ask": {
+            "compact": {
+              "help": "Asks it to save first: “I'm about to compact this conversation. Check in, push, or save anything else you need before I complete compaction, and then I will let you know when to resume.”",
+              "label": "Compact"
+            },
+            "countdown": "Compacts in 45 seconds unless you answer",
+            "deferral": {
+              "answer": "later",
+              "help": "Compact by itself when this session reaches 80% (206k)",
+              "label": "Wait until 80%"
+            },
+            "help": "I'm about to compact this conversation. Check in, push, or save anything else you need before I complete compaction, and then I will let you know when to resume.",
+            "text": "Compact this session? It saves its work first.",
+            "turnOff": {
+              "help": "Stop asking and stop compacting by itself until you turn Context Guard back on",
+              "label": "Turn Off"
+            }
+          },
+          "heading": "Context at 61% (160k)",
+          "session": "01a1c7f0-4d8a-7870-aab2-07bc76ea7401",
+          "subtitle": "Codex · C:\\code\\sync",
+          "title": "Add retries to the sync job"
+        }
+      }
+    ],
+    "tray": {
+      "label": "Context Guard",
+      "state": "asking"
+    }
+  },
+  "type": "board",
+  "v": 1
+}

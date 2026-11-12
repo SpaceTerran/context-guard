@@ -1,0 +1,77 @@
+{
+  "board": {
+    "menu": {
+      "heading": "Sessions",
+      "lines": [
+        "Asks at 300k · Wait until 500k"
+      ],
+      "on": {
+        "label": "Context Guard On",
+        "on": true
+      },
+      "quit": "Quit Context Guard",
+      "sessions": [
+        {
+          "compactNow": {
+            "enabled": true,
+            "label": "Compact Now"
+          },
+          "deferral": {
+            "answer": "skip",
+            "label": "Not Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000001",
+          "showQuestion": "Show the Question",
+          "status": "Waiting for your answer",
+          "subtitle": "C:\\code\\billing",
+          "symbol": "asking",
+          "title": "Refactor the billing API",
+          "tokens": "512k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        }
+      ],
+      "settings": "Settings…"
+    },
+    "popups": [
+      {
+        "key": "question:00000000-0000-4000-8000-000000000001",
+        "question": {
+          "ask": {
+            "compact": {
+              "help": "Asks it to save first: “I'm about to compact this conversation. Check in, push, or save anything else you need before I complete compaction, and then I will let you know when to resume.”",
+              "label": "Compact"
+            },
+            "deferral": {
+              "answer": "skip",
+              "help": "Don't ask again until this session compacts",
+              "label": "Not Now"
+            },
+            "help": "I'm about to compact this conversation. Check in, push, or save anything else you need before I complete compaction, and then I will let you know when to resume.",
+            "hide": {
+              "help": "Hide until it asks again (the menu can show it)",
+              "label": "Close"
+            },
+            "text": "Compact this session? It saves its work first. It's idle, so it starts when it next runs.",
+            "turnOff": {
+              "help": "Stop asking and stop compacting by itself until you turn Context Guard back on",
+              "label": "Turn Off"
+            }
+          },
+          "heading": "Context at 512k",
+          "session": "00000000-0000-4000-8000-000000000001",
+          "subtitle": "C:\\code\\billing",
+          "title": "Refactor the billing API"
+        }
+      }
+    ],
+    "tray": {
+      "label": "Context Guard",
+      "state": "asking"
+    }
+  },
+  "type": "board",
+  "v": 1
+}

@@ -1,0 +1,54 @@
+{
+  "board": {
+    "menu": {
+      "heading": "Sessions",
+      "lines": [
+        "Asks at 300k · Wait until 500k"
+      ],
+      "on": {
+        "label": "Context Guard On",
+        "on": false
+      },
+      "quit": "Quit Context Guard",
+      "sessions": [
+        {
+          "compactNow": {
+            "enabled": true,
+            "label": "Compact Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000001",
+          "status": "Not watching: Context Guard is off",
+          "subtitle": "C:\\code\\billing",
+          "symbol": "watching",
+          "title": "Refactor the billing API",
+          "tokens": "302k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        }
+      ],
+      "settings": "Settings…"
+    },
+    "popups": [
+      {
+        "key": "notice:off:1",
+        "notice": {
+          "caption": "",
+          "captionWraps": false,
+          "close": "Close",
+          "detail": "Turn it back on from its icon in the taskbar.",
+          "symbol": "off",
+          "title": "Context Guard is off",
+          "tone": "muted"
+        }
+      }
+    ],
+    "tray": {
+      "label": "Context Guard (off)",
+      "state": "off"
+    }
+  },
+  "type": "board",
+  "v": 1
+}

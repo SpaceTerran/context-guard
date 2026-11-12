@@ -1,0 +1,117 @@
+{
+  "board": {
+    "menu": {
+      "heading": "Sessions",
+      "lines": [
+        "Asks at 300k · Wait until 500k"
+      ],
+      "on": {
+        "label": "Context Guard On",
+        "on": true
+      },
+      "quit": "Quit Context Guard",
+      "sessions": [
+        {
+          "compactNow": {
+            "enabled": false,
+            "label": "Compact Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000001",
+          "status": "Asking it to save at its next step",
+          "subtitle": "C:\\code\\s1",
+          "symbol": "sending",
+          "title": "Refactor the billing API",
+          "tokens": "302k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        },
+        {
+          "compactNow": {
+            "enabled": true,
+            "label": "Compact Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000002",
+          "status": "Compacts by itself at 500k",
+          "subtitle": "C:\\code\\s2",
+          "symbol": "waiting",
+          "title": "Write the release notes",
+          "tokens": "302k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        },
+        {
+          "compactNow": {
+            "enabled": true,
+            "label": "Compact Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "status": "Asked it to save at 302k",
+          "subtitle": "C:\\code\\s3",
+          "symbol": "sent",
+          "title": "Tidy the test helpers",
+          "tokens": "302k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        }
+      ],
+      "settings": "Settings…"
+    },
+    "popups": [
+      {
+        "key": "question:00000000-0000-4000-8000-000000000001",
+        "question": {
+          "heading": "Context at 302k",
+          "progress": {
+            "mark": "working",
+            "text": "Asking it to save at its next step…"
+          },
+          "session": "00000000-0000-4000-8000-000000000001",
+          "subtitle": "C:\\code\\s1",
+          "title": "Refactor the billing API"
+        }
+      },
+      {
+        "key": "question:00000000-0000-4000-8000-000000000002",
+        "question": {
+          "heading": "Context at 302k",
+          "progress": {
+            "mark": "icon",
+            "symbol": "waiting",
+            "text": "Compacts by itself at 500k",
+            "tone": "muted"
+          },
+          "session": "00000000-0000-4000-8000-000000000002",
+          "subtitle": "C:\\code\\s2",
+          "title": "Write the release notes"
+        }
+      },
+      {
+        "key": "question:00000000-0000-4000-8000-000000000003",
+        "question": {
+          "heading": "Context at 302k",
+          "progress": {
+            "mark": "icon",
+            "symbol": "success",
+            "text": "Asked it to save, then it compacts",
+            "tone": "success"
+          },
+          "session": "00000000-0000-4000-8000-000000000003",
+          "subtitle": "C:\\code\\s3",
+          "title": "Tidy the test helpers"
+        }
+      }
+    ],
+    "tray": {
+      "label": "Context Guard",
+      "state": "on"
+    }
+  },
+  "type": "board",
+  "v": 1
+}

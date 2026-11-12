@@ -1,0 +1,139 @@
+{
+  "board": {
+    "menu": {
+      "heading": "Sessions",
+      "lines": [
+        "Asks at 300k · Wait until 500k"
+      ],
+      "on": {
+        "label": "Context Guard On",
+        "on": true
+      },
+      "quit": "Quit Context Guard",
+      "sessions": [
+        {
+          "compactNow": {
+            "enabled": false,
+            "label": "Compact Now"
+          },
+          "followUp": "Needs you before compacting: asked which branch to push to",
+          "id": "00000000-0000-4000-8000-000000000002",
+          "status": "Asked it to save at 512k",
+          "subtitle": "C:\\code\\s2",
+          "symbol": "sent",
+          "title": "Write the release notes",
+          "tokens": "512k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        },
+        {
+          "compactNow": {
+            "enabled": false,
+            "label": "Compact Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000001",
+          "status": "Asking it to save…",
+          "subtitle": "C:\\code\\s1",
+          "symbol": "sending",
+          "title": "Refactor the billing API",
+          "tokens": "302k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        },
+        {
+          "compactNow": {
+            "enabled": true,
+            "label": "Compact Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000003",
+          "status": "Asks at 300k",
+          "subtitle": "C:\\code\\s3",
+          "symbol": "watching",
+          "title": "Tidy the test helpers",
+          "tokens": "188k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": true
+          }
+        },
+        {
+          "compactNow": {
+            "enabled": true,
+            "label": "Compact Now"
+          },
+          "id": "00000000-0000-4000-8000-000000000004",
+          "status": "Not watching this session",
+          "subtitle": "C:\\code\\s4",
+          "symbol": "notWatching",
+          "title": "Read the logs",
+          "tokens": "40k",
+          "watch": {
+            "label": "Watch This Session",
+            "on": false
+          }
+        }
+      ],
+      "settings": "Settings…"
+    },
+    "popups": [
+      {
+        "key": "notice:follow-up:cg-2:needsYou",
+        "notice": {
+          "caption": "Asked which branch to push to",
+          "captionWraps": true,
+          "close": "Close",
+          "detail": "Write the release notes",
+          "symbol": "needsYou",
+          "title": "Needs you before compacting",
+          "tone": "warning"
+        }
+      },
+      {
+        "key": "notice:cg-2",
+        "notice": {
+          "caption": "C:\\code\\s2",
+          "captionWraps": false,
+          "close": "Close",
+          "detail": "Write the release notes",
+          "symbol": "saving",
+          "title": "Reached 512k: saving, then compacting",
+          "tone": "accent"
+        }
+      },
+      {
+        "key": "notice:cg-1",
+        "notice": {
+          "caption": "C:\\code\\s1",
+          "captionWraps": false,
+          "close": "Close",
+          "detail": "Refactor the billing API",
+          "symbol": "saving",
+          "title": "Saving, then compacting",
+          "tone": "accent"
+        }
+      },
+      {
+        "key": "notice:compacted:00000000-0000-4000-8000-000000000003:1790000105.0",
+        "notice": {
+          "caption": "C:\\code\\s3",
+          "captionWraps": false,
+          "close": "Close",
+          "detail": "Tidy the test helpers",
+          "symbol": "compacting",
+          "title": "Auto-compacted at 188k before it could save",
+          "tone": "warning"
+        }
+      }
+    ],
+    "tray": {
+      "label": "Context Guard",
+      "state": "on"
+    }
+  },
+  "type": "board",
+  "v": 1
+}
