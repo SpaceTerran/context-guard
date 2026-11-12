@@ -6,9 +6,17 @@
 # Needs Swift, Visual Studio's C++ build tools (their dumpbin finds the DLLs) and the .NET 10 SDK.
 #
 #   powershell -ExecutionPolicy Bypass -File build.ps1
+#   powershell -ExecutionPolicy Bypass -File build.ps1 -ZipOnly -ZipPath <file.zip>
+#
+# -ZipPath puts the zip there instead. -ZipOnly builds nothing: it zips dist\context-guard again as
+# it is, which a release does after signing the files in it.
 #
 # Windows PowerShell 5.1 and PowerShell 7 both run it. ASCII only: 5.1 reads a file without a BOM
 # as ANSI.
+param(
+    [switch]$ZipOnly,
+    [string]$ZipPath
+)
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 
@@ -24,6 +32,11 @@ $now = [DateTime]::UtcNow
 $build = $now.ToString('yyyyMMdd.HHmm', [Globalization.CultureInfo]::InvariantCulture)
 $fileVersion = '{0}.{1}.{2}.0' -f $now.Year, [int]$now.ToString('MMdd', [Globalization.CultureInfo]::InvariantCulture), [int]$now.ToString('HHmm', [Globalization.CultureInfo]::InvariantCulture)
 $productVersion = "1.0 ($build)"
+$zipFile = if ($ZipPath) {
+    $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ZipPath)
+} else {
+    Join-Path $dist "context-guard-windows-x64-$build.zip"
+}
 
 # Runs a program and returns its output lines; stops the build when it fails. Windows PowerShell
 # turns a program's stderr lines into errors, so they're collected as text.
@@ -46,6 +59,33 @@ function Invoke-Program {
         throw "$Program $($Arguments -join ' ') failed (exit $code)"
     }
     return $lines
+}
+
+# dist\context-guard as one zip (context-guard\... inside), entries named with / so any unzip reads
+# them. A zip already at that path is replaced.
+function Write-Zip {
+    param([string]$Path)
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent | Out-Null }
+    if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
+    Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::Open($Path, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($file in @(Get-ChildItem -LiteralPath $out -Recurse -File -Force)) {
+            $name = 'context-guard/' + $file.FullName.Substring($out.Length + 1).Replace('\', '/')
+            $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file.FullName, $name, [IO.Compression.CompressionLevel]::Optimal)
+        }
+    } finally {
+        $zip.Dispose()
+    }
+}
+
+if ($ZipOnly) {
+    if (-not $ZipPath) { throw '-ZipOnly needs -ZipPath' }
+    if (-not (Test-Path -LiteralPath (Join-Path $out 'context-guard.exe'))) { throw "nothing to zip: build $out first" }
+    Write-Zip $zipFile
+    Write-Host "zipped $out as $zipFile ($([math]::Round((Get-Item -LiteralPath $zipFile).Length / 1MB, 1)) MB)"
+    exit 0
 }
 
 if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) { throw "can't find dotnet: install the .NET 10 SDK" }
@@ -159,20 +199,9 @@ if ($version.ProductVersion -ne $productVersion -or $version.FileVersion -ne $fi
 Add-Type -Namespace ContextGuardBuild -Name Shell -MemberDefinition '[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern uint ExtractIconExW(string file, int index, IntPtr[] large, IntPtr[] small, uint count);'
 if ([ContextGuardBuild.Shell]::ExtractIconExW($appExe, -1, $null, $null, 0) -lt 1) { throw "app\ContextGuard.exe has no icon" }
 
-# The folder as one zip (context-guard\... inside), entries named with / so any unzip reads them.
-Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-$zipPath = Join-Path $dist "context-guard-windows-x64-$build.zip"
-$zip = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
-try {
-    foreach ($file in @(Get-ChildItem -LiteralPath $out -Recurse -File -Force)) {
-        $name = 'context-guard/' + $file.FullName.Substring($out.Length + 1).Replace('\', '/')
-        $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file.FullName, $name, [IO.Compression.CompressionLevel]::Optimal)
-    }
-} finally {
-    $zip.Dispose()
-}
+Write-Zip $zipFile
 
 $mb = [math]::Round(((Get-ChildItem -LiteralPath $out -Recurse -File -Force | Measure-Object Length -Sum).Sum / 1MB), 1)
-$zipMb = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 1)
+$zipMb = [math]::Round((Get-Item -LiteralPath $zipFile).Length / 1MB, 1)
 Write-Host "built $out (context-guard.exe, context-guard-link.exe, $($ship.Count) DLLs, the mod, the app; $mb MB)"
-Write-Host "and $zipPath ($zipMb MB), build $build"
+Write-Host "and $zipFile ($zipMb MB), build $build"
