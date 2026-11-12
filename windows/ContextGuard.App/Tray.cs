@@ -7,16 +7,20 @@ namespace ContextGuard.App;
 /// doesn't get the <c>TaskbarCreated</c> broadcast), <c>Shell_NotifyIcon</c> version 4, and a native menu on
 /// right click. It comes back after Explorer restarts, redraws itself at the taskbar's DPI after a scale change,
 /// and swaps to the other color when the taskbar turns light or dark. <c>WM_CLOSE</c> on its window quits the
-/// app (tests use it).
+/// app (<c>--quit</c> and the tests use it), and <see cref="OpenSettingsMessage"/> opens Settings.
 /// </summary>
 sealed unsafe class Tray
 {
     const uint WM_TRAY = Native.WM_APP + 1;
-    const string ClassName = "ContextGuardTray";
+    /// <summary>The tray window's class: how another copy of the app (<see cref="Commands"/>) finds this one.</summary>
+    internal const string ClassName = "ContextGuardTray";
+
+    /// <summary>Posted to the tray window by a second launch (<see cref="Commands.OpenSettingsInRunningCopy"/>): open Settings.</summary>
+    internal const string OpenSettingsMessage = "ContextGuard.OpenSettings";
     static Tray? instance;
     readonly App app;
     readonly nint hwnd;
-    readonly uint taskbarCreated;
+    readonly uint taskbarCreated, openSettings;
     bool added, lightTaskbar;
     uint iconDpi;
     nint icon;
@@ -42,6 +46,7 @@ sealed unsafe class Tray
         hwnd = Native.CreateWindowEx(0, ClassName, ClassName, 0, 0, 0, 0, 0, 0, 0, module, 0);
         MenuTheme.Allow(hwnd);
         taskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
+        openSettings = Native.RegisterWindowMessage(OpenSettingsMessage);
         lightTaskbar = ReadLightTaskbar();
     }
 
@@ -167,6 +172,12 @@ sealed unsafe class Tray
             added = false;
             MakeIcon();
             Add();
+            return true;
+        }
+        if (msg == openSettings && openSettings != 0)
+        {
+            Log.Write("a second launch: opening Settings");
+            app.OpenSettings();
             return true;
         }
         if (msg is Native.WM_SETTINGCHANGE or Native.WM_DISPLAYCHANGE) app.SettingsChanged();

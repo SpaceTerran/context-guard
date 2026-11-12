@@ -20,6 +20,14 @@
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Program.cs is the entry point: the command line and one copy per session come before XAML starts. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- The name Task Manager, Startup apps and the file's properties show. build.ps1 sets the version
+         from the build stamp (FileVersion, InformationalVersion). -->
+    <AssemblyTitle>Context Guard</AssemblyTitle>
+    <Product>Context Guard</Product>
+    <Company>SpaceTerran</Company>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
   <ItemGroup>
     <!-- The WinUI component only, not the metapackage (which adds AI, ML, Search and Widgets). -->

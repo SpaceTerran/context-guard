@@ -7,7 +7,8 @@ namespace ContextGuard.App;
 /// <summary>
 /// The tray app. It runs <c>context-guard ui</c> (<see cref="FeedClient"/>), draws each board it sends, and
 /// sends back what you click. Everything it shows comes from the board, except what it says while the
-/// program isn't running. One per Windows session; it runs with no window open until you quit it.
+/// program isn't running. One per Windows session (<see cref="Program"/>); it runs with no window open until
+/// you quit it.
 /// </summary>
 public partial class App : Application
 {
@@ -18,7 +19,6 @@ public partial class App : Application
 
     const int MenuOn = 1, MenuSettings = 2, MenuQuit = 3;
 
-    static Mutex? single;
     Tray? tray;
     FeedClient? client;
     FlyoutWindow? flyout;
@@ -39,14 +39,8 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        single = new Mutex(true, @"Local\ContextGuard.App", out var first);
-        if (!first)
-        {
-            Log.Write("already running in this session; leaving");
-            Exit();
-            return;
-        }
-        var options = Options.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray(), Environment.GetEnvironmentVariable);
+        // One copy per session and the command line are seen to before this (Program).
+        var options = Program.Options;
         Log.Write($"started: {options.Program} {string.Join(' ', options.Arguments)}");
 
         queue = DispatcherQueue.GetForCurrentThread();
@@ -202,7 +196,7 @@ public partial class App : Application
         popups?.Show([]);
         tray?.Remove();
         if (client is not null) await client.DisposeAsync();
-        single?.ReleaseMutex();
+        Program.Single?.ReleaseMutex();
         Exit();
     }
 }

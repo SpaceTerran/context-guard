@@ -128,6 +128,29 @@ static unsafe partial class Native
     [LibraryImport("user32.dll", EntryPoint = "FindWindowW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint FindWindow(string? className, string? title);
 
+    // Another copy of the app (the command line, a second launch)
+
+    /// <summary>The access right that lets a process wait for another to end.</summary>
+    public const uint SYNCHRONIZE = 0x00100000;
+
+    [LibraryImport("user32.dll")]
+    public static partial uint GetWindowThreadProcessId(nint hwnd, out uint processId);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool AllowSetForegroundWindow(uint processId);
+
+    [LibraryImport("kernel32.dll")]
+    public static partial nint OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
+
+    /// <summary>0 when the object was signalled (a process: it ended), 0x102 on a timeout.</summary>
+    [LibraryImport("kernel32.dll")]
+    public static partial uint WaitForSingleObject(nint handle, uint milliseconds);
+
+    [LibraryImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool CloseHandle(nint handle);
+
     // The notification area
 
     [LibraryImport("shell32.dll", EntryPoint = "Shell_NotifyIconW")]
