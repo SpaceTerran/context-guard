@@ -43,6 +43,15 @@ public sealed class TrayTests
         Assert.False(app.Find(flyout, "Settings").IsEnabled);
         Assert.Equal(menu.GetProperty("quit").GetString(), app.Find(flyout, "Quit").Name);
         Assert.Empty(app.Intents());
+
+        // What you see of it sits 12 DIP from the work area's right and bottom edges.
+        var scale = RunningApp.Scale;
+        var area = RunningApp.WorkArea();
+        RunningApp.Until(() =>
+        {
+            var seen = RunningApp.VisibleBounds(flyout);
+            return Math.Abs(area.Right - seen.Right - 12 * scale) <= 2 && Math.Abs(area.Bottom - seen.Bottom - 12 * scale) <= 2;
+        }, $"the flyout in the corner (work area {area}, seen at {RunningApp.VisibleBounds(flyout)})");
     }
 
     [Fact]
