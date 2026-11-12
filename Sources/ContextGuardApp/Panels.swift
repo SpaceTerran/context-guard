@@ -4,8 +4,11 @@ import SwiftUI
 
 /// Floating popups and notices, stacked under the menu bar at the top right like notifications.
 /// The shared `Presenter` says what opens and closes.
+/// `@preconcurrency`, not an isolated conformance (`@MainActor PanelHost`): those need Swift 6.2, and
+/// the package builds with Swift 6.0 and later. The app calls the presenter on the main actor, and
+/// Swift checks that at run time.
 @MainActor
-final class PanelController: @MainActor PanelHost {
+final class PanelController: @preconcurrency PanelHost {
     /// The view of a session's question popup.
     var question: (String) -> AnyView = { _ in AnyView(EmptyView()) }
     /// Runs the presenter's sync again.
