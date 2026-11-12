@@ -129,8 +129,10 @@ public struct CodexRunner: Sendable {
             s.cursor = nil
             c.terminal = nil
         }
-        if c.terminal == nil, let p = s.transcriptPath, let meta = CodexRollout.meta(path: p) {
+        if c.terminal == nil || c.terminalRule != CodexMeta.terminalRule, let p = s.transcriptPath,
+           let meta = CodexRollout.meta(path: p) {
             c.terminal = meta.isTerminalSession
+            c.terminalRule = CodexMeta.terminalRule
             c.originator = meta.originator
             if s.cwd == nil { s.cwd = meta.cwd }
         }

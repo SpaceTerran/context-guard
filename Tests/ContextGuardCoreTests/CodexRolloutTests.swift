@@ -30,6 +30,14 @@ final class CodexMetaTests: XCTestCase {
                        "a format this build hasn't seen isn't read")
     }
 
+    func testASessionNamedAfterTheLinkIsATerminals() throws {
+        // Codex names every session on an app server after its first client: the link, when it got
+        // there before the terminal that started the server.
+        XCTAssertTrue(try XCTUnwrap(meta(CodexLine.meta(originator: "context_guard"))).isTerminalSession)
+        XCTAssertFalse(try XCTUnwrap(meta(CodexLine.meta(originator: "context_guard", source: "exec"))).isTerminalSession)
+        XCTAssertFalse(try XCTUnwrap(meta(CodexLine.meta(originator: "context_guard", threadSource: "subagent"))).isTerminalSession)
+    }
+
     func testTheFirstLineIsReadWholeUpToAMegabyte() throws {
         XCTAssertNotNil(meta(CodexLine.meta(instructions: 900_000)))
         XCTAssertNil(meta(CodexLine.meta(instructions: 1_100_000)), "past the cap, nothing is guessed")

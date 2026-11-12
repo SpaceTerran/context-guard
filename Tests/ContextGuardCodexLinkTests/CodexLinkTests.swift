@@ -536,11 +536,12 @@ final class CodexLinkLoopTests: XCTestCase {
     }
 
     func running(_ connector: FakeConnector, terminals: FakeTerminals, idleDisconnect: TimeInterval = 300,
-                 until done: (CodexLinkStatus?) -> Bool) -> (CodexLink, Bool) {
+                 newServerWait: TimeInterval = 0, until done: (CodexLinkStatus?) -> Bool) -> (CodexLink, Bool) {
         var o = CodexLink.Options()
         o.pass = 0.02
         o.idleDisconnect = idleDisconnect
         o.backoff = [0.02]
+        o.newServerWait = newServerWait
         let link = CodexLink(paths: paths, connector: connector, terminals: terminals, options: o)
         let ended = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
@@ -611,6 +612,31 @@ final class CodexLinkLoopTests: XCTestCase {
         }
         XCTAssertTrue(reached, "disconnected with no Codex terminal")
         XCTAssertEqual(connector.connects, 1, "and waits for one before connecting again")
+    }
+
+    func testANewAppServerIsLeftToItsTerminalFirst() {
+        // Codex names every session on a server after its first client: the terminal that started
+        // the server should be that client, not the link.
+        let connector = FakeConnector(daemon)
+        let start = Date()
+        let (_, reached) = running(connector, terminals: codex, newServerWait: 0.4) { $0?.connected == true }
+        XCTAssertTrue(reached)
+        XCTAssertGreaterThanOrEqual(connector.connectedAt.first?.timeIntervalSince(start) ?? 0, 0.4)
+    }
+
+    func testAfterAConnectionEndsItWaitsAgain() {
+        // The server may have restarted: a new one is again left to its terminal first.
+        let terminals = FakeTerminals(codex.terminals())
+        let connector = FakeConnector(daemon)
+        let (_, reached) = running(connector, terminals: terminals, idleDisconnect: 0.1, newServerWait: 0.4) { status in
+            if status?.connected == true, connector.connects == 1 { terminals.set([]) }
+            if self.daemon.closed, connector.connects == 1 { terminals.set(self.codex.terminals()) }
+            return connector.connects == 2
+        }
+        XCTAssertTrue(reached, "connected again")
+        let at = connector.connectedAt
+        XCTAssertGreaterThanOrEqual(at.count == 2 ? at[1].timeIntervalSince(at[0]) : 0, 0.1 + 0.4,
+                                    "the idle time, then the wait")
     }
 
     func testStoppingSaysSoAtOnce() {

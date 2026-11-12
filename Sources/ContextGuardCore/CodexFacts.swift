@@ -18,6 +18,8 @@ public struct CodexFacts: Codable, Equatable, Sendable {
     /// A session you drive in a terminal, in a format Context Guard reads (`CodexMeta`). nil until
     /// its rollout's first line has been read.
     public var terminal: Bool?
+    /// The `CodexMeta.terminalRule` that made `terminal`: one made by an older rule is made again.
+    public var terminalRule: Int?
     /// Its turns as the rollout showed them, carried from one read to the next.
     public var turn: CodexTurn?
 
@@ -62,6 +64,7 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         model = try? c.decode(String.self, forKey: .model)
         originator = try? c.decode(String.self, forKey: .originator)
         terminal = try? c.decode(Bool.self, forKey: .terminal)
+        terminalRule = try? c.decode(Int.self, forKey: .terminalRule)
         turn = try? c.decode(CodexTurn.self, forKey: .turn)
         status = try? c.decode(String.self, forKey: .status)
         flags = try? c.decode([String].self, forKey: .flags)

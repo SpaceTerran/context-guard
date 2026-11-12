@@ -310,6 +310,8 @@ final class FakeConnector: CodexConnecting, @unchecked Sendable {
     let daemon: FakeDaemon
     var isAvailable = true
     var connects = 0
+    /// When each connection was made.
+    var connectedAt: [Date] = []
 
     init(_ daemon: FakeDaemon) {
         self.daemon = daemon
@@ -319,6 +321,7 @@ final class FakeConnector: CodexConnecting, @unchecked Sendable {
 
     func connect(onEvent: @escaping @Sendable (CodexEvent) -> Void) throws -> CodexDaemon {
         connects += 1
+        connectedAt.append(Date())
         daemon.reopen()
         daemon.onEvent = onEvent
         return daemon

@@ -103,6 +103,27 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertEqual(state?.phase, .watching, "never asked")
     }
 
+    func testASessionJudgedByAnOlderRuleIsJudgedAgain() throws {
+        // Named after the link (it was the app server's first client), and judged before such a
+        // session counted as a terminal's.
+        try configure()
+        log = Transcript(dir, name: "named-after-the-link.jsonl")
+        log.append(CodexLine.meta(originator: "context_guard"))
+        log.append(CodexLine.turn("big", reply: "ok", tokens: 200_000))
+        var old = SessionState(sessionId: id, host: .codex, now: clock.now)
+        old.transcriptPath = log.path
+        var facts = CodexFacts(originator: "context_guard")
+        facts.terminal = false
+        old.codex = facts
+        try old.save(paths)
+        try settle()
+        tick()
+        XCTAssertEqual(state?.codex?.terminal, true)
+        XCTAssertEqual(state?.codex?.terminalRule, CodexMeta.terminalRule)
+        XCTAssertTrue(state?.guarded ?? false)
+        XCTAssertEqual(state?.phase, .asking)
+    }
+
     func testItsOwnHelpersAreLeftOut() {
         XCTAssertEqual(runner.tick(CodexThreadLook(threadId: id, status: "active", ephemeral: true)), .none)
         XCTAssertNil(state)

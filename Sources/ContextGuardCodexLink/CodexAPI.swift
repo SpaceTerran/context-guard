@@ -1,3 +1,4 @@
+import ContextGuardCore
 import CryptoKit
 import Foundation
 
@@ -121,7 +122,7 @@ extension CodexDaemon {
     /// The handshake. Returns the app server's user agent (`codex-tui/0.167.1 (…)`).
     public func initialize(version: String, timeout: TimeInterval) throws -> String? {
         let result = try call("initialize", [
-            "clientInfo": ["name": "context_guard", "title": "Context Guard", "version": .string(version)],
+            "clientInfo": ["name": .string(CodexMeta.linkOriginator), "title": "Context Guard", "version": .string(version)],
             "capabilities": ["experimentalApi": true, "requestAttestation": false],
         ], timeout: timeout)
         try notify("initialized", nil)

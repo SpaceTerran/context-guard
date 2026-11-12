@@ -109,6 +109,12 @@ final class CodexAttachmentTests: XCTestCase {
                        ["tui": true, "desktop": false, "exec": false])
     }
 
+    func testASessionNamedAfterTheLinkIsTheTerminalApps() {
+        // The link was the app server's first client, so Codex named the terminal's session after it.
+        let threads = [thread("tui", at: 10, originator: "context_guard"), thread("desktop", at: 30, originator: "Codex Desktop")]
+        XCTAssertEqual(CodexAttachment.attached(threads: threads, terminals: [terminal()]), ["tui": true, "desktop": false])
+    }
+
     func testFoldersAreKeptApart() {
         let threads = [thread("here", in: "/Users/demo/code", at: 10), thread("there", in: "/Users/demo/other", at: 30), thread("nowhere", in: nil)]
         let attached = CodexAttachment.attached(threads: threads, terminals: [terminal(in: "/Users/demo/code")])
