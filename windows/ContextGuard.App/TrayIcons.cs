@@ -9,7 +9,7 @@ namespace ContextGuard.App;
 /// </summary>
 static unsafe class TrayIcons
 {
-    const string Gauge = "\uEC4A", GaugeOff = "\uEC48", Disc = "\uEA3B";
+    internal const string Gauge = "\uEC4A", GaugeOff = "\uEC48", Disc = "\uEA3B";
     const uint White = 0xFFFFFF, Black = 0x000000;
     const uint Format = Native.DT_CENTER | Native.DT_VCENTER | Native.DT_SINGLELINE | Native.DT_NOPREFIX | Native.DT_NOCLIP;
 
@@ -66,7 +66,7 @@ static unsafe class TrayIcons
     }
 
     /// <summary>One glyph, its em box <paramref name="em"/> pixels, centred in the icon.</summary>
-    static void Draw(nint dc, string glyph, int size, int em, uint textColor)
+    internal static void Draw(nint dc, string glyph, int size, int em, uint textColor)
     {
         var font = Native.CreateFont(-em, 0, 0, 0, Native.FW_NORMAL, 0, 0, 0, 1, 0, 0, Native.ANTIALIASED_QUALITY, 0, Glyphs.Font);
         var previous = Native.SelectObject(dc, font);
