@@ -277,6 +277,27 @@ final class ThresholdTests: XCTestCase {
         XCTAssertLessThan(r.askAt, r.laterAt)
     }
 
+    func testCodexMovesUpPastItsSizeAfterCompactingToo() {
+        var s = codex(window: 258_400)
+        let low = Config(codexAskPercent: 10, codexLaterPercent: 15)
+        XCTAssertEqual(low.resolved(for: s).askAt, 25_840)
+        XCTAssertEqual(low.resolved(for: s).laterAt, 38_760)
+        s.lastCompaction = Compaction(at: Date(), trigger: "auto", preTokens: 60_000, postTokens: 30_000, sizeAfter: 30_000)
+        let r = low.resolved(for: s)
+        XCTAssertEqual(r.askAt, 42_920, "half of Ask (12,920) past 30k")
+        XCTAssertEqual(r.laterAt, 55_840, "Wait moves up as much")
+
+        s.lastCompaction?.sizeAfter = 200_000
+        let high = low.resolved(for: s)
+        XCTAssertEqual(high.askAt, 212_920)
+        XCTAssertEqual(high.laterAt, 244_800 - 25_840, "still room for the save before Codex compacts by itself")
+
+        s.lastCompaction?.sizeAfter = 240_000
+        let full = low.resolved(for: s)
+        XCTAssertEqual(full.askAt, 252_920, "past where Codex compacts by itself: it does, and isn't asked")
+        XCTAssertEqual(full.laterAt, 253_920)
+    }
+
     func testAnUnknownWindowKeepsTheTokenCounts() {
         let c = Config()
         XCTAssertEqual(c.resolved(for: codex(window: nil)), c)

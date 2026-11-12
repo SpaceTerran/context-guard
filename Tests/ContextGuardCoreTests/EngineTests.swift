@@ -125,6 +125,71 @@ final class EngineTests: XCTestCase {
         XCTAssertEqual(s.lastCompaction?.preTokens, 320_000)
     }
 
+    func testACompactionsSizeAfterIsItsFirstResponse() {
+        var s = SessionState.guarded(320_000, phase: .sent, cycle: 1)
+        var r = TranscriptReading()
+        r.latest = .compaction(trigger: "manual", preTokens: 320_000, postTokens: 6_228)
+        r.compaction = r.latest
+        Engine.observe(&s, r, config: config, now: now)
+        XCTAssertEqual(s.awaitingSizeAfter, true)
+        XCTAssertNil(s.lastCompaction?.sizeAfter)
+        Engine.observe(&s, .tokens(43_227), config: config, now: now)
+        XCTAssertEqual(s.lastCompaction?.sizeAfter, 43_227)
+        XCTAssertNil(s.awaitingSizeAfter)
+        Engine.observe(&s, .tokens(60_000), config: config, now: now)
+        XCTAssertEqual(s.lastCompaction?.sizeAfter, 43_227, "only the first response counts")
+    }
+
+    func testACompactionFromAnOlderBuildNeverTakesALaterSize() {
+        var s = SessionState.guarded(250_000)
+        s.lastCompaction = Compaction(at: now, trigger: "auto", preTokens: 400_000, postTokens: 20_000)
+        Engine.observe(&s, .tokens(320_000), config: config, now: now)
+        XCTAssertNil(s.lastCompaction?.sizeAfter)
+        XCTAssertEqual(config.resolved(for: s), config)
+    }
+
+    /// Seen live (Ask at 10k, a Haiku session back at 43k after each compaction): it was asked again
+    /// right after every compaction and, with the countdown, compacted again and again.
+    func testACompactionThatCantGetBelowAskAtDoesntAskAgainAtOnce() {
+        let low = Config(askAt: 50_000, laterAt: 70_000)
+        var s = SessionState.guarded(120_000, phase: .sent, cycle: 1)
+        Engine.compacted(&s, trigger: "manual", preTokens: 120_000, postTokens: 27_000, now: now)
+        Engine.observe(&s, .tokens(90_000), config: low.resolved(for: s), now: now)
+        Engine.advance(&s, config: low.resolved(for: s), now: now)
+        XCTAssertEqual(s.phase, .watching)
+        let r = low.resolved(for: s)
+        XCTAssertEqual(r.askAt, 115_000, "half of Ask past its size after compacting")
+        XCTAssertEqual(r.laterAt, 135_000, "Wait moves up as much")
+
+        s.tokens = 114_999
+        Engine.advance(&s, config: low.resolved(for: s), now: now)
+        XCTAssertEqual(s.phase, .watching)
+        s.tokens = 115_000
+        Engine.advance(&s, config: low.resolved(for: s), now: now)
+        XCTAssertEqual(s.phase, .asking)
+        XCTAssertEqual(s.cycle, 2)
+        Engine.apply(answer(s, .later), to: &s)
+        s.tokens = 134_999
+        Engine.advance(&s, config: low.resolved(for: s), now: now)
+        XCTAssertEqual(s.phase, .later)
+        s.tokens = 135_000
+        Engine.advance(&s, config: low.resolved(for: s), now: now)
+        XCTAssertEqual(s.phase, .queued)
+        let text = Engine.claimDelivery(&s, via: .wake, config: low.resolved(for: s), nonce: "cg-1", now: now)
+        XCTAssertTrue(text?.contains("they set it to go out when this session reached 135k tokens") ?? false)
+    }
+
+    func testACompactionBelowAskAtChangesNothing() {
+        var s = SessionState.guarded(320_000, phase: .sent, cycle: 1)
+        Engine.compacted(&s, trigger: "manual", preTokens: 320_000, postTokens: 27_000, now: now)
+        Engine.observe(&s, .tokens(90_000), config: config, now: now)
+        XCTAssertEqual(s.lastCompaction?.sizeAfter, 90_000)
+        XCTAssertEqual(config.resolved(for: s), config)
+        let at = Config(askAt: 90_000, laterAt: 150_000).resolved(for: s)
+        XCTAssertEqual(at.askAt, 135_000, "compacting to Ask itself doesn't get it below")
+        XCTAssertEqual(at.laterAt, 195_000)
+    }
+
     func testSmallDipsDontReArmButALargeDropDoes() {
         var s = SessionState.guarded(320_000, phase: .sent, cycle: 1)
         Engine.observe(&s, .tokens(260_000), config: config, now: now)

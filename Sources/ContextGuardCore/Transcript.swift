@@ -12,6 +12,9 @@ public struct TranscriptReading: Equatable, Sendable {
     public var latest: Latest?
     /// The newest compaction seen in this read, whether or not a response came after it.
     public var compaction: Latest?
+    /// The size at the first response after that compaction or, in a read without one, at the
+    /// read's first response: what a compaction brought the session down to.
+    public var firstTokens: Int?
     public var title: String?
     public var markersSeen: Set<String> = []
     public var cursor: TranscriptCursor?
@@ -63,7 +66,10 @@ public enum TranscriptReader {
 
             switch type {
             case "assistant":
-                if let tokens = responseTokens(obj) { reading.latest = .response(tokens: tokens) }
+                if let tokens = responseTokens(obj) {
+                    if reading.firstTokens == nil { reading.firstTokens = tokens }
+                    reading.latest = .response(tokens: tokens)
+                }
             case "system":
                 guard obj["subtype"] as? String == "compact_boundary" else { break }
                 let meta = obj["compactMetadata"] as? [String: Any] ?? [:]
@@ -73,6 +79,7 @@ public enum TranscriptReader {
                     postTokens: int(meta["postTokens"]))
                 reading.latest = c
                 reading.compaction = c
+                reading.firstTokens = nil
             case "ai-title":
                 if let t = obj["aiTitle"] as? String, !t.isEmpty { reading.title = t }
             case "user", "attachment":

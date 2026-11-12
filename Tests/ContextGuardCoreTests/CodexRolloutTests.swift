@@ -117,6 +117,7 @@ final class CodexRolloutTests: XCTestCase {
         let r = CodexRollout.read(path: log.path, cursor: nil)
         XCTAssertEqual(r.transcript.compaction, .compaction(trigger: "auto", preTokens: 241_780, postTokens: 16_662))
         XCTAssertEqual(r.transcript.tokens, 16_662)
+        XCTAssertEqual(r.transcript.firstTokens, 16_662, "the first size after the compaction")
         XCTAssertFalse(r.sizeAfterCompactionUnknown)
     }
 
@@ -128,11 +129,13 @@ final class CodexRolloutTests: XCTestCase {
         XCTAssertEqual(r.transcript.compaction, .compaction(trigger: "manual", preTokens: nil, postTokens: nil))
         XCTAssertTrue(r.sizeAfterCompactionUnknown, "the size after it isn't written yet")
         XCTAssertNil(r.transcript.tokens)
+        XCTAssertNil(r.transcript.firstTokens)
 
         log.append(CodexLine.tokens(18_081), CodexLine.taskComplete())
         let after = CodexRollout.read(path: log.path, cursor: r.transcript.cursor, turn: r.turn)
         XCTAssertNil(after.transcript.compaction)
         XCTAssertEqual(after.transcript.tokens, 18_081)
+        XCTAssertEqual(after.transcript.firstTokens, 18_081)
     }
 
     func testTheTerminalAppsOwnCompactionTurn() {

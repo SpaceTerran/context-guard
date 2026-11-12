@@ -38,6 +38,23 @@ final class TranscriptTests: XCTestCase {
         XCTAssertEqual(r.compaction, .compaction(trigger: "auto", preTokens: 370_000, postTokens: 22_000))
     }
 
+    /// What compacting got the session down to: its first response after the compaction. Claude
+    /// Code's `postTokens` leaves out the system prompt and tools (seen live: 6,228, then 43,227).
+    func testTheFirstResponseAfterACompactionIsItsSizeAfter() {
+        let t = Transcript(dir)
+        t.append(Line.context(39_406), Line.compaction(pre: 39_479, post: 6_228), Line.context(43_227), Line.context(43_989))
+        let r1 = TranscriptReader.read(path: t.path, cursor: nil)
+        XCTAssertEqual(r1.firstTokens, 43_227)
+        XCTAssertEqual(r1.tokens, 43_989)
+
+        t.append(Line.context(44_214), Line.context(44_500))
+        let r2 = TranscriptReader.read(path: t.path, cursor: r1.cursor)
+        XCTAssertEqual(r2.firstTokens, 44_214, "a read without a compaction: its first response")
+
+        t.append(Line.context(45_000), Line.compaction(pre: 45_000, post: 6_665))
+        XCTAssertNil(TranscriptReader.read(path: t.path, cursor: r2.cursor).firstTokens, "no response since the compaction yet")
+    }
+
     func testTornLastLineWaitsForTheNextRead() {
         let t = Transcript(dir)
         let first = Line.context(100_000)

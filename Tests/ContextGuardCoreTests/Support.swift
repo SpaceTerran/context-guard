@@ -145,9 +145,11 @@ extension SessionState {
 }
 
 extension TranscriptReading {
+    /// A read with one response.
     static func tokens(_ t: Int) -> TranscriptReading {
         var r = TranscriptReading()
         r.latest = .response(tokens: t)
+        r.firstTokens = t
         return r
     }
 }

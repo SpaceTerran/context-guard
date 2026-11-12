@@ -42,14 +42,19 @@ public struct Compaction: Codable, Equatable, Sendable {
     public var trigger: String?
     public var preTokens: Int?
     public var postTokens: Int?
+    /// The session's size at its first response after the compaction: as small as compacting gets
+    /// it. For Claude Code that's more than `postTokens`, which leaves out the system prompt and tools.
+    public var sizeAfter: Int?
     /// The phase it cut short, if the save message was still pending.
     public var interruptedPhase: Phase?
 
-    public init(at: Date, trigger: String?, preTokens: Int?, postTokens: Int?, interruptedPhase: Phase? = nil) {
+    public init(at: Date, trigger: String?, preTokens: Int?, postTokens: Int?, sizeAfter: Int? = nil,
+                interruptedPhase: Phase? = nil) {
         self.at = at
         self.trigger = trigger
         self.preTokens = preTokens
         self.postTokens = postTokens
+        self.sizeAfter = sizeAfter
         self.interruptedPhase = interruptedPhase
     }
 }
@@ -135,6 +140,9 @@ public struct SessionState: Codable, Equatable, Sendable {
     /// SessionStart(compact) fires before Claude Code writes the compaction record, so the new size
     /// is unknown until that record (or the next response) shows up.
     public var awaitingCompactionRecord: Bool = false
+    /// The last compaction's `sizeAfter` comes with the session's next response. nil in files
+    /// written before it was kept, so an older compaction never takes a later size as its own.
+    public var awaitingSizeAfter: Bool?
     /// What happens after the save message: compacting once the session is done saving, then continuing.
     /// Survives the re-arm after the compaction. The Context Guard mod drives it (`ModRunner`).
     public var followUp: FollowUp?

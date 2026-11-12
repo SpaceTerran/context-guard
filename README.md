@@ -43,7 +43,9 @@ which carries on from what it saved. A session that can't be ready until one of 
 so, and Haiku holds it until it's done.
 
 A notice says when it needs you, when it compacts and how it went. After a session compacts, it's
-asked again the next time it reaches 300k.
+asked again the next time it reaches 300k. If compacting can't bring it below that, it's asked once
+it has grown by half of that (150k) past its size after compacting, and Wait moves up as much. Its
+menu says where.
 
 Haiku needs no API key: the mod asks it through the Claude Code session it runs in, with your Claude
 Code sign-in.

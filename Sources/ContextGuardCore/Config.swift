@@ -89,21 +89,36 @@ public struct Config: Codable, Equatable, Sendable {
     /// The settings as they apply to one session. Claude Code's thresholds are the token counts
     /// set. Codex's are shares of the session's own window, kept below the point where Codex
     /// compacts by itself. A Codex session whose window isn't known yet keeps the token counts;
-    /// it isn't guarded until its window is known.
+    /// it isn't guarded until its window is known. Both move up for a session that compacting
+    /// can't bring below "Ask at" (`aboveCompactedSize`).
     public func resolved(for s: SessionState) -> Config {
-        guard s.hostKind == .codex, let window = s.codex?.window, window > 0 else { return self }
         var c = self
-        c.askAt = window * codexAskPercent / 100
-        c.laterAt = window * codexLaterPercent / 100
-        if let itself = s.codex?.compactsItselfAt {
+        var laterCap: Int?
+        if s.hostKind == .codex, let window = s.codex?.window, window > 0 {
+            c.askAt = window * codexAskPercent / 100
+            c.laterAt = window * codexLaterPercent / 100
             // Room before Codex's own compaction, which would cut the save short. Codex compacts
             // when the next request would pass its limit, and one tool result can add tens of
             // thousands of tokens, so the room is a tenth of the window.
-            c.laterAt = min(c.laterAt, itself - window / 10)
+            laterCap = s.codex?.compactsItselfAt.map { $0 - window / 10 }
+            if let laterCap { c.laterAt = min(c.laterAt, laterCap) }
+            c.askAt = max(1_000, min(c.askAt, c.laterAt - window / 20))
+            c.laterAt = max(c.laterAt, c.askAt + 1_000)
         }
-        c.askAt = max(1_000, min(c.askAt, c.laterAt - window / 20))
-        c.laterAt = max(c.laterAt, c.askAt + 1_000)
+        if let compacted = s.lastCompaction?.sizeAfter { c.aboveCompactedSize(compacted, laterCap: laterCap) }
         return c
+    }
+
+    /// A session that its last compaction left at or above "Ask at" would be asked after every turn
+    /// and, with the countdown, compacted again and again, with nothing gained. So it's asked once it
+    /// has grown by half of "Ask at" past that size, and Wait moves up as much (for Codex, kept below
+    /// its own compaction while there's room).
+    mutating func aboveCompactedSize(_ compacted: Int, laterCap: Int?) {
+        guard compacted >= askAt else { return }
+        let ask = compacted + askAt / 2
+        laterAt += ask - askAt
+        askAt = ask
+        if let laterCap { laterAt = max(min(laterAt, laterCap), askAt + 1_000) }
     }
 
     /// Where a Codex session with this window would ask and, told to wait, compact (Settings'

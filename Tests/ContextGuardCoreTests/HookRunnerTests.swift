@@ -292,6 +292,43 @@ final class HookRunnerTests: HookTestCase {
         XCTAssertEqual(s.cycle, 1)
     }
 
+    /// Seen live: Ask at 10k, and a Haiku session back at 43k after each compaction (Claude Code's
+    /// record said 6k). It was asked again right after every compaction, and the countdown
+    /// compacted it again and again.
+    func testACompactionThatLeavesItAboveAskAtDoesntAskAgainRightAway() throws {
+        try configure { $0.askAt = 10_000; $0.laterAt = 20_000 }
+        transcript.append(Line.context(39_406))
+        _ = runner.handle(event("Stop"))
+        XCTAssertEqual(state?.phase, .asking)
+        transcript.append(Line.compaction(pre: 39_479, post: 6_228))
+        _ = runner.handle(event("SessionStart", source: "compact"))
+        XCTAssertEqual(state?.awaitingSizeAfter, true)
+
+        transcript.append(Line.pluginPrompt("continue now"), Line.context(43_227))
+        _ = runner.handle(event("Stop"))
+        let s = try XCTUnwrap(state)
+        XCTAssertEqual(s.phase, .watching, "not asked again at once")
+        XCTAssertEqual(s.cycle, 1)
+        XCTAssertEqual(s.lastCompaction?.sizeAfter, 43_227)
+        XCTAssertEqual(SessionInfo(state: s, isLive: true, waiterAlive: false).statusText(Config.load(paths)), "Asks at 48k")
+
+        transcript.append(Line.context(48_227))
+        _ = runner.handle(event("Stop"))
+        XCTAssertEqual(state?.phase, .asking, "once it has grown by half of Ask")
+        XCTAssertEqual(state?.cycle, 2)
+    }
+
+    func testTheWaiterWaitsForWaitsMovedUpSize() throws {
+        try testACompactionThatLeavesItAboveAskAtDoesntAskAgainRightAway()
+        try answer(.later)
+        guard case .wait(let token) = runner.handle(event("Stop")) else { return XCTFail("expected a waiter") }
+        XCTAssertEqual(state?.phase, .later)
+        // Past the 20k set, but short of where Wait moved to (58,227).
+        let out = try XCTUnwrap(startWaiter(token: token, maxDuration: 0.5).wait(5))
+        XCTAssertEqual(out.exitCode, 0)
+        XCTAssertEqual(state?.phase, .later)
+    }
+
     func testResumeUsesTheReportedContextSize() {
         _ = runner.handle(event("SessionStart", source: "resume", contextTokens: 333_000))
         XCTAssertEqual(state?.tokens, 333_000)
