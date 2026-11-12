@@ -96,8 +96,6 @@ public enum CodexAttachment {
         return w[1]
     }
 
-    public static let terminalOriginator = "codex-tui"
-
     public static func resolved(_ path: String) -> String {
         guard let real = realpath(path, nil) else { return (path as NSString).standardizingPath }
         defer { free(real) }
@@ -117,7 +115,7 @@ public enum CodexAttachment {
         var threadsIn: [String: [CodexThreadInfo]] = [:]
         for th in threads {
             // Only the terminal app's sessions compete for its terminals.
-            guard th.originator == terminalOriginator else {
+            guard CodexMeta.isTerminalOriginator(th.originator) else {
                 out[th.id] = false
                 continue
             }

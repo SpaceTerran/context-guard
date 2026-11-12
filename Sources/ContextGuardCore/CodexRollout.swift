@@ -3,7 +3,7 @@ import Foundation
 /// The first line of a Codex rollout: which thread it is and who started it.
 public struct CodexMeta: Equatable, Sendable {
     public var threadId: String
-    /// The client that started it: `codex-tui` for a terminal session.
+    /// The client that started it: `codex-tui` for a terminal session (see `linkOriginator`).
     public var originator: String?
     /// How it was started (`cli`, `vscode`, `exec`, …). nil when Codex records an object instead,
     /// which it does for a subagent's thread.
@@ -18,9 +18,26 @@ public struct CodexMeta: Equatable, Sendable {
     /// Rollout formats Context Guard reads: Codex 0.167 writes `paginated`, earlier ones `legacy`.
     static let readableHistory: Set<String> = ["legacy", "paginated"]
 
+    /// The originator of a session the terminal app started.
+    public static let terminalOriginator = "codex-tui"
+    /// The name Context Guard's link gives the app server (`clientInfo.name`). Codex names every
+    /// session on an app server after that server's first client, so a terminal's session on a server
+    /// the link reached first carries this name. The link's own sessions (the judge's) are ephemeral
+    /// and have no rollout, so a rollout with this name is another client's.
+    public static let linkOriginator = "context_guard"
+
+    /// Which `isTerminalSession` rule a stored verdict was made by (`CodexFacts.terminalRule`); a
+    /// session judged by an older one is judged again. 2: sessions named after the link count.
+    public static let terminalRule = 2
+
+    /// Started by the terminal app, by its originator. `codex exec` never is.
+    public static func isTerminalOriginator(_ originator: String?, source: String? = nil) -> Bool {
+        originator == terminalOriginator || (originator == linkOriginator && source != "exec")
+    }
+
     /// A session you drive in a terminal, in a format Context Guard knows how to read.
     public var isTerminalSession: Bool {
-        originator == "codex-tui" && source != nil && (threadSource ?? "user") == "user"
+        Self.isTerminalOriginator(originator, source: source) && source != nil && (threadSource ?? "user") == "user"
             && Self.readableHistory.contains(historyMode ?? "legacy")
     }
 }

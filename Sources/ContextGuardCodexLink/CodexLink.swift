@@ -17,6 +17,10 @@ public final class CodexLink: @unchecked Sendable {
         /// No Codex terminal app this long: let the connection go until one starts.
         public var idleDisconnect: TimeInterval = 300
         public var backoff: [TimeInterval] = [1, 2, 5, 10, 30]
+        /// How long an app server must have been there before the link connects: Codex names every
+        /// session on a server after its first client, and a server that just started belongs to the
+        /// terminal that started it, which connects within a second or so.
+        public var newServerWait: TimeInterval = 10
         public var configRefresh: TimeInterval = 60
         /// At most this many judges at once.
         public var judges = 2
@@ -98,13 +102,27 @@ public final class CodexLink: @unchecked Sendable {
         defer { withExtendedLifetime(watch) {} }
         log.write("started (pid \(getpid()))\(onlyCwd.map { ", only sessions in \($0)" } ?? "")")
         var failures = 0
+        // Since when the app server has been there, as far as the link knows: since it first saw it,
+        // or since its last connection ended (the server may be a new one).
+        var serverSince: Date?
         while !isStopped {
             let now = clock()
             let haveTerminal = noteTerminals(terminals.terminals(), now: now)
-            guard connector.available(), haveTerminal || recentlyHadTerminal(now) else {
+            let available = connector.available()
+            if !available {
+                serverSince = nil
+            } else if serverSince == nil {
+                serverSince = now
+            }
+            guard available, haveTerminal || recentlyHadTerminal(now) else {
                 if !haveTerminal { closeAbandoned() }
                 writeStatus(now: now, force: false)
                 sleep(options.pass * 2)
+                continue
+            }
+            if let since = serverSince, now.timeIntervalSince(since) < options.newServerWait {
+                writeStatus(now: now, force: false)
+                sleep(min(options.pass, options.newServerWait - now.timeIntervalSince(since)))
                 continue
             }
             do {
@@ -119,6 +137,7 @@ public final class CodexLink: @unchecked Sendable {
                 }
                 failures = 0
                 serve(daemon, serverVersion: agent)
+                serverSince = nil
             } catch {
                 note(error: describe(error))
                 writeStatus(now: clock(), force: true)
@@ -160,6 +179,9 @@ public final class CodexLink: @unchecked Sendable {
         judgeModel = model
         lock.unlock()
         log.write("connected to \(agent ?? "the Codex app server"); judge: \(model ?? "each session's own model")")
+        if agent?.hasPrefix(CodexMeta.linkOriginator + "/") == true {
+            log.write("the link was this app server's first client, so Codex names its new sessions \(CodexMeta.linkOriginator)")
+        }
         writeStatus(now: clock(), force: true)
 
         while !isStopped, !isClosed {
