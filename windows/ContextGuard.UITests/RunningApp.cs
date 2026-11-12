@@ -15,20 +15,23 @@ namespace ContextGuard.UITests;
 sealed partial class RunningApp : IDisposable
 {
     public const string TrayClass = "ContextGuardTray";
+    const string WinUIWindowClass = "WinUIDesktopWin32WindowClass";
     const uint WM_CLOSE = 0x0010, WM_TRAY = 0x8001, NIN_SELECT = 0x0400, WM_CONTEXTMENU = 0x007B;
 
     readonly string folder = Path.Combine(Path.GetTempPath(), "cg-uitest-" + Guid.NewGuid().ToString("N")[..8]);
 
     /// <param name="board">A file in contract/ui/boards (no extension).</param>
     /// <param name="program">In place of the stand-in: a program that isn't there, say.</param>
-    public RunningApp(string board = "asking", string? program = null)
+    /// <param name="next">Boards the stand-in prints after each intent, in turn.</param>
+    /// <param name="chime">A chime after the first board, as the program sends when a question opens.</param>
+    public RunningApp(string board = "asking", string? program = null, string[]? next = null, bool chime = false)
     {
         // Left over from a test that failed: one app per session, so it would stop this one.
         foreach (var old in System.Diagnostics.Process.GetProcessesByName("ContextGuard")) Quit(old);
         Directory.CreateDirectory(folder);
         IntentLog = Path.Combine(folder, "intents.log");
-        Board = JsonDocument.Parse(File.ReadAllText(Path.Combine(Contract, "boards", board + ".json"))).RootElement.GetProperty("board").Clone();
-        Process = System.Diagnostics.Process.Start(Start(board, program))!;
+        Board = ReadBoard(board);
+        Process = System.Diagnostics.Process.Start(Start(board, program, next, chime))!;
         TrayWindow = Until(() => Native.FindWindow(TrayClass, null) is var h && h != 0 ? (nint?)h : null, "the tray window");
     }
 
@@ -45,8 +48,12 @@ sealed partial class RunningApp : IDisposable
     public JsonElement Board { get; }
     public nint TrayWindow { get; }
 
+    /// <summary>A board in contract/ui/boards.</summary>
+    public static JsonElement ReadBoard(string name) =>
+        JsonDocument.Parse(File.ReadAllText(Path.Combine(Contract, "boards", name + ".json"))).RootElement.GetProperty("board").Clone();
+
     /// <summary>The app's command line for a board (or for another program in place of the stand-in).</summary>
-    public ProcessStartInfo Start(string board, string? program = null)
+    public ProcessStartInfo Start(string board, string? program = null, string[]? next = null, bool chime = false)
     {
         var info = new ProcessStartInfo(App) { UseShellExecute = false };
         if (program is not null)
@@ -57,11 +64,14 @@ sealed partial class RunningApp : IDisposable
         }
         info.ArgumentList.Add("--program");
         info.ArgumentList.Add(Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"));
-        foreach (var arg in new[]
+        var args = new List<string>
         {
             "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(AppContext.BaseDirectory, "StandIn.ps1"),
             "-Board", Path.Combine(Contract, "boards", board + ".json"), "-Log", IntentLog,
-        })
+        };
+        if (next is { Length: > 0 }) args.AddRange(["-Next", string.Join(',', next)]);
+        if (chime) args.Add("-Chime");
+        foreach (var arg in args)
         {
             info.ArgumentList.Add("--program-arg");
             info.ArgumentList.Add(arg);
@@ -125,6 +135,45 @@ sealed partial class RunningApp : IDisposable
 
     public static bool Has(AutomationElement within, string automationId) =>
         within.FindFirstDescendant(cf => cf.ByAutomationId(automationId)) is not null;
+
+    // Popups and notices
+
+    /// <summary>The popups and notices showing: the app's windows but the flyout.</summary>
+    public AutomationElement[] Popups() =>
+        Desktop.FindAllChildren(cf => cf.ByProcessId(Process.Id).And(cf.ByClassName(WinUIWindowClass)))
+            .Where(w => w.Name != "Context Guard" && IsVisible(w)).ToArray();
+
+    /// <summary>A popup by its window's name (what a screen reader calls it), once it shows.</summary>
+    public AutomationElement Popup(string name) =>
+        Until(() => Popups().FirstOrDefault(w => w.Name == name), $"the popup '{name}'");
+
+    /// <summary>What a board's popup is called: a question's heading and session, a notice's title and session.</summary>
+    public static string PopupName(JsonElement popup) =>
+        popup.TryGetProperty("question", out var q)
+            ? $"{q.GetProperty("heading").GetString()}, {q.GetProperty("title").GetString()}"
+            : $"{popup.GetProperty("notice").GetProperty("title").GetString()}, {popup.GetProperty("notice").GetProperty("detail").GetString()}";
+
+    /// <summary>The primary screen's work area (the taskbar left out), in this process's pixels.</summary>
+    public static unsafe System.Drawing.Rectangle WorkArea()
+    {
+        Native.RECT r;
+        if (!Native.SystemParametersInfo(0x0030, 0, &r, 0)) throw new InvalidOperationException("No work area.");   // SPI_GETWORKAREA
+        return System.Drawing.Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
+    }
+
+    /// <summary>What you see of a window, in pixels: its rect less the frame Windows keeps invisible.</summary>
+    public static unsafe System.Drawing.Rectangle VisibleBounds(AutomationElement window)
+    {
+        Native.RECT r;
+        var hr = Native.DwmGetWindowAttribute(window.Properties.NativeWindowHandle.Value, 9, &r, (uint)sizeof(Native.RECT));   // DWMWA_EXTENDED_FRAME_BOUNDS
+        if (hr != 0) throw new InvalidOperationException($"No visible bounds (0x{hr:X}).");
+        return System.Drawing.Rectangle.FromLTRB(r.Left, r.Top, r.Right, r.Bottom);
+    }
+
+    /// <summary>Pixels per DIP on the primary screen, as this process sees it.</summary>
+    public static double Scale => Native.GetDpiForSystem() / 96.0;
+
+    public static nint Foreground => Native.GetForegroundWindow();
 
     // The app's own messages, as the shell sends them
 
@@ -250,5 +299,24 @@ sealed partial class RunningApp : IDisposable
         [LibraryImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static partial bool IsWindowVisible(nint hwnd);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct RECT
+        {
+            public int Left, Top, Right, Bottom;
+        }
+
+        [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static unsafe partial bool SystemParametersInfo(uint action, uint param, void* value, uint winIni);
+
+        [LibraryImport("user32.dll")]
+        public static partial uint GetDpiForSystem();
+
+        [LibraryImport("user32.dll")]
+        public static partial nint GetForegroundWindow();
+
+        [LibraryImport("dwmapi.dll")]
+        public static unsafe partial int DwmGetWindowAttribute(nint hwnd, uint attribute, void* value, uint size);
     }
 }
