@@ -8,7 +8,30 @@
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <!-- The brand's colors (Brand<Role>Brush, for dark, light and high contrast), radii and font, written
+                     from the Mac's Theme.swift by BrandTokensTests. The popups and Settings wear them. -->
+                <ResourceDictionary Source="ms-appx:///Brand.xaml" />
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- What a control's text turns to under the pointer: its own color, except in high contrast, where the
+                 fill turns to the system's highlight and the text to the highlight's text color. -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <StaticResource x:Key="BrandSecondaryHoverTextBrush" ResourceKey="BrandHeadingBrush" />
+                    <StaticResource x:Key="BrandGhostHoverTextBrush" ResourceKey="BrandAccentBrush" />
+                    <StaticResource x:Key="BrandCloseHoverTextBrush" ResourceKey="BrandHeadingBrush" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <StaticResource x:Key="BrandSecondaryHoverTextBrush" ResourceKey="BrandHeadingBrush" />
+                    <StaticResource x:Key="BrandGhostHoverTextBrush" ResourceKey="BrandAccentBrush" />
+                    <StaticResource x:Key="BrandCloseHoverTextBrush" ResourceKey="BrandHeadingBrush" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="BrandSecondaryHoverTextBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="BrandGhostHoverTextBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="BrandCloseHoverTextBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
 
             <!-- A row of the flyout you click, drawn as Windows 11 draws a menu item: no fill until the
                  pointer is over it, rounded, the text dimmed while pressed or disabled. -->
@@ -77,6 +100,182 @@
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="Margin" Value="12,8,12,4" />
+            </Style>
+
+            <!-- The brand's buttons, as the Mac's BrandButtonStyle: 32 high, radius 6, the brand's font at 13; flat fills
+                 that change under the pointer. Primary (the default answer): violet, bold. Secondary: the panel's
+                 fill with a strong edge. Ghost: violet text, no fill until the pointer is over it. -->
+            <Style x:Key="BrandButtonBaseStyle" TargetType="Button">
+                <Setter Property="FontFamily" Value="{StaticResource BrandFont}" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="MinHeight" Value="32" />
+                <Setter Property="Padding" Value="14,0,14,0" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="{StaticResource BrandControlRadius}" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="UseSystemFocusVisuals" Value="{StaticResource UseSystemFocusVisuals}" />
+            </Style>
+
+            <Style x:Key="BrandPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource BrandButtonBaseStyle}">
+                <Setter Property="FontWeight" Value="Bold" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Fill" Background="{ThemeResource BrandPrimaryBrush}" BorderBrush="Transparent"
+                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandPrimaryHoverBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandPrimaryHoverBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandHoverBrush}" />
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandDisabledBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter x:Name="Content" Padding="{TemplateBinding Padding}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    FontFamily="{TemplateBinding FontFamily}" FontSize="{TemplateBinding FontSize}"
+                                    FontWeight="{TemplateBinding FontWeight}" Foreground="{ThemeResource BrandOnPrimaryBrush}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="BrandSecondaryButtonStyle" TargetType="Button" BasedOn="{StaticResource BrandButtonBaseStyle}">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Fill" Background="{ThemeResource BrandPanelBrush}" BorderBrush="{ThemeResource BrandBorderStrongBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandHoverBrush}" />
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandSecondaryHoverTextBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandHoverBrush}" />
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandSecondaryHoverTextBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandDisabledBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter x:Name="Content" Padding="{TemplateBinding Padding}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    FontFamily="{TemplateBinding FontFamily}" FontSize="{TemplateBinding FontSize}"
+                                    FontWeight="{TemplateBinding FontWeight}" Foreground="{ThemeResource BrandHeadingBrush}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="BrandGhostButtonStyle" TargetType="Button" BasedOn="{StaticResource BrandButtonBaseStyle}">
+                <Setter Property="Padding" Value="10,0,10,0" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Fill" Background="Transparent" BorderBrush="Transparent"
+                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandHoverBrush}" />
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandGhostHoverTextBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandHoverBrush}" />
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandGhostHoverTextBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandDisabledBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter x:Name="Content" Padding="{TemplateBinding Padding}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                    FontFamily="{TemplateBinding FontFamily}" FontSize="{TemplateBinding FontSize}"
+                                    FontWeight="{TemplateBinding FontWeight}" Foreground="{ThemeResource BrandAccentBrush}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- A popup's ✕: a small muted cross that darkens on a hover fill. -->
+            <Style x:Key="BrandCloseButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="22" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="{StaticResource BrandBadgeRadius}" />
+                <Setter Property="UseSystemFocusVisuals" Value="{StaticResource UseSystemFocusVisuals}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid x:Name="Fill" Background="Transparent" CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandHoverBrush}" />
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandCloseHoverTextBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="Fill.Background" Value="{ThemeResource BrandHoverBrush}" />
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource BrandCloseHoverTextBrush}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter x:Name="Content" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    Content="{TemplateBinding Content}" Foreground="{ThemeResource BrandMutedBrush}"
+                                    AutomationProperties.AccessibilityView="Raw" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
             <Style x:Key="SeparatorStyle" TargetType="Border">

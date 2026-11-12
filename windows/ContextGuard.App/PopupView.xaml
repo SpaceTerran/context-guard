@@ -1,0 +1,162 @@
+<UserControl
+    x:Class="ContextGuard.App.PopupView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- A question or a notice, drawn as the Mac's QuestionView and NoticeView: the brand's panel, the app's badge,
+         the words, and the answers. Every color is a {ThemeResource}, so a live switch of light, dark or high
+         contrast redraws it; a tone is a visual state for the same reason (a brush set from code keeps the theme it
+         was set in, W9). -->
+    <Grid x:Name="Root" Background="{ThemeResource BrandPanelBrush}">
+        <VisualStateManager.VisualStateGroups>
+            <!-- The badge's symbol: for a question the gauge cut out of a disc in the brand's planet violet (the Mac's
+                 gauge.with.needle.fill, as the tray's asking icon); for a notice, its symbol in its tone. -->
+            <VisualStateGroup x:Name="BadgeTones">
+                <VisualState x:Name="BadgePlanet" />
+                <VisualState x:Name="BadgeAccent">
+                    <VisualState.Setters>
+                        <Setter Target="BadgeDisc.Visibility" Value="Collapsed" />
+                        <Setter Target="BadgeGlyph.FontSize" Value="19" />
+                        <Setter Target="BadgeGlyph.Foreground" Value="{ThemeResource BrandAccentBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="BadgeSuccess">
+                    <VisualState.Setters>
+                        <Setter Target="BadgeDisc.Visibility" Value="Collapsed" />
+                        <Setter Target="BadgeGlyph.FontSize" Value="19" />
+                        <Setter Target="BadgeGlyph.Foreground" Value="{ThemeResource BrandSuccessBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="BadgeWarning">
+                    <VisualState.Setters>
+                        <Setter Target="BadgeDisc.Visibility" Value="Collapsed" />
+                        <Setter Target="BadgeGlyph.FontSize" Value="19" />
+                        <Setter Target="BadgeGlyph.Foreground" Value="{ThemeResource BrandWarningBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="BadgeDanger">
+                    <VisualState.Setters>
+                        <Setter Target="BadgeDisc.Visibility" Value="Collapsed" />
+                        <Setter Target="BadgeGlyph.FontSize" Value="19" />
+                        <Setter Target="BadgeGlyph.Foreground" Value="{ThemeResource BrandDangerBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="BadgeMuted">
+                    <VisualState.Setters>
+                        <Setter Target="BadgeDisc.Visibility" Value="Collapsed" />
+                        <Setter Target="BadgeGlyph.FontSize" Value="19" />
+                        <Setter Target="BadgeGlyph.Foreground" Value="{ThemeResource BrandMutedBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+            <!-- An answered question's mark, in its tone. -->
+            <VisualStateGroup x:Name="MarkTones">
+                <VisualState x:Name="MarkMuted" />
+                <VisualState x:Name="MarkAccent">
+                    <VisualState.Setters>
+                        <Setter Target="MarkGlyph.Foreground" Value="{ThemeResource BrandAccentBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="MarkSuccess">
+                    <VisualState.Setters>
+                        <Setter Target="MarkGlyph.Foreground" Value="{ThemeResource BrandSuccessBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="MarkWarning">
+                    <VisualState.Setters>
+                        <Setter Target="MarkGlyph.Foreground" Value="{ThemeResource BrandWarningBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+                <VisualState x:Name="MarkDanger">
+                    <VisualState.Setters>
+                        <Setter Target="MarkGlyph.Foreground" Value="{ThemeResource BrandDangerBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+
+        <!-- At the top, as tall as its words: the window takes this height. -->
+        <StackPanel x:Name="Body" x:FieldModifier="internal" VerticalAlignment="Top" Padding="16,14,16,14" Spacing="14">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="38" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <!-- The app's icon in miniature: the gauge on the brand's tile, or a notice's symbol in its tone. -->
+                <Border Width="38" Height="38" VerticalAlignment="Top" CornerRadius="8.36" BorderThickness="1"
+                        Background="{ThemeResource BrandBgBrush}" BorderBrush="{ThemeResource BrandBorderBrush}">
+                    <Grid AutomationProperties.AccessibilityView="Raw">
+                        <FontIcon x:Name="BadgeDisc" FontFamily="Segoe Fluent Icons" FontSize="19" Glyph="&#xEA3B;"
+                                  Foreground="{ThemeResource BrandPlanetBrush}" />
+                        <FontIcon x:Name="BadgeGlyph" FontFamily="Segoe Fluent Icons" FontSize="13.68"
+                                  Foreground="{ThemeResource BrandBgBrush}" />
+                    </Grid>
+                </Border>
+                <StackPanel x:Name="TextColumn" Grid.Column="1" Spacing="3">
+                    <TextBlock x:Name="HeadingText" FontFamily="{StaticResource BrandFont}" FontSize="14" FontWeight="Bold"
+                               Foreground="{ThemeResource BrandHeadingBrush}" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="Heading" />
+                    <!-- A question's session title (one line), or a notice's detail (two). -->
+                    <TextBlock x:Name="LineText" FontFamily="{StaticResource BrandFont}" FontSize="13"
+                               Foreground="{ThemeResource BrandTextBrush}" TextTrimming="CharacterEllipsis" />
+                    <!-- A question's tool and folder, or a notice's name and folder: one line, cut in the middle. -->
+                    <TextBlock x:Name="SmallText" FontFamily="{StaticResource BrandFont}" FontSize="12"
+                               Foreground="{ThemeResource BrandMutedBrush}" />
+                    <!-- A notice's reason: up to three lines. -->
+                    <TextBlock x:Name="CaptionText" FontFamily="{StaticResource BrandFont}" FontSize="12" LineHeight="16"
+                               Foreground="{ThemeResource BrandMutedBrush}" TextWrapping="Wrap" MaxLines="3"
+                               TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="Caption" />
+                </StackPanel>
+                <Button x:Name="CloseButton" Grid.Column="2" VerticalAlignment="Top" Style="{StaticResource BrandCloseButtonStyle}"
+                        AllowFocusOnInteraction="False" Click="OnClose" AutomationProperties.AutomationId="Dismiss">
+                    <FontIcon FontFamily="Segoe Fluent Icons" FontSize="10" Glyph="&#xE8BB;" />
+                </Button>
+            </Grid>
+
+            <!-- Until it's answered: the question and its countdown, then the answers. -->
+            <StackPanel x:Name="AskPart" Spacing="6">
+                <TextBlock x:Name="AskText" FontFamily="{StaticResource BrandFont}" FontSize="12"
+                           Foreground="{ThemeResource BrandTextBrush}" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="Text" />
+                <StackPanel x:Name="CountdownRow" Orientation="Horizontal" Spacing="6">
+                    <FontIcon FontFamily="Segoe Fluent Icons" FontSize="11" Glyph="&#xE916;" VerticalAlignment="Center"
+                              Foreground="{ThemeResource BrandAccentBrush}" AutomationProperties.AccessibilityView="Raw" />
+                    <TextBlock x:Name="CountdownText" FontFamily="{StaticResource BrandFont}" FontSize="12"
+                               Foreground="{ThemeResource BrandMutedBrush}" AutomationProperties.AutomationId="Countdown" />
+                </StackPanel>
+            </StackPanel>
+            <Grid x:Name="Answers" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="TurnOffButton" Style="{StaticResource BrandGhostButtonStyle}" AllowFocusOnInteraction="False"
+                        Click="OnTurnOff" AutomationProperties.AutomationId="TurnOff" />
+                <Button x:Name="DeferralButton" Grid.Column="2" Style="{StaticResource BrandSecondaryButtonStyle}"
+                        AllowFocusOnInteraction="False" Click="OnDeferral" AutomationProperties.AutomationId="Deferral" />
+                <Button x:Name="CompactButton" Grid.Column="3" Style="{StaticResource BrandPrimaryButtonStyle}"
+                        AllowFocusOnInteraction="False" Click="OnCompact" AutomationProperties.AutomationId="Compact" />
+            </Grid>
+
+            <!-- Once it's answered: how that is going. One fixed slot, so the text stays put as the spinner turns into
+                 a check. -->
+            <Grid x:Name="ProgressPart" MinHeight="32" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="18" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid Width="18" Height="18" VerticalAlignment="Center">
+                    <ProgressRing x:Name="Spinner" Width="14" Height="14" MinWidth="0" MinHeight="0" IsActive="False"
+                                  Foreground="{ThemeResource BrandAccentBrush}" AutomationProperties.AccessibilityView="Raw" />
+                    <FontIcon x:Name="MarkGlyph" FontFamily="Segoe Fluent Icons" FontSize="13"
+                              Foreground="{ThemeResource BrandMutedBrush}" AutomationProperties.AccessibilityView="Raw" />
+                </Grid>
+                <TextBlock x:Name="ProgressText" Grid.Column="1" VerticalAlignment="Center" FontFamily="{StaticResource BrandFont}"
+                           FontSize="12" Foreground="{ThemeResource BrandTextBrush}" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="Progress" />
+            </Grid>
+        </StackPanel>
+    </Grid>
+</UserControl>

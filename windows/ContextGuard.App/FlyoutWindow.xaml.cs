@@ -61,7 +61,7 @@ public sealed partial class FlyoutWindow : Window
     }
 
     /// <summary>
-    /// No caption, a fixed size, always on top, not in the taskbar or Alt+Tab, rounded. Its own presenter:
+    /// No caption or frame, a fixed size, always on top, not in the taskbar or Alt+Tab, rounded. Its own presenter:
     /// under Native AOT <c>AppWindow.Presenter</c> comes back as the base type, so settings made through an
     /// <c>is OverlappedPresenter</c> check are skipped (W9).
     /// </summary>
@@ -77,6 +77,7 @@ public sealed partial class FlyoutWindow : Window
         AppWindow.IsShownInSwitchers = false;
         var result = Native.RoundCorners(hwnd);   // after SetPresenter, which sets its own frame
         if (result != 0) Log.Write($"flyout: round corners 0x{result:X}");
+        Frameless.Apply(hwnd, noActivate: false);
     }
 
     /// <summary>
@@ -98,6 +99,7 @@ public sealed partial class FlyoutWindow : Window
         Fit();
         pendingFocus = keyboard ? FocusState.Keyboard : FocusState.Pointer;
         AppWindow.Show(true);
+        Fit();   // shown, Windows can say how much of its frame is invisible
         Activate();
         Native.SetForegroundWindow(hwnd);
         FocusFirst();
@@ -221,8 +223,8 @@ public sealed partial class FlyoutWindow : Window
     }
 
     /// <summary>
-    /// Bottom right of the primary work area, above the taskbar: as wide as a Windows 11 flyout and as tall
-    /// as what it shows, up to 70 % of the work area (then it scrolls). Sized from the monitor's DPI: a window
+    /// Bottom right of the primary work area, above the taskbar, what you see of it 12 DIP from the edges: as wide
+    /// as a Windows 11 flyout and as tall as what it shows, up to 70 % of the work area (then it scrolls). Sized from the monitor's DPI: a window
     /// that was hidden keeps a stale DPI of its own (W9).
     /// </summary>
     void Fit()
@@ -231,14 +233,10 @@ public sealed partial class FlyoutWindow : Window
         var area = DisplayArea.Primary.WorkArea;
         Body.Measure(new Size(WidthDip, double.PositiveInfinity));
         var heightDip = Math.Min(Body.DesiredSize.Height, area.Height * MaxShareOfWorkArea / scale);
-        // The frame Windows adds around the client area (its 1 px border).
-        var frameWidth = Math.Max(0, AppWindow.Size.Width - AppWindow.ClientSize.Width);
-        var frameHeight = Math.Max(0, AppWindow.Size.Height - AppWindow.ClientSize.Height);
-        var width = (int)Math.Round(WidthDip * scale) + frameWidth;
-        var height = (int)Math.Ceiling(heightDip * scale) + frameHeight;
         var margin = (int)Math.Round(MarginDip * scale);
-        var rect = new RectInt32(area.X + area.Width - width - margin, area.Y + area.Height - height - margin, width, height);
-        if (rect.X == placed.X && rect.Y == placed.Y && rect.Width == placed.Width && rect.Height == placed.Height) return;
+        var (rect, _) = Placement.BottomRight(hwnd, (int)Math.Round(WidthDip * scale), (int)Math.Ceiling(heightDip * scale),
+            area.X + area.Width - margin, area.Y + area.Height - margin);
+        if (Placement.Same(rect, placed)) return;
         placed = rect;
         AppWindow.MoveAndResize(rect);
     }

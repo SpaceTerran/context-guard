@@ -1,4 +1,5 @@
 using ContextGuard.Feed;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 
 namespace ContextGuard.App;
@@ -21,6 +22,8 @@ public partial class App : Application
     Tray? tray;
     FeedClient? client;
     FlyoutWindow? flyout;
+    Popups? popups;
+    DispatcherQueue? queue;
     Board? board;
     bool programDown, quitting;
 
@@ -44,8 +47,10 @@ public partial class App : Application
         var options = Options.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray(), Environment.GetEnvironmentVariable);
         Log.Write($"started: {options.Program} {string.Join(' ', options.Arguments)}");
 
+        queue = DispatcherQueue.GetForCurrentThread();
         tray = new Tray(this);
         tray.Show("on", Name);
+        popups = new Popups(Send);
 
         client = new FeedClient(options.Program, null, options.Arguments);
         client.BoardChanged += OnBoard;
@@ -55,7 +60,10 @@ public partial class App : Application
             programDown = true;
             tray?.Show("off", NotRunning);
             flyout?.Render(board, programDown);
+            // Its questions can't be answered until it's back; the next board brings them again.
+            popups?.Show([]);
         };
+        client.Chime += Chime;
         client.Error += message => Log.Write($"program: {message}");
         client.Result += result =>
         {
@@ -71,7 +79,21 @@ public partial class App : Application
         programDown = false;
         tray?.Show(newBoard.Tray.State, newBoard.Tray.Label);
         flyout?.Render(newBoard, programDown);
+        popups?.Show(newBoard.Popups);
     }
+
+    /// <summary>A question popup just opened: Windows' notification sound (the Mac plays Glass).</summary>
+    static void Chime()
+    {
+        if (!Native.PlaySound("Notification.Default", 0, Native.SND_ALIAS | Native.SND_ASYNC | Native.SND_NODEFAULT))
+            Log.Write("chime: Windows has no notification sound set");
+    }
+
+    /// <summary>
+    /// The theme, high contrast, the work area or the display changed (the tray's window hears it): the popups'
+    /// edges and places, once Windows has finished telling every window.
+    /// </summary>
+    internal void SettingsChanged() => queue?.TryEnqueue(() => popups?.SettingsChanged());
 
     /// <summary>Sends what you clicked; beeps if it couldn't be done.</summary>
     internal async void Send(Intent intent)
@@ -126,6 +148,7 @@ public partial class App : Application
         quitting = true;
         Log.Write("quit");
         flyout?.CloseForQuit();
+        popups?.Show([]);
         tray?.Remove();
         if (client is not null) await client.DisposeAsync();
         single?.ReleaseMutex();

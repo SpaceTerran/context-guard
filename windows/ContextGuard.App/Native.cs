@@ -170,14 +170,150 @@ static unsafe partial class Native
         return GetDpiForMonitor(monitor, 0, &x, &y) == 0 ? x : 96;   // MDT_EFFECTIVE_DPI
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT
+    {
+        public int X, Y;
+    }
+
+    [LibraryImport("user32.dll")]
+    public static partial nint MonitorFromPoint(POINT point, uint flags);
+
+    /// <summary>The primary monitor's effective DPI, where the popups stack.</summary>
+    public static uint PrimaryMonitorDpi()
+    {
+        uint x, y;
+        var monitor = MonitorFromPoint(default, 1);   // (0, 0) is on the primary monitor; MONITOR_DEFAULTTOPRIMARY
+        return GetDpiForMonitor(monitor, 0, &x, &y) == 0 ? x : 96;
+    }
+
     [LibraryImport("dwmapi.dll")]
     public static partial int DwmSetWindowAttribute(nint hwnd, uint attribute, void* value, uint size);
+
+    [LibraryImport("dwmapi.dll")]
+    public static partial int DwmGetWindowAttribute(nint hwnd, uint attribute, void* value, uint size);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetWindowRect(nint hwnd, RECT* rect);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetClientRect(nint hwnd, RECT* rect);
+
+    /// <summary>How much bigger a window is than its client area, in pixels (none for a <see cref="Frameless"/> one).</summary>
+    public static (int Width, int Height) FrameSize(nint hwnd)
+    {
+        RECT window, client;
+        if (!GetWindowRect(hwnd, &window) || !GetClientRect(hwnd, &client)) return (0, 0);
+        return (Math.Max(0, window.Right - window.Left - client.Right), Math.Max(0, window.Bottom - window.Top - client.Bottom));
+    }
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsWindowVisible(nint hwnd);
+
+    /// <summary>
+    /// How far a window's rect reaches past what you see of it, on each side: Windows draws a 1 px edge and keeps
+    /// the rest of a frame invisible (7 px left, right and below at 100 %; none without a frame, see
+    /// <see cref="Frameless"/>). Windows are placed by what you see.
+    /// Until a window is shown DWM can't say, so then it's worked out from the frame (all of it but the 1 px edge on
+    /// the left, right and bottom; none on top), and the window is placed again once shown.
+    /// </summary>
+    public static RECT InvisibleFrame(nint hwnd, int frameWidth, int frameHeight)
+    {
+        RECT window, visible;
+        if (IsWindowVisible(hwnd) && GetWindowRect(hwnd, &window) && DwmGetWindowAttribute(hwnd, 9, &visible, (uint)sizeof(RECT)) == 0)   // DWMWA_EXTENDED_FRAME_BOUNDS
+        {
+            return new RECT
+            {
+                Left = visible.Left - window.Left, Top = visible.Top - window.Top,
+                Right = window.Right - visible.Right, Bottom = window.Bottom - visible.Bottom,
+            };
+        }
+        var side = Math.Max(0, (frameWidth - 2) / 2);
+        return new RECT { Left = side, Top = 0, Right = side, Bottom = Math.Max(0, frameHeight - 1) };
+    }
 
     /// <summary>Windows 11 rounds captioned windows by itself; a window without a caption has to ask.</summary>
     public static int RoundCorners(nint hwnd)
     {
         var round = 2;   // DWMWA_WINDOW_CORNER_PREFERENCE (33) = DWMWCP_ROUND
         return DwmSetWindowAttribute(hwnd, 33, &round, sizeof(int));
+    }
+
+    /// <summary>The 1 px edge Windows 11 draws round a window, in a color of ours (0x00BBGGRR).</summary>
+    public static int BorderColor(nint hwnd, uint colorRef)
+    {
+        var color = colorRef;   // DWMWA_BORDER_COLOR (34)
+        return DwmSetWindowAttribute(hwnd, 34, &color, sizeof(uint));
+    }
+
+    public const int COLOR_WINDOWTEXT = 8;
+
+    /// <summary>A system color as a COLORREF: in high contrast, the theme's.</summary>
+    [LibraryImport("user32.dll")]
+    public static partial uint GetSysColor(int index);
+
+    /// <summary>0xRRGGBB as a COLORREF (0x00BBGGRR).</summary>
+    public static uint ColorRef(uint rgb) => ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 0xFF);
+
+    // Popups that never take focus (spike W9)
+
+    public const int GWL_EXSTYLE = -20;
+    public const nint WS_EX_NOACTIVATE = 0x08000000;
+    public const uint WM_MOUSEACTIVATE = 0x0021, WM_NCDESTROY = 0x0082, WM_NCCALCSIZE = 0x0083;
+    public const nint MA_NOACTIVATE = 3;
+    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200;
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetWindowPos(nint hwnd, nint insertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    public static partial nint GetWindowLongPtr(nint hwnd, int index);
+
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    public static partial nint SetWindowLongPtr(nint hwnd, int index, nint value);
+
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetWindowSubclass(nint hwnd, delegate* unmanaged<nint, uint, nint, nint, nuint, nuint, nint> proc, nuint id, nuint data);
+
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool RemoveWindowSubclass(nint hwnd, delegate* unmanaged<nint, uint, nint, nint, nuint, nuint, nint> proc, nuint id);
+
+    [LibraryImport("comctl32.dll")]
+    public static partial nint DefSubclassProc(nint hwnd, uint msg, nint wParam, nint lParam);
+
+    // The chime
+
+    public const uint SND_ASYNC = 0x1, SND_NODEFAULT = 0x2, SND_ALIAS = 0x10000;
+
+    [LibraryImport("winmm.dll", EntryPoint = "PlaySoundW", StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool PlaySound(string sound, nint module, uint flags);
+
+    // High contrast
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HIGHCONTRASTW
+    {
+        public uint cbSize;
+        public uint dwFlags;
+        public nint lpszDefaultScheme;
+    }
+
+    [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SystemParametersInfo(uint action, uint param, void* value, uint winIni);
+
+    /// <summary>Whether a high contrast theme is on (then the system's colors win).</summary>
+    public static bool HighContrast()
+    {
+        var hc = new HIGHCONTRASTW { cbSize = (uint)sizeof(HIGHCONTRASTW) };
+        return SystemParametersInfo(0x0042, hc.cbSize, &hc, 0) && (hc.dwFlags & 1) != 0;   // SPI_GETHIGHCONTRAST, HCF_HIGHCONTRASTON
     }
 
     // GDI: the tray icon is drawn from the icon font
