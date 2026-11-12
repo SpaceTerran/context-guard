@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The Windows app's side of `context-guard ui`: what it reads and sends, and the program it runs.
+       No UI, so it is tested on its own. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ContextGuard.Feed.Tests" />
+  </ItemGroup>
+</Project>

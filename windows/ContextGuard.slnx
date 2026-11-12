@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ContextGuard.Feed/ContextGuard.Feed.csproj" />
+  <Project Path="ContextGuard.Feed.Tests/ContextGuard.Feed.Tests.csproj" />
+</Solution>
