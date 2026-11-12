@@ -9,7 +9,7 @@ namespace ContextGuard.UITests;
 /// <summary>
 /// The Settings window against the contract's settings boards (the stand-in prints one after the app's
 /// <c>settingsOpen</c>), and once with the real program, which saves to a scratch config. Ctrl+1…3, typing and
-/// Alt+F4 need real keys, so they are checked by hand (QMP on win-build).
+/// Alt+F4 need real keys, so they are checked by hand with a real keyboard.
 /// </summary>
 public sealed class SettingsTests
 {

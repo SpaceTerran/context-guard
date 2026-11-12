@@ -7,7 +7,7 @@ namespace ContextGuard.UITests;
 /// <summary>
 /// The question popups and notices, in the published app, against the contract's boards: their words, what their
 /// buttons send, how they follow a new board, where they stack, and that they never take the foreground. A real
-/// click while you type in a terminal needs real input, so that is checked by hand (QMP on win-build), not here.
+/// click while you type in a terminal needs real input, so that is checked by hand with a real mouse, not here.
 /// </summary>
 public sealed class PopupTests
 {
