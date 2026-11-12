@@ -22,6 +22,7 @@ struct CLI {
     context-guard: Claude Code hook, Codex link and control for Context Guard
 
       context-guard hook                         run as a Claude Code hook (reads the event on stdin)
+      context-guard hook --stop                  stop the hooks waiting in the background (before an uninstall)
       context-guard codex [--only-cwd <folder>] [--verbose]
                                                  keep Codex sessions guarded (runs until stopped; one at a time)
     \(stopLine)  context-guard status [--json]              list sessions and where each one stands
@@ -44,6 +45,10 @@ struct CLI {
         let paths = Paths.fromEnvironment(env)
         switch args.first {
         case "hook":
+            if args.dropFirst().first == "--stop" {
+                guard args.count == 2 else { fail(usage) }
+                stopWaiters(paths: paths)
+            }
             runHook(paths: paths, env: env)
         case "codex":
             runCodexLink(paths: paths, env: env, args: Array(args.dropFirst()))
@@ -105,6 +110,23 @@ struct CLI {
             if let text = result.text { FileHandle.standardError.write(Data(text.utf8)) }
             exit(result.exitCode)
         }
+    }
+
+    /// What the installers run before removing Context Guard: a waiter left running could still
+    /// send the save message, and on Windows it holds the program open so it can't be deleted.
+    static func stopWaiters(paths: Paths) -> Never {
+        let asked = Waiters.release(paths)
+        let left = Waiters.wait(for: asked, timeout: 10)
+        let n = asked.count
+        if n == 0 {
+            print("no hook is waiting in the background")
+        } else if left.isEmpty {
+            print("stopped \(n) \(n == 1 ? "hook" : "hooks") waiting in the background")
+        } else {
+            let pids = left.map { String($0.pid) }.joined(separator: ", ")
+            fail("asked \(n) \(n == 1 ? "hook" : "hooks") waiting in the background to stop, but \(left.count) still \(left.count == 1 ? "runs" : "run") (process \(pids))")
+        }
+        exit(0)
     }
 
     // MARK: codex
