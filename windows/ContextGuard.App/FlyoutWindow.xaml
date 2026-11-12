@@ -1,0 +1,46 @@
+<Window
+    x:Class="ContextGuard.App.FlyoutWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Context Guard">
+    <!-- What a left click on the icon shows: the Mac's menu under its gauge, drawn as a Windows 11 flyout. -->
+    <Window.SystemBackdrop>
+        <DesktopAcrylicBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="Root" KeyDown="OnKeyDown">
+        <ScrollViewer x:Name="Scroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="Body" Padding="4,4,4,4">
+                <TextBlock x:Name="NotRunningText" Margin="12,10,12,10" TextWrapping="Wrap"
+                           AutomationProperties.AutomationId="NotRunning" />
+
+                <StackPanel x:Name="BoardPart">
+                    <Grid x:Name="OnRow" Padding="12,2,4,2" MinHeight="40">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="OnLabel" VerticalAlignment="Center" TextWrapping="Wrap" />
+                        <ToggleSwitch x:Name="OnSwitch" Grid.Column="1" MinWidth="0" OnContent="" OffContent=""
+                                      Toggled="OnToggled" AutomationProperties.AutomationId="On" />
+                    </Grid>
+                    <TextBlock x:Name="LinesText" Style="{StaticResource NoteTextStyle}" Margin="12,0,12,8"
+                               AutomationProperties.AutomationId="Lines" />
+                    <Border Style="{StaticResource SeparatorStyle}" />
+                    <TextBlock x:Name="HeadingText" Style="{StaticResource HeadingTextStyle}"
+                               AutomationProperties.AutomationId="Heading" />
+                    <TextBlock x:Name="EmptyText" Margin="12,4,12,8" TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               AutomationProperties.AutomationId="Empty" />
+                    <StackPanel x:Name="SessionList" />
+                    <Border Style="{StaticResource SeparatorStyle}" />
+                    <Button x:Name="SettingsButton" Style="{StaticResource MenuRowButtonStyle}" IsEnabled="False"
+                            AutomationProperties.AutomationId="Settings" />
+                </StackPanel>
+
+                <Button x:Name="QuitButton" Style="{StaticResource MenuRowButtonStyle}" Click="OnQuit"
+                        AutomationProperties.AutomationId="Quit" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>
