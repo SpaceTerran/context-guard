@@ -1,7 +1,9 @@
 # Builds Context Guard for Windows into dist\context-guard\: the hook program (context-guard.exe),
 # the Codex link the background task runs (context-guard-link.exe), the Swift runtime DLLs they run
-# on, the mod, and install.ps1, which installs them from there.
-# Needs Swift and Visual Studio's C++ build tools (their dumpbin finds the DLLs).
+# on, the mod, the app (app\ContextGuard.exe and the Windows App SDK files it runs on), and
+# install.ps1, which installs them from there. That folder is also zipped, as
+# dist\context-guard-windows-x64-<build>.zip. The app's debugging symbols go to dist\symbols\.
+# Needs Swift, Visual Studio's C++ build tools (their dumpbin finds the DLLs) and the .NET 10 SDK.
 #
 #   powershell -ExecutionPolicy Bypass -File build.ps1
 #
@@ -11,7 +13,17 @@ Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 
 $pkg = $PSScriptRoot
-$out = Join-Path $pkg 'dist\context-guard'
+$dist = Join-Path $pkg 'dist'
+$out = Join-Path $dist 'context-guard'
+$symbols = Join-Path $dist 'symbols'
+$appProject = Join-Path $pkg 'windows\ContextGuard.App\ContextGuard.App.csproj'
+
+# Build number: when it was built (UTC), as build.sh, so each install is newer than the last. A file
+# version's four parts are 16-bit, so there it's split: 2026.1112.1430.0 for 20261112.1430.
+$now = [DateTime]::UtcNow
+$build = $now.ToString('yyyyMMdd.HHmm', [Globalization.CultureInfo]::InvariantCulture)
+$fileVersion = '{0}.{1}.{2}.0' -f $now.Year, [int]$now.ToString('MMdd', [Globalization.CultureInfo]::InvariantCulture), [int]$now.ToString('HHmm', [Globalization.CultureInfo]::InvariantCulture)
+$productVersion = "1.0 ($build)"
 
 # Runs a program and returns its output lines; stops the build when it fails. Windows PowerShell
 # turns a program's stderr lines into errors, so they're collected as text.
@@ -35,6 +47,8 @@ function Invoke-Program {
     }
     return $lines
 }
+
+if (-not (Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue)) { throw "can't find dotnet: install the .NET 10 SDK" }
 
 $programs = @('context-guard.exe', 'context-guard-link.exe')
 foreach ($product in $programs) {
@@ -78,7 +92,9 @@ while ($queue.Count -gt 0) {
     }
 }
 
-if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
+foreach ($old in @($out, $symbols) + @(Get-ChildItem -LiteralPath $dist -Filter 'context-guard-windows-*.zip' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })) {
+    if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
+}
 New-Item -ItemType Directory -Path $out | Out-Null
 foreach ($program in $programs) { Copy-Item -LiteralPath (Join-Path $bin $program) -Destination $out }
 foreach ($path in $ship.Values) { Copy-Item -LiteralPath $path -Destination $out }
@@ -89,9 +105,29 @@ Copy-Item -LiteralPath (Join-Path $pkg 'mod\.claude-plugin\plugin.json'), (Join-
 Copy-Item -LiteralPath (Join-Path $pkg 'mod\hooks') -Destination (Join-Path $out 'mod\hooks') -Recurse
 Copy-Item -LiteralPath (Join-Path $pkg 'install.ps1') -Destination $out
 
-# Both run from the folder alone, with nothing on PATH but Windows. The link has no console, so it
-# is given an argument it refuses: it says so in its log (in a scratch folder) and exits 1, which it
-# can only do once its DLLs have loaded.
+# The app. Built once so it can draw its icon (the Mac's, as an .ico), then published as it ships
+# (Native AOT, self-contained) with that icon and this build's version in the exe. From windows\,
+# where global.json is.
+$appOut = Join-Path $out 'app'
+$icon = Join-Path $pkg 'windows\ContextGuard.App\obj\AppIcon.ico'
+Push-Location (Join-Path $pkg 'windows')
+try {
+    Invoke-Program 'dotnet' @('build', $appProject, '-c', 'Release', '-nologo', '-v:minimal') -Show | Out-Null
+    $built = (Invoke-Program 'dotnet' @('msbuild', $appProject, '-nologo', '-p:Configuration=Release', '-getProperty:TargetDir') | Where-Object { $_.Trim() } | Select-Object -Last 1).Trim()
+    Invoke-Program (Join-Path $built 'ContextGuard.exe') @('--render-icon', $icon) | Out-Null
+    Invoke-Program 'dotnet' @('publish', $appProject, '-c', 'Release', '-nologo', '-v:minimal', '-o', $appOut,
+        "-p:ApplicationIcon=$icon", "-p:FileVersion=$fileVersion", "-p:InformationalVersion=$productVersion") -Show | Out-Null
+} finally {
+    Pop-Location
+}
+# Its symbols stay here, for reading a crash report from this build; they don't ship.
+New-Item -ItemType Directory -Path $symbols | Out-Null
+Get-ChildItem -LiteralPath $appOut -Filter '*.pdb' | Move-Item -Destination $symbols
+
+# All three run from the folder alone, with nothing on PATH but Windows. The link has no console, so
+# it is given an argument it refuses: it says so in its log (in a scratch folder) and exits 1, which
+# it can only do once its DLLs have loaded. The app draws its icon again, which it can only do once
+# the Windows App SDK's DLLs have loaded too.
 $savedPath = $env:Path
 $savedHome = $env:CONTEXT_GUARD_HOME
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('context-guard-build-' + [Guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -105,11 +141,38 @@ try {
     if ($link.ExitCode -ne 1 -or $said -notlike '*not started: --env BUILD_CHECK*') {
         throw "context-guard-link.exe didn't run from $out (exit $($link.ExitCode); log: $said)"
     }
+    $appExe = Join-Path $appOut 'ContextGuard.exe'
+    $drawn = Join-Path $scratch 'AppIcon.ico'
+    Invoke-Program $appExe @('--render-icon', $drawn) | Out-Null
+    if (-not (Test-Path -LiteralPath $drawn)) { throw "app\ContextGuard.exe didn't run from $out" }
 } finally {
     $env:Path = $savedPath
     $env:CONTEXT_GUARD_HOME = $savedHome
     if (Test-Path -LiteralPath $scratch) { Remove-Item -LiteralPath $scratch -Recurse -Force }
 }
 
-$mb = [math]::Round(((Get-ChildItem -LiteralPath $out -Recurse -File | Measure-Object Length -Sum).Sum / 1MB), 1)
-Write-Host "built $out (context-guard.exe, context-guard-link.exe, $($ship.Count) DLLs, the mod; $mb MB)"
+# What Windows shows for the app: its icon and this build's version.
+$version = (Get-Item -LiteralPath $appExe).VersionInfo
+if ($version.ProductVersion -ne $productVersion -or $version.FileVersion -ne $fileVersion) {
+    throw "app\ContextGuard.exe has version $($version.FileVersion) ($($version.ProductVersion)), not $fileVersion ($productVersion)"
+}
+Add-Type -Namespace ContextGuardBuild -Name Shell -MemberDefinition '[DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern uint ExtractIconExW(string file, int index, IntPtr[] large, IntPtr[] small, uint count);'
+if ([ContextGuardBuild.Shell]::ExtractIconExW($appExe, -1, $null, $null, 0) -lt 1) { throw "app\ContextGuard.exe has no icon" }
+
+# The folder as one zip (context-guard\... inside), entries named with / so any unzip reads them.
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$zipPath = Join-Path $dist "context-guard-windows-x64-$build.zip"
+$zip = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($file in @(Get-ChildItem -LiteralPath $out -Recurse -File -Force)) {
+        $name = 'context-guard/' + $file.FullName.Substring($out.Length + 1).Replace('\', '/')
+        $null = [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $file.FullName, $name, [IO.Compression.CompressionLevel]::Optimal)
+    }
+} finally {
+    $zip.Dispose()
+}
+
+$mb = [math]::Round(((Get-ChildItem -LiteralPath $out -Recurse -File -Force | Measure-Object Length -Sum).Sum / 1MB), 1)
+$zipMb = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 1)
+Write-Host "built $out (context-guard.exe, context-guard-link.exe, $($ship.Count) DLLs, the mod, the app; $mb MB)"
+Write-Host "and $zipPath ($zipMb MB), build $build"
