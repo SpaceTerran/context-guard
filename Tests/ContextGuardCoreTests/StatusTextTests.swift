@@ -56,6 +56,36 @@ final class StatusTextTests: XCTestCase {
         XCTAssertFalse(lines.contains { $0.contains("Codex link") })
     }
 
+    func cursor(_ tokens: Int, window: Int = 200_000) -> SessionInfo {
+        var s = SessionState(sessionId: "44e5a64b-0000-4000-8000-000000000003", host: .cursor, now: now)
+        s.guarded = true
+        s.tokens = tokens
+        s.title = "Notes file"
+        s.cursorChat = CursorFacts(window: window)
+        return SessionInfo(state: s, isLive: true, waiterAlive: false)
+    }
+
+    func testOnceCursorsHooksAreInItHasItsLine() {
+        // Right after install.sh, before any Cursor chat has run.
+        XCTAssertEqual(StatusText.lines(config: Config(), sessions: [], link: nil, cursorHooks: true, now: now), [
+            "Context Guard is on",
+            "  Claude Code: asks at 300k · compacts at 500k when told to wait",
+            "  Cursor: asks at 60% · compacts at 80% of each chat's window when told to wait",
+            "No running sessions seen yet.",
+        ])
+    }
+
+    func testACursorChatBringsCursorsLineWithoutItsHooks() {
+        let lines = StatusText.lines(config: Config(), sessions: [claude(40_000), cursor(50_000)], link: nil, now: now)
+        XCTAssertEqual(lines, [
+            "Context Guard is on",
+            "  Claude Code: asks at 300k · compacts at 500k when told to wait",
+            "  Cursor: asks at 60% · compacts at 80% of each chat's window when told to wait",
+            "a1b2c3d4  Claude 40k    watching  Settings screen",
+            "44e5a64b  Cursor 50k    watching  Notes file · 25% of 200k",
+        ])
+    }
+
     func testACodexSessionsOwnFacts() {
         XCTAssertEqual(StatusText.row(codex(30_000, window: nil), tools: true), "01a1c7f0  Codex  30k    watching  Release notes (not guarded)")
         XCTAssertEqual(StatusText.row(codex(30_000, attached: false), tools: true),

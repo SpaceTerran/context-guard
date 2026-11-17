@@ -1,13 +1,15 @@
 import Foundation
 
 /// `context-guard status` as text: the settings for each tool, the Codex link, and each running
-/// session. Until the Codex link has run (no `codex-link.json`) and with no Cursor chats it reads as
-/// it always has.
+/// session. Until the Codex link has run (no `codex-link.json`), with Cursor's hooks out and no
+/// Cursor chats, it reads as it always has.
 public enum StatusText {
-    public static func lines(config: Config, sessions: [SessionInfo], link: CodexLinkStatus?, cursor: Bool? = nil,
+    /// - Parameter cursorHooks: whether Cursor runs Context Guard's hooks. Cursor's line shows once
+    ///   they're in or a chat has run, as in the app.
+    public static func lines(config: Config, sessions: [SessionInfo], link: CodexLinkStatus?, cursorHooks: Bool = false,
                              now: Date = Date()) -> [String] {
         let codex = link != nil
-        let cursor = cursor ?? sessions.contains { $0.host == .cursor }
+        let cursor = cursorHooks || sessions.contains { $0.host == .cursor }
         let onOff = "Context Guard is \(config.enabled ? "on" : "off")"
         let claude = "asks at \(Format.tokens(config.askAt)) · compacts at \(Format.tokens(config.laterAt)) when told to wait"
         var out: [String] = []
