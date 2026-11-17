@@ -83,6 +83,8 @@ public struct Board: Encodable, Equatable, Sendable {
     public struct Session: Encodable, Equatable, Sendable {
         public var id: String
         public var title: String
+        /// The tool it runs in: its mark goes before the title.
+        public var tool: Tool
         public var symbol: Symbol
         /// Its size ("302k").
         public var tokens: String
@@ -96,6 +98,17 @@ public struct Board: Encodable, Equatable, Sendable {
         public var deferral: Deferral?
         public var showQuestion: String?
         public var watch: Toggle
+    }
+
+    /// A tool sessions run in: `id` picks its mark (`ToolLogo`), `name` is what a screen reader says for it.
+    public struct Tool: Encodable, Equatable, Sendable {
+        public var id: SessionHost
+        public var name: String
+
+        public init(_ host: SessionHost) {
+            id = host
+            name = host.name
+        }
     }
 
     public struct MenuItem: Encodable, Equatable, Sendable {
@@ -118,6 +131,8 @@ public struct Board: Encodable, Equatable, Sendable {
         public var session: String
         public var heading: String
         public var title: String
+        /// The session's tool: its mark goes before the title.
+        public var tool: Tool
         public var subtitle: String
         /// Until it's answered.
         public var ask: Ask?
@@ -153,6 +168,8 @@ public struct Board: Encodable, Equatable, Sendable {
         public var tone: Tone
         public var title: String
         public var detail: String
+        /// When it's about a session (`detail` is its title), the session's tool: its mark goes before `detail`.
+        public var tool: Tool?
         public var caption: String
         /// A reason wraps; a name and folder stays on one line, cut in the middle.
         public var captionWraps: Bool

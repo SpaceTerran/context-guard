@@ -22,11 +22,12 @@ public enum SendReason: String, Codable, Sendable {
 
 public enum DeliveryChannel: String, Codable, Sendable {
     /// Added to the running turn at its next step: after a main-thread step (Claude Code's
-    /// PostToolBatch), or into Codex's running turn (`turn/steer`).
+    /// PostToolBatch), into Codex's running turn (`turn/steer`), or to the result of a Cursor tool
+    /// call (`postToolUse`).
     case step
     /// Woke the idle session from the background Stop hook.
     case wake
-    /// Started as a turn of its own, between turns (Codex).
+    /// Started as a turn of its own, between turns (Codex, and Cursor's `stop` follow-up).
     case turn
 
     // It's only shown, so a channel from a newer build reads as a wake rather than failing the
@@ -92,6 +93,8 @@ public struct SessionState: Codable, Equatable, Sendable {
     public var host: String?
     /// Codex sessions only.
     public var codex: CodexFacts?
+    /// Cursor chats only. (`cursor` is where the transcript was last read.)
+    public var cursorChat: CursorFacts?
     public var cwd: String?
     public var transcriptPath: String?
     public var title: String?
@@ -162,6 +165,13 @@ public struct SessionState: Codable, Equatable, Sendable {
     public var hostKind: SessionHost? {
         guard let host else { return .claude }
         return SessionHost(rawValue: host)
+    }
+
+    /// The context window the tool reports for the session. Claude Code doesn't: its sessions are
+    /// measured in tokens.
+    public var window: Int? {
+        let w = codex?.window ?? cursorChat?.window
+        return w.flatMap { $0 > 0 ? $0 : nil }
     }
 
     public static func load(_ id: String, _ paths: Paths) -> SessionState? {

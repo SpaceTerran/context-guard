@@ -17,6 +17,14 @@ public struct Config: Codable, Equatable, Sendable {
     public static let codexAskPercentRange = 10...79
     /// Most Codex models' window, as sessions report it: the example Settings shows.
     public static let typicalCodexWindow = 258_400
+    public static let defaultCursorAskPercent = 60
+    public static let defaultCursorLaterPercent = 80
+    /// Cursor says where it summarizes a chat by itself only when it does (`preCompact`), so the
+    /// same limits as Codex: Wait keeps a tenth of the window as room, asking comes 5 points before.
+    public static let cursorLaterPercentRange = 15...84
+    public static let cursorAskPercentRange = 10...79
+    /// Most Cursor chats' window (`contextTokenLimit`): the example Settings shows.
+    public static let typicalCursorWindow = 200_000
 
     public var schemaVersion: Int = Config.schema
     public var enabled: Bool = true
@@ -38,13 +46,19 @@ public struct Config: Codable, Equatable, Sendable {
     public var codexAskPercent: Int = Config.defaultCodexAskPercent
     /// For Codex sessions, "Wait" sends once the context reaches this share of the window.
     public var codexLaterPercent: Int = Config.defaultCodexLaterPercent
+    /// Cursor chats ask once their context reaches this share of the chat's own window.
+    public var cursorAskPercent: Int = Config.defaultCursorAskPercent
+    /// For Cursor chats, "Wait" sends once the context reaches this share of the window.
+    public var cursorLaterPercent: Int = Config.defaultCursorLaterPercent
 
     public init() {}
 
     public init(enabled: Bool = true, askAt: Int = Config.defaultAskAt, laterAt: Int = Config.defaultLaterAt,
                 message: String = Config.defaultMessage, autoYesSeconds: Int = Config.defaultAutoYesSeconds,
                 continueMessage: String = Config.defaultContinueMessage, enabledAt: Date? = nil,
-                codexAskPercent: Int = Config.defaultCodexAskPercent, codexLaterPercent: Int = Config.defaultCodexLaterPercent) {
+                codexAskPercent: Int = Config.defaultCodexAskPercent, codexLaterPercent: Int = Config.defaultCodexLaterPercent,
+                cursorAskPercent: Int = Config.defaultCursorAskPercent,
+                cursorLaterPercent: Int = Config.defaultCursorLaterPercent) {
         self.enabled = enabled
         self.askAt = askAt
         self.laterAt = laterAt
@@ -54,6 +68,8 @@ public struct Config: Codable, Equatable, Sendable {
         self.enabledAt = enabledAt
         self.codexAskPercent = codexAskPercent
         self.codexLaterPercent = codexLaterPercent
+        self.cursorAskPercent = cursorAskPercent
+        self.cursorLaterPercent = cursorLaterPercent
     }
 
     // Missing or wrong-typed keys fall back to defaults instead of failing the whole file.
@@ -70,6 +86,8 @@ public struct Config: Codable, Equatable, Sendable {
         enabledAt = try? c.decode(Date.self, forKey: .enabledAt)
         codexAskPercent = (try? c.decode(Int.self, forKey: .codexAskPercent)) ?? d.codexAskPercent
         codexLaterPercent = (try? c.decode(Int.self, forKey: .codexLaterPercent)) ?? d.codexLaterPercent
+        cursorAskPercent = (try? c.decode(Int.self, forKey: .cursorAskPercent)) ?? d.cursorAskPercent
+        cursorLaterPercent = (try? c.decode(Int.self, forKey: .cursorLaterPercent)) ?? d.cursorLaterPercent
     }
 
     /// Values the rules can rely on: thresholds positive and ordered, messages never empty.
@@ -83,30 +101,51 @@ public struct Config: Codable, Equatable, Sendable {
         let ask = Config.codexAskPercentRange, later = Config.codexLaterPercentRange
         c.codexAskPercent = min(max(ask.lowerBound, c.codexAskPercent), ask.upperBound)
         c.codexLaterPercent = min(max(c.codexAskPercent + 5, c.codexLaterPercent), later.upperBound)
+        let cursorAsk = Config.cursorAskPercentRange, cursorLater = Config.cursorLaterPercentRange
+        c.cursorAskPercent = min(max(cursorAsk.lowerBound, c.cursorAskPercent), cursorAsk.upperBound)
+        c.cursorLaterPercent = min(max(c.cursorAskPercent + 5, c.cursorLaterPercent), cursorLater.upperBound)
         return c
     }
 
     /// The settings as they apply to one session. Claude Code's thresholds are the token counts
-    /// set. Codex's are shares of the session's own window, kept below the point where Codex
-    /// compacts by itself. A Codex session whose window isn't known yet keeps the token counts;
-    /// it isn't guarded until its window is known. Both move up for a session that compacting
+    /// set. Codex's and Cursor's are shares of the session's own window, kept below the point where
+    /// the tool compacts by itself. A session whose window isn't known yet keeps the token counts;
+    /// it isn't guarded until its window is known. All move up for a session that compacting
     /// can't bring below "Ask at" (`aboveCompactedSize`).
     public func resolved(for s: SessionState) -> Config {
         var c = self
         var laterCap: Int?
-        if s.hostKind == .codex, let window = s.codex?.window, window > 0 {
-            c.askAt = window * codexAskPercent / 100
-            c.laterAt = window * codexLaterPercent / 100
-            // Room before Codex's own compaction, which would cut the save short. Codex compacts
-            // when the next request would pass its limit, and one tool result can add tens of
-            // thousands of tokens, so the room is a tenth of the window.
-            laterCap = s.codex?.compactsItselfAt.map { $0 - window / 10 }
-            if let laterCap { c.laterAt = min(c.laterAt, laterCap) }
-            c.askAt = max(1_000, min(c.askAt, c.laterAt - window / 20))
-            c.laterAt = max(c.laterAt, c.askAt + 1_000)
+        switch s.hostKind {
+        case .codex:
+            if let window = s.codex?.window, window > 0 {
+                laterCap = c.share(of: window, ask: codexAskPercent, later: codexLaterPercent,
+                                   compactsItselfAt: s.codex?.compactsItselfAt)
+            }
+        case .cursor:
+            if let window = s.cursorChat?.window, window > 0 {
+                laterCap = c.share(of: window, ask: cursorAskPercent, later: cursorLaterPercent,
+                                   compactsItselfAt: s.cursorChat?.compactsItselfAt)
+            }
+        case .claude, nil:
+            break
         }
         if let compacted = s.lastCompaction?.sizeAfter { c.aboveCompactedSize(compacted, laterCap: laterCap) }
         return c
+    }
+
+    /// Sets the thresholds to shares of `window`, below where the tool compacts by itself when that's
+    /// known. Returns the highest Wait can go.
+    mutating func share(of window: Int, ask: Int, later: Int, compactsItselfAt: Int?) -> Int? {
+        askAt = window * ask / 100
+        laterAt = window * later / 100
+        // Room before the tool's own compaction, which would cut the save short. It compacts when
+        // the next request would pass its limit, and one tool result can add tens of thousands of
+        // tokens, so the room is a tenth of the window.
+        let laterCap = compactsItselfAt.map { $0 - window / 10 }
+        if let laterCap { laterAt = min(laterAt, laterCap) }
+        askAt = max(1_000, min(askAt, laterAt - window / 20))
+        laterAt = max(laterAt, askAt + 1_000)
+        return laterCap
     }
 
     /// A session that its last compaction left at or above "Ask at" would be asked after every turn
@@ -126,6 +165,14 @@ public struct Config: Codable, Equatable, Sendable {
     public func codexThresholds(window: Int = Config.typicalCodexWindow) -> (askAt: Int, laterAt: Int) {
         var s = SessionState(sessionId: "example", host: .codex, now: Date(timeIntervalSince1970: 0))
         s.codex = CodexFacts(window: window)
+        let r = resolved(for: s)
+        return (r.askAt, r.laterAt)
+    }
+
+    /// Where a Cursor chat with this window would ask and, told to wait, compact (Settings' example).
+    public func cursorThresholds(window: Int = Config.typicalCursorWindow) -> (askAt: Int, laterAt: Int) {
+        var s = SessionState(sessionId: "example", host: .cursor, now: Date(timeIntervalSince1970: 0))
+        s.cursorChat = CursorFacts(window: window)
         let r = resolved(for: s)
         return (r.askAt, r.laterAt)
     }

@@ -31,6 +31,8 @@ public sealed class PopupTests
 
         Assert.Equal(Text(question, "heading"), app.Find(window, "Heading").Name);
         Assert.Equal(Text(question, "title"), app.Find(window, "Title").Name);
+        // The session's tool's mark, before the title: an image named for the tool.
+        Assert.Equal(Text(question.GetProperty("tool"), "name"), app.Find(window, "Tool").Name);
         // Whole, though the line may be cut in the middle.
         Assert.Equal(Text(question, "subtitle"), app.Find(window, "Subtitle").Name);
         Assert.Equal(Text(ask, "text"), app.Find(window, "Text").Name);
@@ -113,6 +115,9 @@ public sealed class PopupTests
             var notice = popup.GetProperty("notice");
             Assert.Equal(Text(notice, "title"), app.Find(window, "Heading").Name);
             Assert.Equal(Text(notice, "detail"), app.Find(window, "Detail").Name);
+            // A notice about a session has its tool's mark before the detail; one about no session has none.
+            if (notice.TryGetProperty("tool", out var tool)) Assert.Equal(Text(tool, "name"), app.Find(window, "Tool").Name);
+            else Assert.False(RunningApp.Has(window, "Tool"));
             Assert.Equal(Text(notice, "caption"), app.Find(window, "Caption").Name);
             Assert.Equal(Text(notice, "close"), app.Find(window, "Dismiss").Name);
         }

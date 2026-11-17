@@ -244,7 +244,8 @@ final class PresenterTests: XCTestCase {
         p.reload(now: t0)
         p.sync(host, now: t0)
         XCTAssertEqual(host.notices["notice:cg-a"],
-                       NoticeContent(symbol: .saving, tone: .accent, title: "Saving, then compacting", detail: "Session 1", caption: "/tmp/s1"))
+                       NoticeContent(symbol: .saving, tone: .accent, title: "Saving, then compacting", detail: "Session 1",
+                                     tool: .claude, caption: "/tmp/s1"))
         XCTAssertEqual(host.notices["notice:cg-b"]?.title, "Reached 512k: saving, then compacting")
         let shown = host.noticeKeys
         p.sync(host, now: t0.addingTimeInterval(1))
@@ -267,7 +268,8 @@ final class PresenterTests: XCTestCase {
         p.sync(host, now: t0)
         let needs = "notice:follow-up:cg-1:needsYou"
         XCTAssertEqual(host.notices[needs], NoticeContent(symbol: .needsYou, tone: .warning, title: "Needs you before compacting",
-                                                          detail: "Session 1", caption: "Asked which branch", captionWraps: true, seconds: 20))
+                                                          detail: "Session 1", tool: .claude, caption: "Asked which branch", captionWraps: true,
+                                                          seconds: 20))
         XCTAssertTrue(host.isOpen(needs))
         try edit(id) { $0.followUp?.stage = .compacting }
         p.reload(now: t0)
@@ -291,7 +293,7 @@ final class PresenterTests: XCTestCase {
         p.sync(host, now: t0.addingTimeInterval(6))
         let key = try XCTUnwrap(host.noticeKeys.first)
         XCTAssertEqual(host.notices[key], NoticeContent(symbol: .compacting, tone: .warning, title: "Auto-compacted at 188k before it could save",
-                                                        detail: "Session 1", caption: "/tmp/s1"))
+                                                        detail: "Session 1", tool: .claude, caption: "/tmp/s1"))
     }
 
     func testOnlyNewAutoCompactionsThatInterruptedSomethingAreAnnounced() throws {
@@ -339,6 +341,24 @@ final class PresenterTests: XCTestCase {
         XCTAssertTrue(p.showsCodex)
         XCTAssertEqual(p.codexLink, .connected)
         XCTAssertEqual(p.codexJudge, "gpt-6-luna")
+    }
+
+    func testCursorsLinesShowOnceItsHooksAreInOrAChatHasRun() throws {
+        var hooks = false
+        let p = Presenter(paths: paths, registry: registry, probe: probe, codexLinkInstalled: { false },
+                          cursorHooksInstalled: { hooks }, now: t0)
+        p.reload(now: t0)
+        XCTAssertFalse(p.showsCursor)
+        hooks = true
+        p.reload(now: t0)
+        XCTAssertTrue(p.showsCursor)
+        hooks = false
+        var s = SessionState(sessionId: "00000000-0000-4000-8000-0000000000c1", host: .cursor, now: t0)
+        s.cursorChat = CursorFacts(surface: .app, window: 200_000)
+        try s.save(paths)
+        p.reload(now: t0)
+        XCTAssertTrue(p.showsCursor)
+        XCTAssertFalse(p.showsCodex, "Codex's are their own")
     }
 
     func testOldSessionFilesGoHourly() throws {

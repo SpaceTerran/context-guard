@@ -4,11 +4,17 @@ import PackageDescription
 var products: [Product] = [
     .executable(name: "context-guard", targets: ["context-guard"]),
 ]
+var cliDependencies: [Target.Dependency] = ["ContextGuardCore", "ContextGuardCodexLink"]
+// `context-guard cursor`: reads Cursor's stores, types into its chats and runs its judge. Cursor is
+// guarded on the Mac only.
+#if os(macOS)
+cliDependencies.append("ContextGuardCursor")
+#endif
 var targets: [Target] = [
     .target(name: "ContextGuardCore"),
     // `context-guard codex`: talks to the Codex app server. Only the CLI uses it.
     .target(name: "ContextGuardCodexLink", dependencies: ["ContextGuardCore"]),
-    .executableTarget(name: "context-guard", dependencies: ["ContextGuardCore", "ContextGuardCodexLink"]),
+    .executableTarget(name: "context-guard", dependencies: cliDependencies),
     // Fixtures both test targets use.
     .target(name: "ContextGuardTestSupport", path: "Tests/ContextGuardTestSupport"),
     .testTarget(name: "ContextGuardCoreTests", dependencies: ["ContextGuardCore", "ContextGuardTestSupport"]),
@@ -20,7 +26,10 @@ var targets: [Target] = [
 #if os(macOS)
 // Not "ContextGuard": APFS is case-insensitive, and the two binaries share .build/release.
 products.append(.executable(name: "ContextGuardApp", targets: ["ContextGuardApp"]))
-targets.append(.executableTarget(name: "ContextGuardApp", dependencies: ["ContextGuardCore"]))
+targets.append(.executableTarget(name: "ContextGuardApp", dependencies: ["ContextGuardCore", "ContextGuardCursor"]))
+targets.append(.target(name: "ContextGuardCursor", dependencies: ["ContextGuardCore"]))
+targets.append(.testTarget(name: "ContextGuardCursorTests",
+                           dependencies: ["ContextGuardCursor", "ContextGuardCore", "ContextGuardTestSupport"]))
 #endif
 
 // The Codex link the Windows background task runs: `context-guard codex`'s code, linked as a GUI

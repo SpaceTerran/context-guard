@@ -16,6 +16,8 @@ final class AppModel {
     private(set) var replies: [String: Reply] = [:]
     /// The Codex link is installed or has run: the menu and Settings show each tool's own lines.
     private(set) var showsCodex = false
+    /// Cursor's hooks are installed or a Cursor chat has run: Cursor's lines and tab show too.
+    private(set) var showsCursor = false
     /// How `context-guard codex` stands, and the model it judges Codex sessions with.
     private(set) var codexLink = CodexLinkStatus.State.notRunning
     private(set) var codexJudge: String?
@@ -30,7 +32,8 @@ final class AppModel {
     init(paths: Paths) {
         self.paths = paths
         presenter = Presenter(paths: paths, registry: FileRegistry(dir: paths.registryDir),
-                              codexLinkInstalled: { CodexLinkInstall.isInstalled(paths) })
+                              codexLinkInstalled: { CodexLinkInstall.isInstalled(paths) },
+                              cursorHooksInstalled: { CursorHookSetup.isInstalled() })
         config = presenter.config
         panels.question = { [unowned self] id in AnyView(QuestionView(model: self, sessionID: id)) }
         panels.onRecheck = { [weak self] in self?.syncPanels() }
@@ -80,6 +83,7 @@ final class AppModel {
         if presenter.sessions != sessions { sessions = presenter.sessions }
         if presenter.replies != replies { replies = presenter.replies }
         if presenter.showsCodex != showsCodex { showsCodex = presenter.showsCodex }
+        if presenter.showsCursor != showsCursor { showsCursor = presenter.showsCursor }
         if presenter.codexLink != codexLink { codexLink = presenter.codexLink }
         if presenter.codexJudge != codexJudge { codexJudge = presenter.codexJudge }
     }

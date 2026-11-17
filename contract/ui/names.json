@@ -22,5 +22,10 @@
     "warning",
     "danger",
     "muted"
+  ],
+  "tools": [
+    "claude",
+    "codex",
+    "cursor"
   ]
 }

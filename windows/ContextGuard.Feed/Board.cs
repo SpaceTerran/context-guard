@@ -83,6 +83,8 @@ public sealed record Session
     public required string Id { get; init; }
     /// <summary>In full: the app shortens it to fit.</summary>
     public required string Title { get; init; }
+    /// <summary>The tool it runs in: its mark goes before the title.</summary>
+    public required Tool Tool { get; init; }
     public required string Symbol { get; init; }
     /// <summary>Its size ("302k").</summary>
     public required string Tokens { get; init; }
@@ -96,6 +98,14 @@ public sealed record Session
     public Deferral? Deferral { get; init; }
     public string? ShowQuestion { get; init; }
     public required Toggle Watch { get; init; }
+}
+
+/// <summary>A tool sessions run in: <see cref="Id"/> picks its mark (<see cref="ToolLogos"/>), <see cref="Name"/> is what a
+/// screen reader says for it.</summary>
+public sealed record Tool
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
 }
 
 public sealed record MenuItem
@@ -120,6 +130,8 @@ public sealed record Question
     public required string Session { get; init; }
     public required string Heading { get; init; }
     public required string Title { get; init; }
+    /// <summary>The session's tool: its mark goes before the title.</summary>
+    public required Tool Tool { get; init; }
     public required string Subtitle { get; init; }
     /// <summary>Until it's answered.</summary>
     public Ask? Ask { get; init; }
@@ -158,6 +170,9 @@ public sealed record Notice
     public required string Tone { get; init; }
     public required string Title { get; init; }
     public required string Detail { get; init; }
+    /// <summary>When it's about a session (<see cref="Detail"/> is its title), the session's tool: its mark goes before the
+    /// detail.</summary>
+    public Tool? Tool { get; init; }
     public required string Caption { get; init; }
     /// <summary>A reason wraps; a name and folder stays on one line, cut in the middle.</summary>
     public required bool CaptionWraps { get; init; }

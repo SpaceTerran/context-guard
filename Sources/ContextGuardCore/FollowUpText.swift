@@ -25,6 +25,7 @@ public enum FollowUpText {
         case .working: return "Still saving" + reason(f)
         case .needsYou: return "Needs you before compacting" + reason(f)
         case .draft: return "Compacts once the prompt box is empty"
+        case .yours: return "Saved, ready for you to compact" + reason(f)
         case .compacting: return "Compacting…"
         case .continuing: return "Compacted\(sizes(f)) · sends \(message) when it's idle"
         case .done: return "Compacted\(sizes(f)) and sent \(message)"
@@ -42,6 +43,10 @@ public enum FollowUpText {
         case .needsYou:
             // It waits on you, so it stays up longer.
             return Notice(symbol: .needsYou, tone: .warning, title: "Needs you before compacting", reason: sentence(f.note), seconds: 20)
+        case .yours:
+            // It waits on you, so it stays up longer.
+            return Notice(symbol: .needsYou, tone: .warning, title: "Saved, ready for you to compact",
+                          reason: sentence(f.note), seconds: 20)
         case .compacting:
             return Notice(symbol: .compacting, tone: .accent, title: "Compacting", reason: nil, seconds: 8)
         case .done:

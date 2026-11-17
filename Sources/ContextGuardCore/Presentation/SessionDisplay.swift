@@ -3,7 +3,8 @@ import Foundation
 /// What the menu and popups show for one session. Each is worked out from the session and the
 /// settings alone, so an app redraws whenever either changes.
 extension SessionInfo {
-    /// The settings as they apply to this session: Codex's thresholds are shares of its window.
+    /// The settings as they apply to this session: Codex's and Cursor's thresholds are shares of its
+    /// window.
     public func thresholds(_ config: Config) -> Config { config.resolved(for: state) }
 
     /// Its size in the menu: "302k", or "compacted" until the compaction's record arrives.
@@ -11,16 +12,17 @@ extension SessionInfo {
         state.awaitingCompactionRecord ? "compacted" : Format.tokens(state.tokens)
     }
 
-    /// Its size in a popup's heading: for Codex, its share of the window too.
+    /// Its size in a popup's heading: for Codex and Cursor, its share of the window too.
     public var sizeText: String {
         state.awaitingCompactionRecord ? "compacted" : size(state.tokens)
     }
 
-    /// Its location line. A Codex session's starts with the tool ("Codex · ~/code"); Claude Code
-    /// sessions' read as they always have.
+    /// Its location line. A Codex or Cursor session's starts with the tool ("Codex · ~/code",
+    /// "Cursor CLI · ~/code"); Claude Code sessions' read as they always have.
     public var toolSubtitle: String {
-        guard host == .codex else { return subtitle }
-        return subtitle.isEmpty ? host.name : "\(host.name) · \(subtitle)"
+        guard host != .claude else { return subtitle }
+        let tool = state.cursorChat?.runsIn == .cli ? "\(host.name) CLI" : host.name
+        return subtitle.isEmpty ? tool : "\(tool) · \(subtitle)"
     }
 
     /// Where it stands, the first line of its menu.
@@ -155,12 +157,22 @@ public enum Display {
         config.enabled && live(sessions).contains { !$0.muted && $0.effectivePhase == .asking }
     }
 
-    /// The settings at the top of the menu: one line, or one per tool once Codex is in the picture.
-    public static func thresholdLines(_ config: Config, showsCodex: Bool) -> [String] {
+    /// The settings at the top of the menu: one line, or one per tool once Codex or Cursor is in the
+    /// picture.
+    public static func thresholdLines(_ config: Config, showsCodex: Bool, showsCursor: Bool = false) -> [String] {
         let claude = "\(Format.tokens(config.askAt)) · Wait until \(Format.tokens(config.laterAt))"
-        guard showsCodex else { return ["Asks at \(claude)"] }
-        return ["Claude Code: asks at \(claude)",
-                "Codex: asks at \(config.codexAskPercent)% · Wait until \(config.codexLaterPercent)%"]
+        guard showsCodex || showsCursor else { return ["Asks at \(claude)"] }
+        var lines = ["Claude Code: asks at \(claude)"]
+        if showsCodex { lines.append("Codex: asks at \(config.codexAskPercent)% · Wait until \(config.codexLaterPercent)%") }
+        if showsCursor { lines.append("Cursor: asks at \(config.cursorAskPercent)% · Wait until \(config.cursorLaterPercent)%") }
+        return lines
+    }
+
+    /// Whether Cursor holds the Accessibility permission Context Guard types into the app with, as
+    /// the latest chat in the app saw it; nil before one has run.
+    public static func cursorCanType(_ sessions: [SessionInfo]) -> Bool? {
+        sessions.filter { $0.host == .cursor && $0.state.cursorChat?.runsIn == .app && $0.state.cursorChat?.canType != nil }
+            .max { $0.state.updatedAt < $1.state.updatedAt }?.state.cursorChat?.canType
     }
 
     /// Menus don't truncate; keep one long title from widening the whole menu.

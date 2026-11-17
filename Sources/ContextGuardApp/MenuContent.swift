@@ -7,7 +7,7 @@ struct MenuContent: View {
 
     var body: some View {
         Toggle(Words.Menu.on, isOn: Binding(get: { model.config.enabled }, set: { model.setEnabled($0) }))
-        ForEach(Display.thresholdLines(model.config, showsCodex: model.showsCodex), id: \.self) { Text($0) }
+        ForEach(Display.thresholdLines(model.config, showsCodex: model.showsCodex, showsCursor: model.showsCursor), id: \.self) { Text($0) }
         Divider()
         let sessions = model.liveSessions
         if sessions.isEmpty {
@@ -50,7 +50,11 @@ struct SessionMenu: View {
             Divider()
             Toggle(Words.Menu.watchThisSession, isOn: Binding(get: { !info.muted }, set: { model.setWatched(info.id, $0) }))
         } label: {
-            Label(Display.shortened(info.title), systemImage: info.symbol.systemName)
+            Label {
+                Text(Display.shortened(info.title))
+            } icon: {
+                Image(nsImage: ToolMark.menuIcon(info.host, symbol: info.symbol))
+            }
         }
         .badge(Text(info.tokensText).monospacedDigit())
     }

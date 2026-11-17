@@ -34,7 +34,10 @@ public sealed class TrayTests
         {
             var id = session.GetProperty("id").GetString();
             var row = app.Find(flyout, $"Session-{id}");
-            Assert.Equal($"{session.GetProperty("title").GetString()}, {session.GetProperty("tokens").GetString()}", row.Name);
+            var tool = session.GetProperty("tool").GetProperty("name").GetString();
+            Assert.Equal($"{session.GetProperty("title").GetString()}, {tool}, {session.GetProperty("tokens").GetString()}", row.Name);
+            // The tool's mark before its icon: an image named for the tool.
+            Assert.Equal(tool, app.Find(flyout, $"Tool-{id}").Name);
             // Closed: its actions aren't shown.
             Assert.False(RunningApp.Has(flyout, $"CompactNow-{id}"));
         }

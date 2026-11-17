@@ -1,5 +1,8 @@
 import ContextGuardCodexLink
 import ContextGuardCore
+#if os(macOS)
+import ContextGuardCursor
+#endif
 #if canImport(Darwin)
 import Darwin
 #elseif os(Windows)
@@ -18,14 +21,26 @@ struct CLI {
     static let stopLine = ""
     #endif
 
+    #if os(macOS)
+    static let hooks = "Claude Code and Cursor hooks"
+    static let cursorLines = """
+      context-guard cursor hook                  run as a Cursor hook, app or CLI (reads the event on stdin)
+      context-guard cursor install | uninstall   add Context Guard's hooks to ~/.cursor/hooks.json, or remove them
+
+    """
+    #else
+    static let hooks = "Claude Code hook"
+    static let cursorLines = ""
+    #endif
+
     static let usage = """
-    context-guard: Claude Code hook, Codex link and control for Context Guard
+    context-guard: \(hooks), Codex link and control for Context Guard
 
       context-guard hook                         run as a Claude Code hook (reads the event on stdin)
       context-guard hook --stop                  stop the hooks waiting in the background (before an uninstall)
       context-guard codex [--only-cwd <folder>] [--verbose]
                                                  keep Codex sessions guarded (runs until stopped; one at a time)
-    \(stopLine)  context-guard status [--json]              list sessions and where each one stands
+    \(stopLine)\(cursorLines)  context-guard status [--json]              list sessions and where each one stands
       context-guard answer <session> yes|later|skip [--source popup|menu|cli]
                                                  answer a session's question (id or id prefix); from the
                                                  menu, yes is Compact Now
@@ -52,6 +67,12 @@ struct CLI {
             runHook(paths: paths, env: env)
         case "codex":
             runCodexLink(paths: paths, env: env, args: Array(args.dropFirst()))
+        case "cursor":
+            #if os(macOS)
+            runCursor(paths: paths, env: env, args: Array(args.dropFirst()))
+            #else
+            fail("Context Guard guards Cursor on the Mac only")
+            #endif
         case "status":
             status(paths: paths, json: args.contains("--json"))
         case "answer":
@@ -128,6 +149,50 @@ struct CLI {
         }
         exit(0)
     }
+
+    // MARK: cursor
+
+    #if os(macOS)
+    static func runCursor(paths: Paths, env: [String: String], args: [String]) -> Never {
+        switch args {
+        case ["hook"]:
+            runCursorHook(paths: paths, env: env)
+        case ["install"], ["uninstall"]:
+            let url = CursorHookSetup.hooksFile(env)
+            do {
+                switch args == ["install"] ? try CursorHookSetup.install(hooks: url) : try CursorHookSetup.uninstall(hooks: url) {
+                case .updated(let backup?): print("updated \(url.path) (backup: \(backup.path))")
+                case .updated(nil): print("updated \(url.path)")
+                case .unchanged: print(args == ["install"] ? "\(url.path) already has Context Guard's hooks" : "no Context Guard hooks in \(url.path)")
+                }
+            } catch {
+                fail("error: \(error)")
+            }
+            exit(0)
+        default:
+            fail(usage)
+        }
+    }
+
+    /// Never noisy: every failure prints `{}` and exits 0. `stop` may stay in the background until
+    /// the next turn, and prints the save message (or nothing) when it ends.
+    static func runCursorHook(paths: Paths, env: [String: String]) -> Never {
+        // Every event but a held stop answers at once; its configured timeout is 5 s.
+        Watchdog.start(seconds: 4)
+        let data = FileHandle.standardInput.readDataToEndOfFile()
+        guard let input = CursorHookInput.parse(data) else { emit([:]) }
+        let look = CursorIdentify().look(input, environment: env, hookPid: getpid())
+        let runner = CursorRunner(paths: paths)
+        let reply = runner.handle(input, look: look)
+        guard case .hold(let token) = reply else { emit(reply.json) }
+        Watchdog.cancel()
+        let maxDuration = env["CONTEXT_GUARD_WAITER_MAX"].flatMap(TimeInterval.init) ?? CursorRunner.holdFor
+        let poll = env["CONTEXT_GUARD_WAITER_POLL"].flatMap(TimeInterval.init) ?? 2
+        let text = runner.hold(sessionId: input.conversationId, token: token, maxDuration: maxDuration, poll: poll,
+                               typing: CursorTypist(environment: env), judge: CursorAutoJudge(environment: env))
+        emit(text.map { ["followup_message": $0] } ?? [:])
+    }
+    #endif
 
     // MARK: codex
 
@@ -280,6 +345,8 @@ struct CLI {
         var reachableNow: Bool
         /// A terminal shows it (Codex), as far as the link can tell.
         var attached: Bool?
+        /// Cursor: `app` or `cli`.
+        var surface: String?
         var phase: String
         var effectivePhase: String
         var guarded: Bool
@@ -298,11 +365,12 @@ struct CLI {
             tool = s.host.rawValue
             title = s.title
             tokens = s.state.tokens
-            window = s.state.codex?.window
+            window = s.state.window
             askAt = config.askAt
             laterAt = config.laterAt
             reachableNow = s.reachableNow
             attached = s.state.codex?.attached
+            surface = s.host == .cursor ? s.state.cursorChat?.runsIn.rawValue : nil
             phase = s.state.phase.rawValue
             effectivePhase = s.effectivePhase.rawValue
             guarded = s.state.guarded

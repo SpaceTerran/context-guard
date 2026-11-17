@@ -45,6 +45,7 @@ public struct Paths: Sendable, Equatable {
     }
     /// A Codex session you stopped watching: keyed to its thread, since no process of its own runs it.
     public func codexMuteFile(_ threadId: String) -> URL { mutedDir.appendingPathComponent("codex-\(threadId).json") }
+    public func cursorMuteFile(_ conversationId: String) -> URL { mutedDir.appendingPathComponent("cursor-\(conversationId).json") }
     /// What `context-guard codex` last said about its link to the Codex app server (`CodexLinkStatus`).
     public var codexLinkFile: URL { root.appendingPathComponent("codex-link.json") }
     /// Held by the running `context-guard codex`, so only one runs.

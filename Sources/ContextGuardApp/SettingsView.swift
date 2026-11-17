@@ -1,5 +1,6 @@
 import AppKit
 import ContextGuardCore
+import ContextGuardCursor
 import ServiceManagement
 import SwiftUI
 
@@ -40,15 +41,31 @@ final class SettingsWindow {
     }
 }
 
+/// A tab per tool, so a tool that comes into the picture adds a tab, never height: General (Context
+/// Guard itself and the countdown every tool shares), then each tool's setup and thresholds, then
+/// the messages. Codex's and Cursor's show once they're in the picture.
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, asking, messages
+    case general, claude, codex, cursor, messages
     var id: Self { self }
 
     var title: String {
         switch self {
         case .general: return Words.Settings.general
-        case .asking: return Words.Settings.whenToAsk
+        case .claude: return SessionHost.claude.name
+        case .codex: return SessionHost.codex.name
+        case .cursor: return SessionHost.cursor.name
         case .messages: return Words.Settings.messages
+        }
+    }
+
+    /// The tabs Settings shows, in order.
+    static func shown(showsCodex: Bool, showsCursor: Bool) -> [SettingsTab] {
+        allCases.filter { tab in
+            switch tab {
+            case .codex: return showsCodex
+            case .cursor: return showsCursor
+            case .general, .claude, .messages: return true
+            }
         }
     }
 }
@@ -63,6 +80,8 @@ struct SettingsView: View {
     private let hooksInstalled: Bool
     private let modInstalled: Bool
     private let codexLinkInstalled: Bool
+    private let cursorHooksInstalled: Bool
+    private let cursorCLIFound: Bool
 
     static let width: CGFloat = 600
     /// Both message boxes: five lines before they scroll.
@@ -75,14 +94,19 @@ struct SettingsView: View {
         hooksInstalled = HookInstall.isInstalled(model.paths)
         modInstalled = ModInstall.isInstalled(model.paths)
         codexLinkInstalled = CodexLinkInstall.isInstalled(model.paths)
+        cursorHooksInstalled = CursorHookSetup.isInstalled()
+        cursorCLIFound = CursorAutoJudge.cliFound()
     }
+
+    private var tabs: [SettingsTab] { SettingsTab.shown(showsCodex: model.showsCodex, showsCursor: model.showsCursor) }
+    private var otherTools: Bool { model.showsCodex || model.showsCursor }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            TabBar(tabs: SettingsTab.allCases, title: \.title, selection: $tab)
+            TabBar(tabs: tabs, title: \.title, selection: $tab)
             // Every tab is laid out, so the window is as tall as the tallest and never jumps.
             ZStack(alignment: .topLeading) {
-                ForEach(SettingsTab.allCases) { t in
+                ForEach(tabs) { t in
                     let shown = t == tab
                     page(t)
                         .opacity(shown ? 1 : 0)
@@ -105,7 +129,9 @@ struct SettingsView: View {
     private func page(_ t: SettingsTab) -> some View {
         switch t {
         case .general: general
-        case .asking: asking
+        case .claude: claude
+        case .codex: codex
+        case .cursor: cursor
         case .messages: messages
         }
     }
@@ -115,7 +141,7 @@ struct SettingsView: View {
     private var general: some View {
         VStack(alignment: .leading, spacing: 10) {
             Card(title: Words.Settings.contextGuard) {
-                let watch = SettingsText.watchLabel(showsCodex: model.showsCodex)
+                let watch = SettingsText.watchLabel(otherTools: otherTools)
                 Row(label: watch) {
                     Toggle(watch, isOn: Binding(get: { model.config.enabled }, set: { model.setEnabled($0) }))
                         .labelsHidden()
@@ -136,100 +162,104 @@ struct SettingsView: View {
                 }
                 if let loginError {
                     Rule()
-                    Note(loginError, color: Theme.danger)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
+                    cardNote(loginError, color: Theme.danger)
                 }
             }
             Note(Words.Settings.offNote)
                 .padding(.horizontal, 2)
                 .padding(.bottom, 14)
-
-            // One card per tool, as on When to Ask: what's installed, then the judge and whose sign-in it uses.
-            Card(title: SessionHost.claude.name) {
-                Row(label: Words.Settings.hooks) { StatusLabel(SettingsText.installed(hooksInstalled)) }
-                    .help(Words.Settings.hooksHelp)
-                Rule()
-                Row(label: Words.Settings.mod) { StatusLabel(SettingsText.installed(modInstalled)) }
-                    .help(Words.Settings.modHelp)
-                Rule()
-                Row(label: Words.Settings.judge) { StatusLabel(SettingsText.claudeJudge) }
-                    .help(Words.Settings.judgeHelp)
+            // The countdown every tool's popup shares.
+            Card(title: Words.Settings.ifYouDontAnswer) {
+                numberField(.autoYes)
+            } accessory: {
+                SaveStatusLabel(status: form.countdownStatus)
             }
-            Note(SettingsText.signInNote(.claude))
-                .padding(.horizontal, 2)
-            if model.showsCodex {
-                Card(title: SessionHost.codex.name) {
-                    Row(label: Words.Settings.link) { StatusLabel(SettingsText.link(model.codexLink, installed: codexLinkInstalled)) }
-                        .help(Words.Settings.linkHelp)
-                    if case .onlyWatching(let why) = model.codexLink {
-                        Rule()
-                        Note(SettingsText.onlyWatchingNote(why), color: Theme.warning)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                    }
-                    Rule()
-                    Row(label: Words.Settings.judge) { StatusLabel(SettingsText.codexJudge(model.codexJudge, link: model.codexLink)) }
-                        .help(Words.Settings.judgeHelp)
-                }
-                .padding(.top, 14)
-                Note(SettingsText.signInNote(.codex))
-                    .padding(.horizontal, 2)
+            note(form.countdownNote(otherTools: otherTools))
+        }
+    }
+
+    // MARK: Each tool: what's installed and who judges, then when to ask
+
+    private var claude: some View {
+        toolPage(.claude, status: form.claudeStatus, note: form.claudeNote, fields: [.askK, .laterK]) {
+            Row(label: Words.Settings.hooks) { StatusLabel(SettingsText.installed(hooksInstalled)) }
+                .help(Words.Settings.hooksHelp)
+            Rule()
+            Row(label: Words.Settings.mod) { StatusLabel(SettingsText.installed(modInstalled)) }
+                .help(Words.Settings.modHelp)
+            Rule()
+            Row(label: Words.Settings.judge) { StatusLabel(SettingsText.claudeJudge) }
+                .help(Words.Settings.judgeHelp)
+        }
+    }
+
+    private var codex: some View {
+        toolPage(.codex, status: form.codexStatus, note: form.codexNote, fields: [.codexAsk, .codexLater]) {
+            Row(label: Words.Settings.link) { StatusLabel(SettingsText.link(model.codexLink, installed: codexLinkInstalled)) }
+                .help(Words.Settings.linkHelp)
+            if case .onlyWatching(let why) = model.codexLink {
+                Rule()
+                cardNote(SettingsText.onlyWatchingNote(why), color: Theme.warning)
+            }
+            Rule()
+            Row(label: Words.Settings.judge) { StatusLabel(SettingsText.codexJudge(model.codexJudge, link: model.codexLink)) }
+                .help(Words.Settings.judgeHelp)
+        }
+    }
+
+    private var cursor: some View {
+        let canType = Display.cursorCanType(model.sessions)
+        return toolPage(.cursor, status: form.cursorStatus, note: form.cursorNote, fields: [.cursorAsk, .cursorLater]) {
+            Row(label: Words.Settings.hooks) { StatusLabel(SettingsText.installed(cursorHooksInstalled)) }
+                .help(Words.Settings.cursorHooksHelp)
+            Rule()
+            Row(label: Words.Settings.typing) { StatusLabel(SettingsText.cursorTyping(canType)) }
+                .help(Words.Settings.typingHelp)
+            if canType == false {
+                Rule()
+                cardNote(SettingsText.cursorAccessibilityNote, color: Theme.warning)
+            }
+            Rule()
+            Row(label: Words.Settings.judge) { StatusLabel(SettingsText.cursorJudge(cliFound: cursorCLIFound)) }
+                .help(Words.Settings.judgeHelp)
+            if !cursorCLIFound {
+                Rule()
+                cardNote(SettingsText.noCursorCLINote, color: Theme.warning)
             }
         }
     }
 
-    // MARK: When to Ask
-
-    @ViewBuilder
-    private var asking: some View {
-        if model.showsCodex {
-            // Each tool's thresholds, then the countdown both share.
-            VStack(alignment: .leading, spacing: 10) {
-                Card(title: SessionHost.claude.name) {
-                    numberField(.askK)
-                    Rule()
-                    numberField(.laterK)
-                } accessory: {
-                    SaveStatusLabel(status: form.claudeStatus)
+    /// A tool's tab: its setup and whose sign-in the judge uses, then its thresholds and what they
+    /// come to.
+    private func toolPage<Rows: View>(_ host: SessionHost, status: SaveStatus, note thresholds: SettingsNote,
+                                      fields: [SettingsForm.Field], @ViewBuilder setup: () -> Rows) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Card(title: Words.Settings.setup, content: setup)
+            Note(SettingsText.signInNote(host))
+                .padding(.horizontal, 2)
+                .padding(.bottom, 14)
+            Card(title: Words.Settings.whenToAskCard) {
+                ForEach(Array(fields.enumerated()), id: \.element) { i, f in
+                    if i > 0 { Rule() }
+                    numberField(f)
                 }
-                note(form.claudeNote)
-                    .padding(.bottom, 14)
-                Card(title: SessionHost.codex.name) {
-                    numberField(.codexAsk)
-                    Rule()
-                    numberField(.codexLater)
-                } accessory: {
-                    SaveStatusLabel(status: form.codexStatus)
-                }
-                note(form.codexNote)
-                    .padding(.bottom, 14)
-                Card(title: Words.Settings.ifYouDontAnswer) {
-                    numberField(.autoYes)
-                } accessory: {
-                    SaveStatusLabel(status: form.countdownStatus)
-                }
-                note(form.countdownNote)
+            } accessory: {
+                // Thresholds that don't make sense aren't saved; the note under the card says why.
+                SaveStatusLabel(status: status)
             }
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                Card(title: Words.Settings.whenToAskCard) {
-                    numberField(.askK)
-                    Rule()
-                    numberField(.autoYes)
-                    Rule()
-                    numberField(.laterK)
-                } accessory: {
-                    // Thresholds that don't make sense aren't saved; the note under the card says why.
-                    SaveStatusLabel(status: form.whenToAskStatus)
-                }
-                note(form.whenToAskNote)
-            }
+            note(thresholds)
         }
+    }
+
+    /// A line of text inside a card, between its rows.
+    private func cardNote(_ text: String, color: Color) -> some View {
+        Note(text, color: color)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
     }
 
     private func numberField(_ f: SettingsForm.Field) -> some View {
-        NumberField(form.field(f, showsCodex: model.showsCodex),
+        NumberField(form.field(f, ownCountdownCard: true),
                     value: Binding(get: { form.number(f) }, set: { form.set(f, number: $0, save: { save($0) }) }),
                     invalid: form.invalid(f))
     }
@@ -247,8 +277,8 @@ struct SettingsView: View {
             messageCard(.message, title: Words.Settings.beforeCompacting, what: Words.Settings.saveMessage)
             messageCard(.continueMessage, title: Words.Settings.afterCompacting, what: Words.Settings.continueMessage)
                 .padding(.top, 10)
-            Note(SettingsText.messagesNote(showsCodex: model.showsCodex,
-                                           codexJudgeName: SettingsText.codexJudgeName(model.codexJudge, link: model.codexLink)))
+            Note(SettingsText.messagesNote(codexJudge: model.showsCodex ? SettingsText.codexJudgeName(model.codexJudge, link: model.codexLink) : nil,
+                                           showsCursor: model.showsCursor))
                 .padding(.horizontal, 2)
         }
     }

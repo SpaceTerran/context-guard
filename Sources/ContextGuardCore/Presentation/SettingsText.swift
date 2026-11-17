@@ -25,13 +25,19 @@ public enum SettingsText {
 
     public static let askField = Field(label: Words.Settings.askAt, unit: Words.Settings.kTokens, step: 50, range: 50...10_000)
     public static let laterField = Field(label: Words.Settings.compactAtIfWait, unit: Words.Settings.kTokens, step: 50, range: 50...10_000)
-    public static let codexAskField = Field(label: Words.Settings.askAt, unit: Words.Settings.percent, step: 5, range: Config.codexAskPercentRange)
-    public static let codexLaterField = Field(label: Words.Settings.compactAtIfWait, unit: Words.Settings.percent, step: 5,
-                                              range: Config.codexLaterPercentRange)
 
-    /// The countdown's field: in its own card once Codex is in the picture, else with the thresholds.
-    public static func countdownField(showsCodex: Bool) -> Field {
-        Field(label: showsCodex ? Words.Settings.compactAfter : Words.Settings.ifYouDontAnswerCompactAfter,
+    /// A tool's thresholds as shares of each session's window (Codex, Cursor).
+    public static func askField(_ tool: PercentTool) -> Field {
+        Field(label: Words.Settings.askAt, unit: Words.Settings.percent, step: 5, range: tool.asks)
+    }
+    public static func laterField(_ tool: PercentTool) -> Field {
+        Field(label: Words.Settings.compactAtIfWait, unit: Words.Settings.percent, step: 5, range: tool.laters)
+    }
+
+    /// The countdown's field: in its own card (once another tool is in the picture, and always in
+    /// the Mac's tabs), else with Claude Code's thresholds.
+    public static func countdownField(ownCard: Bool) -> Field {
+        Field(label: ownCard ? Words.Settings.compactAfter : Words.Settings.ifYouDontAnswerCompactAfter,
               unit: Words.Settings.seconds, step: 15, range: 0...3_600)
     }
 
@@ -62,49 +68,84 @@ public enum SettingsText {
         return ask + answer + " If you choose Wait, it compacts at \(laterK)k."
     }
 
-    // MARK: Codex's thresholds
+    // MARK: Codex's and Cursor's thresholds
 
-    public static func codexAskInvalid(_ ask: Int) -> Bool { !Config.codexAskPercentRange.contains(ask) }
+    /// A tool whose thresholds are shares of each session's window, and the limits on them: the
+    /// same as `Config.normalized`, so what's saved is what's shown.
+    public enum PercentTool: Sendable {
+        case codex, cursor
 
-    /// What's wrong with Codex's thresholds as typed, or nil when they can be saved. The same
-    /// limits as `Config.normalized`, so what's saved is what's shown.
-    public static func codexProblem(ask: Int, later: Int) -> String? {
-        let asks = Config.codexAskPercentRange, laters = Config.codexLaterPercentRange
-        if ask < 1 { return "Codex's “Ask at” needs a number, like \(Config.defaultCodexAskPercent)." }
-        if codexAskInvalid(ask) { return "Codex's “Ask at” has to be from \(asks.lowerBound)% to \(asks.upperBound)%." }
-        if later < 1 { return "Codex's “If you choose Wait, compact at” needs a number, like \(Config.defaultCodexLaterPercent)." }
-        if later > laters.upperBound {
-            return "Codex's “If you choose Wait, compact at” goes up to \(laters.upperBound)%: Codex compacts by itself at about 95%, and saving needs room before that."
+        public var host: SessionHost { self == .codex ? .codex : .cursor }
+        public var asks: ClosedRange<Int> { self == .codex ? Config.codexAskPercentRange : Config.cursorAskPercentRange }
+        public var laters: ClosedRange<Int> { self == .codex ? Config.codexLaterPercentRange : Config.cursorLaterPercentRange }
+        var defaultAsk: Int { self == .codex ? Config.defaultCodexAskPercent : Config.defaultCursorAskPercent }
+        var defaultLater: Int { self == .codex ? Config.defaultCodexLaterPercent : Config.defaultCursorLaterPercent }
+        /// The window Settings' example uses.
+        var typicalWindow: Int { self == .codex ? Config.typicalCodexWindow : Config.typicalCursorWindow }
+        /// Why Wait stops short of the top.
+        var whyNotHigher: String {
+            switch self {
+            case .codex: return "Codex compacts by itself at about 95%, and saving needs room before that."
+            case .cursor: return "saving needs room before Cursor summarizes by itself."
+            }
         }
-        if later < ask + 5 { return "Codex's “If you choose Wait, compact at” has to be at least 5% more than its “Ask at”." }
+
+        /// Where a session with the typical window asks and, told to wait, compacts.
+        func example(ask: Int, later: Int) -> (askAt: Int, laterAt: Int) {
+            var c = Config()
+            switch self {
+            case .codex:
+                c.codexAskPercent = ask
+                c.codexLaterPercent = later
+                return c.codexThresholds()
+            case .cursor:
+                c.cursorAskPercent = ask
+                c.cursorLaterPercent = later
+                return c.cursorThresholds()
+            }
+        }
+    }
+
+    public static func askInvalid(_ tool: PercentTool, ask: Int) -> Bool { !tool.asks.contains(ask) }
+
+    /// What's wrong with a tool's thresholds as typed, or nil when they can be saved.
+    public static func problem(_ tool: PercentTool, ask: Int, later: Int) -> String? {
+        let name = tool.host.name, asks = tool.asks, laters = tool.laters
+        if ask < 1 { return "\(name)'s “Ask at” needs a number, like \(tool.defaultAsk)." }
+        if askInvalid(tool, ask: ask) { return "\(name)'s “Ask at” has to be from \(asks.lowerBound)% to \(asks.upperBound)%." }
+        if later < 1 { return "\(name)'s “If you choose Wait, compact at” needs a number, like \(tool.defaultLater)." }
+        if later > laters.upperBound {
+            return "\(name)'s “If you choose Wait, compact at” goes up to \(laters.upperBound)%: \(tool.whyNotHigher)"
+        }
+        if later < ask + 5 { return "\(name)'s “If you choose Wait, compact at” has to be at least 5% more than its “Ask at”." }
         return nil
     }
 
     /// The compact-at field is marked only when "Ask at" itself is fine.
-    public static func codexLaterInvalid(ask: Int, later: Int) -> Bool {
-        !codexAskInvalid(ask) && codexProblem(ask: ask, later: later) != nil
+    public static func laterInvalid(_ tool: PercentTool, ask: Int, later: Int) -> Bool {
+        !askInvalid(tool, ask: ask) && problem(tool, ask: ask, later: later) != nil
     }
 
-    /// The note under Codex's card, with what the shares come to in a typical window.
-    public static func codexThresholdsNote(ask: Int, later: Int) -> String {
-        var c = Config()
-        c.codexAskPercent = ask
-        c.codexLaterPercent = later
-        let t = c.codexThresholds()
-        return "When a session reaches \(ask)% of its window, a popup asks whether to compact it. If you choose Wait, it compacts at \(later)%. In a \(Format.tokens(Config.typicalCodexWindow)) window, that's \(Format.tokens(t.askAt)) and \(Format.tokens(t.laterAt))."
+    /// The note under a tool's card, with what the shares come to in a typical window.
+    public static func thresholdsNote(_ tool: PercentTool, ask: Int, later: Int) -> String {
+        let t = tool.example(ask: ask, later: later)
+        return "When a session reaches \(ask)% of its window, a popup asks whether to compact it. If you choose Wait, it compacts at \(later)%. In a \(Format.tokens(tool.typicalWindow)) window, that's \(Format.tokens(t.askAt)) and \(Format.tokens(t.laterAt))."
     }
 
-    /// The note under the countdown's own card.
-    public static func countdownNote(_ autoYes: Int) -> String {
-        autoYes > 0
-            ? "If you don't answer a popup within \(Format.seconds(autoYes)), it compacts the session, whichever tool it runs in."
-            : "A popup waits for your answer, whichever tool the session runs in (0 seconds: it never compacts on its own)."
+    /// The note under the countdown's own card: one countdown for every tool, once there's more
+    /// than Claude Code.
+    public static func countdownNote(_ autoYes: Int, otherTools: Bool = true) -> String {
+        let anyTool = otherTools ? ", whichever tool it runs in" : ""
+        return autoYes > 0
+            ? "If you don't answer a popup within \(Format.seconds(autoYes)), it compacts the session\(anyTool)."
+            : "A popup waits for your answer\(otherTools ? ", whichever tool the session runs in" : "") (0 seconds: it never compacts on its own)."
     }
 
     // MARK: General
 
-    public static func watchLabel(showsCodex: Bool) -> String {
-        showsCodex ? "Watch sessions" : "Watch Claude Code sessions"
+    /// Context Guard's switch: just Claude Code's sessions until another tool is in the picture.
+    public static func watchLabel(otherTools: Bool) -> String {
+        otherTools ? "Watch sessions" : "Watch Claude Code sessions"
     }
 
     /// Under each tool's card: the judge needs no key of its own.
@@ -148,6 +189,30 @@ public enum SettingsText {
         }
     }
 
+    /// Cursor's typing row: in the Cursor app, Context Guard types `/summarize` with Cursor's own
+    /// Accessibility permission. Whether Cursor has it is seen by its hooks, so it isn't known
+    /// until a chat runs in the app.
+    public static func cursorTyping(_ allowed: Bool?) -> StatusLine {
+        switch allowed {
+        case true?: return StatusLine(text: "Cursor's Accessibility", symbol: .success, tone: .success)
+        case false?: return StatusLine(text: "Cursor needs Accessibility", symbol: .warning, tone: .warning)
+        case nil: return StatusLine(text: "Seen when a chat runs in the app", symbol: .waiting, tone: .muted)
+        }
+    }
+
+    /// Under Cursor's typing row while Cursor doesn't have the permission.
+    public static let cursorAccessibilityNote =
+        "Turn on Cursor in System Settings › Privacy & Security › Accessibility. Until then, a notice asks you to type /summarize in the chat yourself."
+
+    /// Cursor's judge row: Cursor's Auto model, through the Cursor CLI and your Cursor sign-in.
+    public static func cursorJudge(cliFound: Bool) -> StatusLine {
+        cliFound ? StatusLine(text: "Auto", symbol: .success, tone: .success)
+            : StatusLine(text: "Needs the Cursor CLI", symbol: .warning, tone: .warning)
+    }
+
+    /// Under Cursor's card when there's no Cursor CLI to judge with.
+    public static let noCursorCLINote = "Without the Cursor CLI (cursor-agent), the popup asks you whether a chat has saved."
+
     /// Codex's judge as notes name it, in a sentence.
     public static func codexJudgeName(_ model: String?, link: CodexLinkStatus.State) -> String {
         if let model { return model }
@@ -170,9 +235,13 @@ public enum SettingsText {
     /// Restore Default's help.
     public static func restoreHelp(_ what: String) -> String { "Put back the default \(what)" }
 
-    /// The note under both message cards.
-    public static func messagesNote(showsCodex: Bool, codexJudgeName: String) -> String {
-        let judge = showsCodex ? "The judge (Haiku for Claude Code, \(codexJudgeName) for Codex)" : "The judge (Haiku)"
+    /// The note under both message cards: which judge reads each tool's sessions. `codexJudge` is
+    /// nil while Codex isn't in the picture.
+    public static func messagesNote(codexJudge: String?, showsCursor: Bool = false) -> String {
+        var judges: [String] = []
+        if let codexJudge { judges.append("\(codexJudge) for Codex") }
+        if showsCursor { judges.append("Auto for Cursor") }
+        let judge = judges.isEmpty ? "The judge (Haiku)" : "The judge (" + (["Haiku for Claude Code"] + judges).joined(separator: ", ") + ")"
         return "Changes save as you type. Both go to the session as your words. \(judge) reads what the session does after the first one; once it has saved and is idle, Context Guard compacts it, then sends the second. If you type in the session first, it leaves the rest to you."
     }
 }

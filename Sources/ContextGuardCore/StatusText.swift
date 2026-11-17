@@ -1,18 +1,26 @@
 import Foundation
 
 /// `context-guard status` as text: the settings for each tool, the Codex link, and each running
-/// session. Until the Codex link has run (no `codex-link.json`) it reads as it always has.
+/// session. Until the Codex link has run (no `codex-link.json`) and with no Cursor chats it reads as
+/// it always has.
 public enum StatusText {
-    public static func lines(config: Config, sessions: [SessionInfo], link: CodexLinkStatus?, now: Date = Date()) -> [String] {
+    public static func lines(config: Config, sessions: [SessionInfo], link: CodexLinkStatus?, cursor: Bool? = nil,
+                             now: Date = Date()) -> [String] {
         let codex = link != nil
+        let cursor = cursor ?? sessions.contains { $0.host == .cursor }
         let onOff = "Context Guard is \(config.enabled ? "on" : "off")"
         let claude = "asks at \(Format.tokens(config.askAt)) · compacts at \(Format.tokens(config.laterAt)) when told to wait"
         var out: [String] = []
-        if codex {
+        if codex || cursor {
             out.append(onOff)
             out.append("  Claude Code: \(claude)")
-            out.append("  Codex: asks at \(config.codexAskPercent)% · compacts at \(config.codexLaterPercent)% of each session's window when told to wait")
-            out.append("  Codex link: \(linkState(link, now: now))")
+            if codex {
+                out.append("  Codex: asks at \(config.codexAskPercent)% · compacts at \(config.codexLaterPercent)% of each session's window when told to wait")
+                out.append("  Codex link: \(linkState(link, now: now))")
+            }
+            if cursor {
+                out.append("  Cursor: asks at \(config.cursorAskPercent)% · compacts at \(config.cursorLaterPercent)% of each chat's window when told to wait")
+            }
         } else {
             out.append("\(onOff) · \(claude)")
         }
@@ -21,18 +29,18 @@ public enum StatusText {
             out.append("No running sessions seen yet.")
             return out
         }
-        out += live.map { row($0, tools: codex) }
+        out += live.map { row($0, tools: codex || cursor) }
         return out
     }
 
     /// One session: id, tool (with Codex in the picture), size, phase, title, then what's notable.
     static func row(_ s: SessionInfo, tools: Bool) -> String {
         var line = "\(s.id.prefix(8))  "
-        if tools { line += pad(s.host == .codex ? "Codex" : "Claude", 6) + " " }
+        if tools { line += pad(s.host == .claude ? "Claude" : s.host.name, 6) + " " }
         line += pad(Format.tokens(s.state.tokens), 6) + " " + pad(s.effectivePhase.rawValue, 9) + " " + s.title
         if !s.state.guarded { line += " (not guarded)" }
         if s.muted { line += " (not watching)" }
-        if let window = s.state.codex?.window, window > 0 {
+        if let window = s.state.window {
             line += " · \(s.state.tokens * 100 / window)% of \(Format.tokens(window))"
         }
         if s.host == .codex, s.state.codex?.attached == false { line += " · no terminal shows it" }

@@ -5,7 +5,8 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
     public var id: String { state.sessionId }
     public var state: SessionState
     /// Its Claude process is still running this conversation; for Codex, the app server has it
-    /// loaded and `context-guard codex` is connected to it.
+    /// loaded and `context-guard codex` is connected to it; for Cursor, the app or CLI that runs the
+    /// chat is running and the chat had a turn within the hold after one.
     public var isLive: Bool
     public var registry: RegistryEntry?
     /// A background Stop hook is waiting, so "Yes" reaches the session right away even if it's idle.
@@ -40,22 +41,22 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
 
     public var host: SessionHost { state.hostKind ?? .claude }
 
-    /// A size as this session's tool counts it: tokens for Claude Code, and for Codex the share of
-    /// the session's own window first ("62% (160k)"), as Codex shows context in percent. Rounds
-    /// down, like `Format.tokens`.
+    /// A size as this session's tool counts it: tokens for Claude Code, and for Codex and Cursor the
+    /// share of the session's own window first ("62% (160k)"), as they show context in percent.
+    /// Rounds down, like `Format.tokens`.
     public func size(_ tokens: Int) -> String {
-        guard host == .codex, let window = state.codex?.window, window > 0 else { return Format.tokens(tokens) }
+        guard let window = state.window else { return Format.tokens(tokens) }
         return "\(tokens * 100 / window)% (\(Format.tokens(tokens)))"
     }
 
-    /// The same, short enough for a button: "80%" for Codex, "500k" for Claude Code.
+    /// The same, short enough for a button: "80%" for Codex and Cursor, "500k" for Claude Code.
     public func shortSize(_ tokens: Int) -> String {
-        guard host == .codex, let window = state.codex?.window, window > 0 else { return Format.tokens(tokens) }
+        guard let window = state.window else { return Format.tokens(tokens) }
         return "\(tokens * 100 / window)%"
     }
 
     /// "Yes" reaches the session right away, even while it sits idle: a background Stop hook is
-    /// waiting (Claude Code), or the link can send it a prompt now (Codex).
+    /// waiting (Claude Code, and Cursor's `stop` hook), or the link can send it a prompt now (Codex).
     public var reachableNow: Bool {
         guard host == .codex else { return waiterAlive }
         return isLive && state.codex?.status == "idle" && state.codex?.attached != false
@@ -63,10 +64,13 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
 
     /// Where its Claude process stands now. The app can't count background agents (only the mod
     /// can), so `background` work here says 0 agents. A Codex session is between turns when the
-    /// app server says it's idle.
+    /// app server says it's idle, and a Cursor chat when its last turn ended (its hooks' turn record).
     public var activity: SessionActivity {
-        if host == .codex { return state.codex?.status == "idle" ? .idle : .busy }
-        return SessionActivity.of(registry, turn: turn, processStart: state.claudeStart, now: Date())
+        switch host {
+        case .codex: return state.codex?.status == "idle" ? .idle : .busy
+        case .cursor: return turn?.active == true ? .busy : .idle
+        case .claude: return SessionActivity.of(registry, turn: turn, processStart: state.claudeStart, now: Date())
+        }
     }
 
     /// Not in the middle of a turn: a wake starts a new one.
@@ -98,13 +102,24 @@ public enum SessionCatalog {
             guard let s = SessionState.load(id, paths) else { continue }
             var entry: RegistryEntry?
             var live = false
-            if s.hostKind == .codex {
-                live = linkUp && !s.ended && s.codex?.loaded == true
-            } else if let pid = s.claudePid, !s.ended, probe.isRunning(pid, startedAt: s.claudeStart) {
-                entry = byPid[pid]
-                if let entry { live = entry.sessionId == s.sessionId } else { live = !registryAvailable }
-            }
             let waiter = s.waiterToken != nil && (s.waiterPid.map { probe.isRunning($0, startedAt: s.waiterStart) } ?? false)
+            switch s.hostKind {
+            case .codex:
+                live = linkUp && !s.ended && s.codex?.loaded == true
+            case .cursor:
+                // The app keeps every chat, so a chat counts while its `stop` hook waits after a turn
+                // (or could still be: the hold's length) and Cursor runs.
+                if !s.ended, let pid = s.cursorChat?.pid, probe.isRunning(pid, startedAt: s.cursorChat?.start) {
+                    live = waiter || Date().timeIntervalSince(s.updatedAt) < CursorRunner.holdFor
+                }
+            case .claude:
+                if let pid = s.claudePid, !s.ended, probe.isRunning(pid, startedAt: s.claudeStart) {
+                    entry = byPid[pid]
+                    if let entry { live = entry.sessionId == s.sessionId } else { live = !registryAvailable }
+                }
+            case nil:
+                break
+            }
             var pending: Answer?
             if let a = Answer.load(id, paths), a.id != s.appliedAnswerId, a.cycle == s.cycle { pending = a }
             out.append(SessionInfo(state: s, isLive: live, registry: entry, waiterAlive: waiter, pendingAnswer: pending,

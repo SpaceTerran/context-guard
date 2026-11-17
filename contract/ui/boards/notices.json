@@ -23,6 +23,10 @@
           "symbol": "sent",
           "title": "Write the release notes",
           "tokens": "512k",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": true
@@ -39,6 +43,10 @@
           "symbol": "sending",
           "title": "Refactor the billing API",
           "tokens": "302k",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": true
@@ -55,6 +63,10 @@
           "symbol": "watching",
           "title": "Tidy the test helpers",
           "tokens": "188k",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": true
@@ -71,6 +83,10 @@
           "symbol": "notWatching",
           "title": "Read the logs",
           "tokens": "40k",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": false
@@ -89,7 +105,11 @@
           "detail": "Write the release notes",
           "symbol": "needsYou",
           "title": "Needs you before compacting",
-          "tone": "warning"
+          "tone": "warning",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          }
         }
       },
       {
@@ -101,7 +121,11 @@
           "detail": "Write the release notes",
           "symbol": "saving",
           "title": "Reached 512k: saving, then compacting",
-          "tone": "accent"
+          "tone": "accent",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          }
         }
       },
       {
@@ -113,7 +137,11 @@
           "detail": "Refactor the billing API",
           "symbol": "saving",
           "title": "Saving, then compacting",
-          "tone": "accent"
+          "tone": "accent",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          }
         }
       },
       {
@@ -125,7 +153,11 @@
           "detail": "Tidy the test helpers",
           "symbol": "compacting",
           "title": "Auto-compacted at 188k before it could save",
-          "tone": "warning"
+          "tone": "warning",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          }
         }
       }
     ],

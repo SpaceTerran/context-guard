@@ -184,10 +184,11 @@ public enum HookSetup {
         return try change(url, now: now, whenMissing: nil) { hasOurs($0) ? try stripped($0) : nil }
     }
 
-    private static let bom: [UInt8] = [0xEF, 0xBB, 0xBF]
+    static let bom: [UInt8] = [0xEF, 0xBB, 0xBF]
 
-    /// `edit` returns the new settings, or nil when there's nothing to change.
-    private static func change(_ url: URL, now: Date, whenMissing: OrderedJSON?,
+    /// `edit` returns the new settings, or nil when there's nothing to change. Cursor's hooks file
+    /// is changed the same way (`CursorHookSetup`).
+    static func change(_ url: URL, now: Date, whenMissing: OrderedJSON?,
                                _ edit: (OrderedJSON) throws -> OrderedJSON?) throws -> Outcome {
         let file = PathRules.native(url.path)
         let old: Data?

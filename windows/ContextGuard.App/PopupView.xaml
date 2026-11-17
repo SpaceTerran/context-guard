@@ -1,7 +1,8 @@
 <UserControl
     x:Class="ContextGuard.App.PopupView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:ContextGuard.App">
     <!-- A question or a notice, drawn as the Mac's QuestionView and NoticeView: the brand's panel, the app's badge,
          the words, and the answers. Every color is a {ThemeResource}, so a live switch of light, dark or high
          contrast redraws it; a tone is a visual state for the same reason (a brush set from code keeps the theme it
@@ -96,9 +97,18 @@
                     <TextBlock x:Name="HeadingText" FontFamily="{StaticResource BrandFont}" FontSize="14" FontWeight="Bold"
                                Foreground="{ThemeResource BrandHeadingBrush}" TextWrapping="Wrap"
                                AutomationProperties.AutomationId="Heading" />
-                    <!-- A question's session title (one line), or a notice's detail (two). -->
-                    <TextBlock x:Name="LineText" FontFamily="{StaticResource BrandFont}" FontSize="13"
-                               Foreground="{ThemeResource BrandTextBrush}" TextTrimming="CharacterEllipsis" />
+                    <!-- A question's session title (one line), or a notice's detail (two), after the session's tool's mark
+                         (none for a notice about no session: collapsed, its margin goes too). -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <local:ToolLogoView x:Name="Logo" Width="12" Height="12" VerticalAlignment="Top" Margin="0,3,6,0"
+                                            Foreground="{ThemeResource BrandTextBrush}" AutomationProperties.AutomationId="Tool" />
+                        <TextBlock x:Name="LineText" Grid.Column="1" FontFamily="{StaticResource BrandFont}" FontSize="13"
+                                   Foreground="{ThemeResource BrandTextBrush}" TextTrimming="CharacterEllipsis" />
+                    </Grid>
                     <!-- A question's tool and folder, or a notice's name and folder: one line, cut in the middle. -->
                     <TextBlock x:Name="SmallText" FontFamily="{StaticResource BrandFont}" FontSize="12"
                                Foreground="{ThemeResource BrandMutedBrush}" />
