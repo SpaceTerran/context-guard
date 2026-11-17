@@ -328,7 +328,13 @@ struct CLI {
             if let data = try? encoder.encode(rows) { print(String(decoding: data, as: UTF8.self)) }
             return
         }
-        for line in StatusText.lines(config: config, sessions: sessions, link: CodexLinkStatus.load(paths)) { print(line) }
+        #if os(macOS)
+        let cursorHooks = CursorHookSetup.isInstalled()
+        #else
+        let cursorHooks = false  // Cursor is guarded on the Mac only.
+        #endif
+        for line in StatusText.lines(config: config, sessions: sessions, link: CodexLinkStatus.load(paths),
+                                     cursorHooks: cursorHooks) { print(line) }
     }
 
     struct StatusRow: Encodable {
