@@ -35,12 +35,14 @@ public sealed partial class SessionRowView : UserControl
     {
         session = s;
         Expanded = expanded;
+        Logo.Show(s.Tool);
+        AutomationProperties.SetAutomationId(Logo, $"Tool-{s.Id}");
         Glyph.Glyph = Feed.Glyphs.For(s.Symbol);
         TitleText.Text = s.Title;
         TokensText.Text = s.Tokens;
         Chevron.Glyph = expanded ? ChevronUp : ChevronDown;
         AutomationProperties.SetAutomationId(Row, $"Session-{s.Id}");
-        AutomationProperties.SetName(Row, $"{s.Title}, {s.Tokens}");
+        AutomationProperties.SetName(Row, $"{s.Title}, {s.Tool.Name}, {s.Tokens}");
         AutomationProperties.SetHelpText(Row, s.Status);
 
         Details.Visibility = expanded ? Visibility.Visible : Visibility.Collapsed;

@@ -55,6 +55,8 @@ public enum Words {
         public static let messages = "Messages"
 
         public static let contextGuard = "Context Guard"
+        /// Each tool's tab on the Mac: what's installed and who judges, then its thresholds.
+        public static let setup = "Setup"
         public static let openAtLogin = "Open at login"
         public static let offNote = "When off, nothing pops up and nothing compacts by itself. Compact Now in a session's menu still works."
         public static let hooks = "Hooks"
@@ -63,6 +65,9 @@ public enum Words {
         public static let modHelp = "Compacts each Claude Code session once it has saved"
         public static let judge = "Judge"
         public static let judgeHelp = "Reads what the session does after the save message and says when it has saved"
+        public static let cursorHooksHelp = "Follow each Cursor chat, in the app and in a terminal, and send it the save and continue messages"
+        public static let typing = "Typing"
+        public static let typingHelp = "Types /summarize into the chat once it has saved: in the Cursor app with Cursor's own Accessibility permission, in a terminal through tmux or Herdr"
         public static let link = "Link"
         public static let linkHelp = "Follows each Codex session, sends it the save and continue messages and compacts it. It connects to Codex while a Codex session runs in a terminal."
 

@@ -149,8 +149,7 @@ public final class Feed {
         case .set(let field, let value):
             return editSettings(now) { form, save in form.set(field, typed: value, now: now, save: save) }
         case .step(let field, let up):
-            let showsCodex = presenter.showsCodex
-            return editSettings(now) { form, save in form.step(field, up: up, showsCodex: showsCodex, now: now, save: save) }
+            return editSettings(now) { form, save in form.step(field, up: up, now: now, save: save) }
         case .restore(let field):
             return editSettings(now) { form, save in form.restore(field, now: now, save: save) }
         }
@@ -208,7 +207,7 @@ public final class Feed {
             let deferral = info.deferral(config)
             let subtitle = info.toolSubtitle
             return Board.Session(
-                id: info.id, title: info.title, symbol: info.symbol, tokens: info.tokensText, status: info.statusText(config),
+                id: info.id, title: info.title, tool: Board.Tool(info.host), symbol: info.symbol, tokens: info.tokensText, status: info.statusText(config),
                 followUp: info.followUpText(config, now: now), subtitle: subtitle.isEmpty ? nil : subtitle,
                 compactNow: Board.MenuItem(label: Words.Menu.compactNow, enabled: info.canCompactNow),
                 deferral: asking ? Board.Deferral(label: info.label(for: deferral), help: nil, answer: deferral.action) : nil,
@@ -225,12 +224,12 @@ public final class Feed {
         if let notice = panels.notice(key) {
             return Board.Popup(key: key, question: nil, notice: Board.Notice(
                 symbol: notice.symbol, tone: notice.tone, title: notice.title, detail: notice.detail,
-                caption: notice.caption, captionWraps: notice.captionWraps, close: Words.Popup.close))
+                tool: notice.tool.map(Board.Tool.init), caption: notice.caption, captionWraps: notice.captionWraps, close: Words.Popup.close))
         }
         guard let id = Self.questionID(key), let info = presenter.session(id) else { return nil }
         let progress = presenter.progress(info)
         var question = Board.Question(session: id, heading: info.questionHeading, title: info.title,
-                                      subtitle: info.toolSubtitle, ask: nil, progress: nil)
+                                      tool: Board.Tool(info.host), subtitle: info.toolSubtitle, ask: nil, progress: nil)
         if progress == .question {
             let deadline = info.autoYesDeadline(config, now: now)
             let deferral = info.deferral(config)
@@ -260,7 +259,7 @@ public final class Feed {
             Board.Row(status: Board.StatusRow(label: label, help: help, status: Board.Status(line)))
         }
         func field(_ f: SettingsForm.Field) -> Board.Row {
-            let spec = form.field(f, showsCodex: showsCodex)
+            let spec = form.field(f, ownCountdownCard: showsCodex)
             let value = form.number(f)
             return Board.Row(field: Board.Field(id: f, label: spec.label, unit: spec.unit, value: value,
                                                 text: value > 0 ? String(value) : "", invalid: form.invalid(f)))
@@ -273,7 +272,7 @@ public final class Feed {
         }
 
         // General: Context Guard itself, then one card per tool (what's installed, the judge).
-        let watch = SettingsText.watchLabel(showsCodex: showsCodex)
+        let watch = SettingsText.watchLabel(otherTools: showsCodex)
         var general: [Board.Block] = [
             .card(Words.Settings.contextGuard, [Board.Row(toggle: Board.ToggleRow(id: "enabled", label: watch, on: config.enabled)),
                                                 Board.Row(login: Board.LoginRow(label: Words.Settings.openAtLogin))]),
@@ -299,7 +298,7 @@ public final class Feed {
                .card(SessionHost.codex.name, status: status(form.codexStatus), [field(.codexAsk), field(.codexLater)]),
                .note(form.codexNote),
                .card(Words.Settings.ifYouDontAnswer, status: status(form.countdownStatus), [field(.autoYes)]),
-               .note(form.countdownNote)]
+               .note(form.countdownNote())]
             : [.card(Words.Settings.whenToAskCard, status: status(form.whenToAskStatus), [field(.askK), field(.autoYes), field(.laterK)]),
                .note(form.whenToAskNote)]
 
@@ -307,7 +306,7 @@ public final class Feed {
         let messages: [Board.Block] = [
             message(.message, title: Words.Settings.beforeCompacting, what: Words.Settings.saveMessage),
             message(.continueMessage, title: Words.Settings.afterCompacting, what: Words.Settings.continueMessage),
-            .note(SettingsNote(text: SettingsText.messagesNote(showsCodex: showsCodex, codexJudgeName: judgeName), tone: .muted)),
+            .note(SettingsNote(text: SettingsText.messagesNote(codexJudge: showsCodex ? judgeName : nil), tone: .muted)),
         ]
         return Board.Settings(title: Words.Settings.windowTitle, tabs: [
             Board.Tab(id: "general", title: Words.Settings.general, blocks: general),

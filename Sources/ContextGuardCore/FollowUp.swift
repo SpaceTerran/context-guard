@@ -16,6 +16,9 @@ public struct FollowUp: Codable, Equatable, Sendable {
         case needsYou
         /// Ready, but there's text in the prompt box.
         case draft
+        /// Ready, but Context Guard can't compact this session itself (a Cursor CLI chat outside tmux
+        /// and herdr): it waits for you to, and carries on with the continue message once you have.
+        case yours
         case compacting
         /// Compacted; the continue message goes out once the session is idle.
         case continuing
@@ -86,7 +89,7 @@ public struct FollowUp: Codable, Equatable, Sendable {
     public var isActive: Bool { ![.done, .tookOver, .stopped, .failed].contains(stage) }
 
     /// Still waiting for the session to be ready.
-    public var isBeforeCompacting: Bool { [.checking, .working, .needsYou, .draft].contains(stage) }
+    public var isBeforeCompacting: Bool { [.checking, .working, .needsYou, .draft, .yours].contains(stage) }
 
     // Missing keys fall back to defaults, so a file from another build still reads.
     public init(from decoder: Decoder) throws {
@@ -174,10 +177,13 @@ public struct SessionLook: Equatable, Sendable {
     public var promptSinceCompacting = false
     public var transcriptSize: UInt64?
     public var lastWrite: Date?
+    /// Whether Context Guard can type into the session. Only Cursor needs it: compacting a Cursor
+    /// chat is typed into it.
+    public var typing: TypingReach = .ready
 
     public init(activity: SessionActivity = .busy, quiet: Bool = false, draft: Bool = false,
                 conversation: Conversation? = nil, promptSinceCompacting: Bool = false,
-                transcriptSize: UInt64? = nil, lastWrite: Date? = nil) {
+                transcriptSize: UInt64? = nil, lastWrite: Date? = nil, typing: TypingReach = .ready) {
         self.activity = activity
         self.quiet = quiet
         self.draft = draft
@@ -185,10 +191,20 @@ public struct SessionLook: Equatable, Sendable {
         self.promptSinceCompacting = promptSinceCompacting
         self.transcriptSize = transcriptSize
         self.lastWrite = lastWrite
+        self.typing = typing
     }
 
     /// Between turns: a wake or the continue message starts a new turn, and compacting works.
     public var idle: Bool { activity.isBetweenTurns }
+}
+
+/// Whether Context Guard can type into a session.
+public enum TypingReach: Equatable, Sendable {
+    case ready
+    /// Not now: you're using the keyboard or mouse.
+    case notNow
+    /// Not at all: nothing Context Guard can type through reaches it.
+    case never
 }
 
 /// The follow-up rules. Pure functions over `SessionState`, like `Engine`.
@@ -278,13 +294,13 @@ public enum Compactor {
                 set(&f, .tookOver, now: now)
                 return .none
             }
-            guard look.quiet else { return .none }
+            guard look.quiet, look.typing == .ready else { return .none }
             // Marked done before it goes out: a lost report can leave one unsent, never send two.
             set(&f, .done, now: now)
             f.continuedAt = now
             return .continue(nonce: f.nonce, text: config.continueMessage)
 
-        case .checking, .working, .needsYou, .draft:
+        case .checking, .working, .needsYou, .draft, .yours:
             if let asked = f.judgeAskedAt, now.timeIntervalSince(asked) < judgeAbandoned { return .none }
             f.judgeAskedAt = nil
             // Between turns, background work or not: what that work brings back later reaches the
@@ -297,6 +313,18 @@ public enum Compactor {
                 case .ready:
                     if look.draft {
                         if f.stage != .draft { set(&f, .draft, now: now) }
+                        return .none
+                    }
+                    switch look.typing {
+                    case .ready:
+                        break
+                    case .notNow:
+                        return .none
+                    case .never:
+                        if f.stage != .yours {
+                            set(&f, .yours, now: now)
+                            f.note = "type \(host.compactCommand) in it"
+                        }
                         return .none
                     }
                     guard f.compactAttempts < maxCompactAttempts else {
@@ -316,8 +344,8 @@ public enum Compactor {
                     guard f.workingRepeats < maxWorkingRepeats else {
                         // Idle for half an hour and still "working": hand it to you.
                         f.verdict = .needsUser
-                        f.note = "it has been idle a long time but doesn't look finished"
                         set(&f, .needsYou, now: now)
+                        f.note = "it has been idle a long time but doesn't look finished"
                         return .none
                     }
                 }
@@ -353,12 +381,12 @@ public enum Compactor {
             f.verdict = reply.verdict
             f.verdictAt = now
             f.verdictMark = mark
-            f.note = reply.reason
             switch reply.verdict {
             case .ready: set(&f, .checking, now: now)
             case .working: set(&f, .working, now: now)
             case .needsUser: set(&f, .needsYou, now: now)
             }
+            f.note = reply.reason
             return reply.verdict == .ready
 
         case .judgeFailed:
@@ -416,7 +444,7 @@ public enum Compactor {
     static func compacted(_ s: inout SessionState, trigger: String?, preTokens: Int?, postTokens: Int?, now: Date) {
         guard var f = s.followUp, f.isActive else { return }
         switch f.stage {
-        case .compacting:
+        case .compacting, .yours:
             set(&f, .continuing, now: now)
             f.compactedAt = now
             f.tokensBefore = preTokens
@@ -440,7 +468,10 @@ public enum Compactor {
         f.nextJudgeAt = now.addingTimeInterval(delay)
     }
 
+    /// Moves the follow-up on. A stage's own note is set after this.
     static func set(_ f: inout FollowUp, _ stage: FollowUp.Stage, now: Date) {
+        // That note said what to type, which is past once it moves on (compacted, by you or by itself).
+        if f.stage == .yours, stage != .yours { f.note = nil }
         f.stage = stage
         f.stageAt = now
     }

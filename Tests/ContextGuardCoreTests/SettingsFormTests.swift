@@ -23,14 +23,16 @@ final class SettingsFormTests: XCTestCase {
         disk.laterAt = 450_000
         disk.codexAskPercent = 50
         disk.codexLaterPercent = 70
+        disk.cursorAskPercent = 40
+        disk.cursorLaterPercent = 65
         disk.autoYesSeconds = 30
         disk.message = "save"
         disk.continueMessage = "go on"
         let f = form()
-        XCTAssertEqual(SettingsForm.Field.allCases.filter(\.isNumber).map(f.number), [250, 450, 50, 70, 30])
-        XCTAssertEqual(SettingsForm.Field.allCases.map(f.text), ["250", "450", "50", "70", "30", "save", "go on"])
+        XCTAssertEqual(SettingsForm.Field.allCases.filter(\.isNumber).map(f.number), [250, 450, 50, 70, 40, 65, 30])
+        XCTAssertEqual(SettingsForm.Field.allCases.map(f.text), ["250", "450", "50", "70", "40", "65", "30", "save", "go on"])
         XCTAssertEqual(f.number(.message), 0)
-        XCTAssertEqual(SettingsForm.Field.allCases.map(f.status), Array(repeating: SaveStatus.unchanged, count: 7))
+        XCTAssertEqual(SettingsForm.Field.allCases.map(f.status), Array(repeating: SaveStatus.unchanged, count: 9))
         XCTAssertEqual(f.whenToAskStatus, .unchanged)
     }
 
@@ -105,7 +107,7 @@ final class SettingsFormTests: XCTestCase {
         XCTAssertEqual(disk.codexAskPercent, 78)
         XCTAssertEqual(disk.codexLaterPercent, 84)
         XCTAssertEqual(f.codexStatus, .saved(t0))
-        XCTAssertEqual(f.codexNote, SettingsNote(text: SettingsText.codexThresholdsNote(ask: 78, later: 84), tone: .muted))
+        XCTAssertEqual(f.codexNote, SettingsNote(text: SettingsText.thresholdsNote(.codex, ask: 78, later: 84), tone: .muted))
 
         f.set(.codexAsk, typed: "5", now: t0, save: save)
         XCTAssertTrue(f.invalid(.codexAsk))
@@ -114,12 +116,33 @@ final class SettingsFormTests: XCTestCase {
         XCTAssertEqual(f.claudeStatus, .unchanged, "Claude Code's card is its own")
     }
 
+    func testCursorsPairIsSavedOnItsOwn() {
+        var f = form()
+        f.set(.cursorLater, typed: "90", now: t0, save: save)
+        XCTAssertEqual(f.cursorProblem,
+                       "Cursor's “If you choose Wait, compact at” goes up to 84%: saving needs room before Cursor summarizes by itself.")
+        XCTAssertEqual(f.status(.cursorAsk), .notSaved(f.cursorProblem!))
+        XCTAssertEqual(f.cursorNote.tone, .danger)
+        XCTAssertFalse(f.invalid(.cursorAsk))
+        XCTAssertTrue(f.invalid(.cursorLater))
+        XCTAssertEqual(saves, 0)
+
+        f.set(.cursorLater, typed: "75", now: t0, save: save)
+        f.set(.cursorAsk, typed: "45", now: t0, save: save)
+        XCTAssertEqual(disk.cursorAskPercent, 45)
+        XCTAssertEqual(disk.cursorLaterPercent, 75)
+        XCTAssertEqual(f.cursorStatus, .saved(t0))
+        XCTAssertEqual(f.cursorNote, SettingsNote(text: SettingsText.thresholdsNote(.cursor, ask: 45, later: 75), tone: .muted))
+        XCTAssertEqual(disk.codexAskPercent, Config.defaultCodexAskPercent, "Codex's are its own")
+        XCTAssertEqual(f.codexStatus, .unchanged)
+    }
+
     func testTheCountdownSavesAsTyped() {
         var f = form()
         f.set(.autoYes, typed: "0", now: t0, save: save)
         XCTAssertEqual(disk.autoYesSeconds, 0)
         XCTAssertEqual(f.countdownStatus, .saved(t0))
-        XCTAssertEqual(f.countdownNote, SettingsNote(text: SettingsText.countdownNote(0), tone: .muted))
+        XCTAssertEqual(f.countdownNote(), SettingsNote(text: SettingsText.countdownNote(0), tone: .muted))
         XCTAssertEqual(f.whenToAskNote, SettingsNote(text: SettingsText.whenToAskNote(askK: 300, laterK: 500, autoYes: 0), tone: .muted))
     }
 
@@ -182,34 +205,39 @@ final class SettingsFormTests: XCTestCase {
         disk.laterAt = 10_000_000
         disk.codexAskPercent = 10
         disk.codexLaterPercent = 84
+        disk.cursorAskPercent = 10
         disk.autoYesSeconds = 7
         var f = form()
-        f.step(.askK, up: true, showsCodex: false, now: t0, save: save)
+        f.step(.askK, up: true, now: t0, save: save)
         XCTAssertEqual(f.askK, 350, "to the step above")
-        f.step(.askK, up: false, showsCodex: false, now: t0, save: save)
+        f.step(.askK, up: false, now: t0, save: save)
         XCTAssertEqual(f.askK, 300, "to the step below")
-        f.step(.laterK, up: true, showsCodex: false, now: t0, save: save)
+        f.step(.laterK, up: true, now: t0, save: save)
         XCTAssertEqual(f.laterK, 10_000, "the top of its range")
-        f.step(.codexAsk, up: false, showsCodex: true, now: t0, save: save)
+        f.step(.codexAsk, up: false, now: t0, save: save)
         XCTAssertEqual(f.codexAsk, 10, "the bottom of its range")
-        f.step(.codexLater, up: true, showsCodex: true, now: t0, save: save)
+        f.step(.codexLater, up: true, now: t0, save: save)
         XCTAssertEqual(f.codexLater, 84)
-        f.step(.autoYes, up: false, showsCodex: false, now: t0, save: save)
+        f.step(.cursorAsk, up: true, now: t0, save: save)
+        XCTAssertEqual(f.cursorAsk, 15)
+        f.step(.autoYes, up: false, now: t0, save: save)
         XCTAssertEqual(f.autoYes, 0)
-        f.step(.autoYes, up: true, showsCodex: true, now: t0, save: save)
+        f.step(.autoYes, up: true, now: t0, save: save)
         XCTAssertEqual(f.autoYes, 15)
-        f.step(.message, up: true, showsCodex: false, now: t0, save: save)
+        f.step(.message, up: true, now: t0, save: save)
         XCTAssertEqual(disk.askAt, 300_000)
         XCTAssertEqual(disk.autoYesSeconds, 15)
-        XCTAssertEqual(saves, 4, "a step that changes nothing saves nothing")
+        XCTAssertEqual(disk.cursorAskPercent, 15)
+        XCTAssertEqual(saves, 5, "a step that changes nothing saves nothing")
     }
 
-    func testTheCountdownsLabelDependsOnCodex() {
+    func testTheCountdownsLabelDependsOnItsCard() {
         let f = form()
-        XCTAssertEqual(f.field(.autoYes, showsCodex: false).label, "If you don't answer, compact after")
-        XCTAssertEqual(f.field(.autoYes, showsCodex: true).label, "Compact after")
-        XCTAssertEqual(f.field(.askK, showsCodex: true), SettingsText.askField)
-        XCTAssertEqual(f.field(.codexLater, showsCodex: true), SettingsText.codexLaterField)
+        XCTAssertEqual(f.field(.autoYes, ownCountdownCard: false).label, "If you don't answer, compact after")
+        XCTAssertEqual(f.field(.autoYes, ownCountdownCard: true).label, "Compact after")
+        XCTAssertEqual(f.field(.askK, ownCountdownCard: true), SettingsText.askField)
+        XCTAssertEqual(f.field(.codexLater, ownCountdownCard: true), SettingsText.laterField(.codex))
+        XCTAssertEqual(f.field(.cursorAsk, ownCountdownCard: true), SettingsText.askField(.cursor))
     }
 
     func testWhatAFieldHoldsAsTyped() {
@@ -231,6 +259,6 @@ final class SettingsFormTests: XCTestCase {
         XCTAssertEqual(ask.stepped(50, up: false), 50)
         XCTAssertEqual(ask.stepped(0, up: true), 50, "an empty field steps to the first value")
         XCTAssertEqual(ask.stepped(10_000, up: true), 10_000)
-        XCTAssertEqual(SettingsText.countdownField(showsCodex: false).stepped(0, up: false), 0)
+        XCTAssertEqual(SettingsText.countdownField(ownCard: false).stepped(0, up: false), 0)
     }
 }

@@ -68,7 +68,7 @@ final class FollowUpTextTests: XCTestCase {
 
     func testOnlyWhatYouShouldKnowRaisesANotice() {
         let raising = FollowUp.Stage.allCases.filter { FollowUpText.notice(followUp($0), continueMessage: "go") != nil }
-        XCTAssertEqual(raising, [.needsYou, .compacting, .done, .tookOver, .failed])
+        XCTAssertEqual(raising, [.needsYou, .yours, .compacting, .done, .tookOver, .failed])
         let done = FollowUpText.notice(followUp(.done), continueMessage: "continue now")
         XCTAssertEqual(done?.title, "Compacted 312k → 24k")
         XCTAssertEqual(done?.reason, "Then sent “continue now”")
@@ -77,6 +77,11 @@ final class FollowUpTextTests: XCTestCase {
         let failed = FollowUpText.notice(followUp(.failed, note: "compacting didn't go through after 3 tries"), continueMessage: "go")
         XCTAssertEqual(failed?.reason, "Compacting didn't go through after 3 tries", "a line of its own starts with a capital")
         XCTAssertGreaterThan(needs?.seconds ?? 0, 8, "it waits on you, so it stays up longer")
+        let yours = FollowUpText.notice(followUp(.yours, note: "type /summarize in it"), continueMessage: "go")
+        XCTAssertEqual(yours?.title, "Saved, ready for you to compact")
+        XCTAssertEqual(yours?.reason, "Type /summarize in it")
+        XCTAssertGreaterThan(yours?.seconds ?? 0, 8, "it waits on you, so it stays up longer")
+        XCTAssertEqual(line(followUp(.yours, note: "type /summarize in it")), "Saved, ready for you to compact: type /summarize in it")
     }
 
     func testEachNoticeIsColoredByWhatItMeans() {

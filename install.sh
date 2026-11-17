@@ -4,6 +4,8 @@
 #   - puts the hook program at ~/.claude/hooks/context-guard/context-guard
 #   - adds its hooks to ~/.claude/settings.json (`context-guard setup`: backed up first; other hooks
 #     are left alone)
+#   - when Cursor is on this Mac (the app or its CLI, cursor-agent), adds its hooks to
+#     ~/.cursor/hooks.json the same way (`context-guard cursor install`), which guards Cursor chats
 #   - puts the mod (mod/, the part that compacts once the session has saved) at ~/.claude/hooks/context-guard/mod
 #     and installs it as a Claude Code plugin for this user
 #   - adds a LaunchAgent that keeps `context-guard codex` running, which guards Codex sessions
@@ -12,8 +14,9 @@
 #
 #   ./install.sh               install, or update in place (run it again after changing the code)
 #   ./install.sh --no-codex    the same, without the Codex link (and removes one installed before)
-#   ./install.sh --uninstall   remove the hooks, the hook program, the mod, the Codex link and the
-#                              app; keeps your settings and session records in ~/.claude/context-guard
+#   ./install.sh --uninstall   remove the hooks (Claude Code's and Cursor's), the hook program, the mod,
+#                              the Codex link and the app; keeps your settings and session records in
+#                              ~/.claude/context-guard
 set -euo pipefail
 
 pkg="$(cd "$(dirname "$0")" && pwd)"
@@ -29,6 +32,8 @@ app="$HOME/Applications/Context Guard.app"
 exe="$app/Contents/MacOS/ContextGuard"
 # Every Context Guard hook command contains this path.
 marker="hooks/context-guard/context-guard"
+# Cursor's user hooks, which both the Cursor app and the Cursor CLI run.
+cursor_hooks="$HOME/.cursor/hooks.json"
 # The LaunchAgent that runs `context-guard codex`. The app looks for this file to tell whether the
 # Codex link is installed.
 agent_label="com.spaceterran.ContextGuard.codex"
@@ -47,16 +52,32 @@ quit_app() {
   pkill -f "^$exe" || true
 }
 
-# Takes Context Guard's hooks out of settings.json, with the program that put them there: the
-# installed one, or this checkout's build when that's gone.
+# The program that put the hooks there: the installed one, or this checkout's build when that's gone.
+hook_program() {
+  if [ -x "$hook_bin" ]; then
+    printf '%s\n' "$hook_bin"
+    return
+  fi
+  swift build -c release --product context-guard --package-path "$pkg" >/dev/null
+  printf '%s\n' "$(swift build -c release --show-bin-path --package-path "$pkg")/context-guard"
+}
+
+# Takes Context Guard's hooks out of settings.json.
 remove_hooks() {
   [ -f "$settings" ] && grep -q "$marker" "$settings" || return 0
-  local prog="$hook_bin"
-  if [ ! -x "$prog" ]; then
-    swift build -c release --product context-guard --package-path "$pkg" >/dev/null
-    prog="$(swift build -c release --show-bin-path --package-path "$pkg")/context-guard"
-  fi
-  "$prog" setup --uninstall
+  "$(hook_program)" setup --uninstall
+}
+
+# Takes Context Guard's hooks out of Cursor's hooks.json; Cursor's other hooks stay.
+remove_cursor_hooks() {
+  [ -f "$cursor_hooks" ] && grep -q "$marker" "$cursor_hooks" || return 0
+  "$(hook_program)" cursor uninstall
+}
+
+# The Cursor app, or the Cursor CLI.
+has_cursor() {
+  [ -d /Applications/Cursor.app ] || [ -d "$HOME/Applications/Cursor.app" ] ||
+    command -v cursor-agent >/dev/null || [ -x "$HOME/.local/bin/cursor-agent" ]
 }
 
 # Tells the hooks waiting in the background after each turn to stop, so none sends a save message
@@ -179,6 +200,7 @@ uninstall() {
   rm -rf "$app"
   say "removed $app"
   remove_hooks
+  remove_cursor_hooks
   uninstall_mod
   stop_waiters
   rm -f "$hook_bin"
@@ -204,6 +226,8 @@ install() {
   # Backs up settings.json, then removes and adds the hooks, so running this again leaves exactly
   # one copy of each. Other hooks and settings stay as they are.
   "$hook_bin" setup
+  # Cursor's hooks.json the same way, when Cursor is here (and out of it when it's gone).
+  if has_cursor; then "$hook_bin" cursor install; else remove_cursor_hooks; fi
 
   copy_mod
   install_mod

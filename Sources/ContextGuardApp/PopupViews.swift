@@ -22,10 +22,13 @@ struct QuestionView: View {
                     Text(info.questionHeading)
                         .font(Theme.font(14, .bold))
                         .foregroundStyle(Theme.heading)
-                    Text(info.title)
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.text)
-                        .lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        ToolMarkView(host: info.host)
+                        Text(info.title)
+                            .font(Theme.font(13))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(Theme.text)
                     let subtitle = info.toolSubtitle
                     if !subtitle.isEmpty {
                         Text(subtitle)
@@ -122,10 +125,14 @@ struct NoticeView: View {
                 Text(notice.title)
                     .font(Theme.font(14, .bold))
                     .foregroundStyle(Theme.heading)
-                Text(notice.detail)
-                    .font(Theme.font(13))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(2)
+                // About a session: its tool's mark, then its title.
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    if let tool = notice.tool { ToolMarkView(host: tool) }
+                    Text(notice.detail)
+                        .font(Theme.font(13))
+                        .lineLimit(2)
+                }
+                .foregroundStyle(Theme.text)
                 if !notice.caption.isEmpty {
                     Text(notice.caption)
                         .font(Theme.font(12))

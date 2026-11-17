@@ -45,7 +45,10 @@ async def loaded() -> None:
                         raise SystemExit(f"{method}: {msg['error']}")
                     return msg["result"]
 
-        await call("initialize", {"clientInfo": {"name": "context_guard_live_test", "title": None, "version": "1"},
+        # Codex names every session on an app server after the server's first client, for as long as
+        # the server runs: a server this reaches first would name your terminal sessions after it.
+        # The link's name (CodexMeta.linkOriginator) is the one such sessions are still guarded under.
+        await call("initialize", {"clientInfo": {"name": "context_guard", "title": None, "version": "1"},
                                   "capabilities": {"experimentalApi": True}})
         await ws.send(json.dumps({"method": "initialized"}))
         ids: list[str] = []

@@ -253,17 +253,24 @@ public enum Engine {
         s.stopsSinceSent = 0
         return deliveryText(config.message, nonce: nonce, reason: s.sendReason ?? .yes,
                             askedAt: s.askedTokens ?? s.tokens, laterAt: config.laterAt,
-                            timedOutAfter: s.askTimedOut == true ? config.autoYesSeconds : nil, host: s.wordingHost)
+                            timedOutAfter: s.askTimedOut == true ? config.autoYesSeconds : nil, host: s.wordingHost,
+                            channel: channel)
     }
 
     /// The text the session sees. Claude Code presents a woken session's message as a background
-    /// event ("not user input"), so it says what relays it and why, then quotes the user's own words.
-    /// Codex shows it as a prompt you typed, so it's your words as they are. The tag lets Context
+    /// event ("not user input"), and Cursor one added mid-turn as a note in a tool's result, so it
+    /// says what relays it and why, then quotes the user's own words. Codex, and Cursor between
+    /// turns, show it as a prompt you typed, so it's your words as they are. The tag lets Context
     /// Guard confirm the message reached the session's log.
     public static func deliveryText(_ message: String, nonce: String, reason: SendReason, askedAt: Int, laterAt: Int,
-                                    timedOutAfter: Int? = nil, host: SessionHost = .claude) -> String {
-        if host == .codex { return "\(message) [\(nonce)]" }
-        let relay = "Context Guard (a Claude Code hook the user installed to watch context size) is relaying a message the user chose to send"
+                                    timedOutAfter: Int? = nil, host: SessionHost = .claude,
+                                    channel: DeliveryChannel = .wake) -> String {
+        switch host {
+        case .codex: return "\(message) [\(nonce)]"
+        case .cursor where channel == .turn: return "\(message) [\(nonce)]"
+        case .claude, .cursor: break
+        }
+        let relay = "Context Guard (a \(host.name) hook the user installed to watch context size) is relaying a message the user chose to send"
         let why: String
         switch reason {
         case .yes where timedOutAfter != nil:

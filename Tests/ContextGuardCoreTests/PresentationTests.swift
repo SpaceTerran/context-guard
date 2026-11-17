@@ -287,19 +287,19 @@ final class PresentationTests: XCTestCase {
     }
 
     func testCodexsThresholdsHaveTheSameLimitsAsTheConfig() {
-        XCTAssertNil(SettingsText.codexProblem(ask: 60, later: 80))
-        XCTAssertEqual(SettingsText.codexProblem(ask: 0, later: 80), "Codex's “Ask at” needs a number, like 60.")
-        XCTAssertEqual(SettingsText.codexProblem(ask: 5, later: 80), "Codex's “Ask at” has to be from 10% to 79%.")
-        XCTAssertEqual(SettingsText.codexProblem(ask: 60, later: 0), "Codex's “If you choose Wait, compact at” needs a number, like 80.")
-        XCTAssertEqual(SettingsText.codexProblem(ask: 60, later: 90),
+        XCTAssertNil(SettingsText.problem(.codex, ask: 60, later: 80))
+        XCTAssertEqual(SettingsText.problem(.codex, ask: 0, later: 80), "Codex's “Ask at” needs a number, like 60.")
+        XCTAssertEqual(SettingsText.problem(.codex, ask: 5, later: 80), "Codex's “Ask at” has to be from 10% to 79%.")
+        XCTAssertEqual(SettingsText.problem(.codex, ask: 60, later: 0), "Codex's “If you choose Wait, compact at” needs a number, like 80.")
+        XCTAssertEqual(SettingsText.problem(.codex, ask: 60, later: 90),
                        "Codex's “If you choose Wait, compact at” goes up to 84%: Codex compacts by itself at about 95%, and saving needs room before that.")
-        XCTAssertEqual(SettingsText.codexProblem(ask: 60, later: 64), "Codex's “If you choose Wait, compact at” has to be at least 5% more than its “Ask at”.")
-        XCTAssertTrue(SettingsText.codexAskInvalid(5))
-        XCTAssertFalse(SettingsText.codexLaterInvalid(ask: 5, later: 64), "only Ask at is marked")
-        XCTAssertTrue(SettingsText.codexLaterInvalid(ask: 60, later: 64))
+        XCTAssertEqual(SettingsText.problem(.codex, ask: 60, later: 64), "Codex's “If you choose Wait, compact at” has to be at least 5% more than its “Ask at”.")
+        XCTAssertTrue(SettingsText.askInvalid(.codex, ask: 5))
+        XCTAssertFalse(SettingsText.laterInvalid(.codex, ask: 5, later: 64), "only Ask at is marked")
+        XCTAssertTrue(SettingsText.laterInvalid(.codex, ask: 60, later: 64))
         // Whatever passes is saved as typed.
         for ask in 0...100 {
-            for later in 0...100 where SettingsText.codexProblem(ask: ask, later: later) == nil {
+            for later in 0...100 where SettingsText.problem(.codex, ask: ask, later: later) == nil {
                 var c = Config()
                 c.codexAskPercent = ask
                 c.codexLaterPercent = later
@@ -307,20 +307,48 @@ final class PresentationTests: XCTestCase {
                 XCTAssertEqual(c.normalized.codexLaterPercent, later)
             }
         }
-        XCTAssertEqual(SettingsText.codexThresholdsNote(ask: 60, later: 80),
+        XCTAssertEqual(SettingsText.thresholdsNote(.codex, ask: 60, later: 80),
                        "When a session reaches 60% of its window, a popup asks whether to compact it. If you choose Wait, it compacts at 80%. In a 258k window, that's 155k and 206k.")
+    }
+
+    func testCursorsThresholdsHaveTheSameLimitsAsTheConfig() {
+        XCTAssertNil(SettingsText.problem(.cursor, ask: 60, later: 80))
+        XCTAssertEqual(SettingsText.problem(.cursor, ask: 0, later: 80), "Cursor's “Ask at” needs a number, like 60.")
+        XCTAssertEqual(SettingsText.problem(.cursor, ask: 80, later: 84), "Cursor's “Ask at” has to be from 10% to 79%.")
+        XCTAssertEqual(SettingsText.problem(.cursor, ask: 60, later: 85),
+                       "Cursor's “If you choose Wait, compact at” goes up to 84%: saving needs room before Cursor summarizes by itself.")
+        XCTAssertEqual(SettingsText.problem(.cursor, ask: 60, later: 61),
+                       "Cursor's “If you choose Wait, compact at” has to be at least 5% more than its “Ask at”.")
+        XCTAssertTrue(SettingsText.laterInvalid(.cursor, ask: 60, later: 61))
+        XCTAssertFalse(SettingsText.laterInvalid(.cursor, ask: 80, later: 61), "only Ask at is marked")
+        for ask in 0...100 {
+            for later in 0...100 where SettingsText.problem(.cursor, ask: ask, later: later) == nil {
+                var c = Config()
+                c.cursorAskPercent = ask
+                c.cursorLaterPercent = later
+                XCTAssertEqual(c.normalized.cursorAskPercent, ask)
+                XCTAssertEqual(c.normalized.cursorLaterPercent, later)
+            }
+        }
+        XCTAssertEqual(SettingsText.thresholdsNote(.cursor, ask: 60, later: 80),
+                       "When a session reaches 60% of its window, a popup asks whether to compact it. If you choose Wait, it compacts at 80%. In a 200k window, that's 120k and 160k.")
+        XCTAssertEqual(SettingsText.askField(.cursor).range, Config.cursorAskPercentRange)
+        XCTAssertEqual(SettingsText.laterField(.cursor).range, Config.cursorLaterPercentRange)
+        XCTAssertEqual(SettingsText.laterField(.cursor).unit, "%")
     }
 
     func testTheFields() {
         XCTAssertEqual(SettingsText.askField.range, 50...10_000)
-        XCTAssertEqual(SettingsText.codexLaterField.range, Config.codexLaterPercentRange)
-        XCTAssertEqual(SettingsText.countdownField(showsCodex: true).label, "Compact after")
-        XCTAssertEqual(SettingsText.countdownField(showsCodex: false).label, "If you don't answer, compact after")
-        XCTAssertEqual(SettingsText.countdownField(showsCodex: false).range, 0...3_600, "the same limits as Config.normalized")
+        XCTAssertEqual(SettingsText.laterField(.codex).range, Config.codexLaterPercentRange)
+        XCTAssertEqual(SettingsText.countdownField(ownCard: true).label, "Compact after")
+        XCTAssertEqual(SettingsText.countdownField(ownCard: false).label, "If you don't answer, compact after")
+        XCTAssertEqual(SettingsText.countdownField(ownCard: false).range, 0...3_600, "the same limits as Config.normalized")
         XCTAssertEqual(SettingsText.countdownNote(60),
                        "If you don't answer a popup within 60 seconds, it compacts the session, whichever tool it runs in.")
         XCTAssertEqual(SettingsText.countdownNote(0),
                        "A popup waits for your answer, whichever tool the session runs in (0 seconds: it never compacts on its own).")
+        XCTAssertEqual(SettingsText.countdownNote(60, otherTools: false), "If you don't answer a popup within 60 seconds, it compacts the session.")
+        XCTAssertEqual(SettingsText.countdownNote(0, otherTools: false), "A popup waits for your answer (0 seconds: it never compacts on its own).")
     }
 
     func testTheCodexLinkAndJudges() {
@@ -341,7 +369,31 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(SettingsText.onlyWatchingNote("this Codex has no thread/queue/add"),
                        "Only watching, not compacting: this Codex has no thread/queue/add. A newer Codex may fix this.")
         XCTAssertEqual(SettingsText.signInNote(.codex), "No API key: the judge uses your Codex sign-in.")
-        XCTAssertEqual(SettingsText.watchLabel(showsCodex: false), "Watch Claude Code sessions")
+        XCTAssertEqual(SettingsText.watchLabel(otherTools: false), "Watch Claude Code sessions")
+        XCTAssertEqual(SettingsText.watchLabel(otherTools: true), "Watch sessions")
+    }
+
+    func testCursorsTypingAsTheLatestAppChatSawIt() {
+        func chat(_ n: Int, _ surface: CursorSurface, canType: Bool?, at: TimeInterval) -> SessionInfo {
+            var s = SessionState(sessionId: "00000000-0000-4000-8000-00000000000\(n)", host: .cursor, now: now.addingTimeInterval(at))
+            s.cursorChat = CursorFacts(surface: surface, window: 200_000)
+            s.cursorChat?.canType = canType
+            return SessionInfo(state: s, isLive: true, waiterAlive: false)
+        }
+        XCTAssertNil(Display.cursorCanType([]))
+        XCTAssertNil(Display.cursorCanType([chat(1, .cli, canType: true, at: 0), chat(2, .app, canType: nil, at: 9)]),
+                     "the CLI types through its terminal, and an older chat file doesn't say")
+        XCTAssertEqual(Display.cursorCanType([chat(1, .app, canType: false, at: 0), chat(2, .app, canType: true, at: 60)]), true)
+        XCTAssertEqual(Display.cursorCanType([chat(1, .app, canType: false, at: 60), chat(2, .app, canType: true, at: 0)]), false)
+    }
+
+    func testCursorsRows() {
+        XCTAssertEqual(SettingsText.cursorTyping(true), StatusLine(text: "Cursor's Accessibility", symbol: .success, tone: .success))
+        XCTAssertEqual(SettingsText.cursorTyping(false), StatusLine(text: "Cursor needs Accessibility", symbol: .warning, tone: .warning))
+        XCTAssertEqual(SettingsText.cursorTyping(nil).tone, .muted)
+        XCTAssertEqual(SettingsText.cursorJudge(cliFound: true), StatusLine(text: "Auto", symbol: .success, tone: .success))
+        XCTAssertEqual(SettingsText.cursorJudge(cliFound: false), StatusLine(text: "Needs the Cursor CLI", symbol: .warning, tone: .warning))
+        XCTAssertEqual(SettingsText.signInNote(.cursor), "No API key: the judge uses your Cursor sign-in.")
     }
 
     func testTheMessagesNotes() {
@@ -352,9 +404,13 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(SettingsText.messageNote("", status: .notSaved("disk full"), about: about).text, "Not saved: disk full")
         XCTAssertEqual(SettingsText.messageNote("", status: .notSaved("disk full"), about: about).tone, .danger)
         XCTAssertEqual(SettingsText.restoreHelp("save message"), "Put back the default save message")
-        XCTAssertTrue(SettingsText.messagesNote(showsCodex: false, codexJudgeName: "x").contains("The judge (Haiku) reads"))
-        XCTAssertTrue(SettingsText.messagesNote(showsCodex: true, codexJudgeName: "gpt-6-luna")
+        XCTAssertTrue(SettingsText.messagesNote(codexJudge: nil).contains("The judge (Haiku) reads"))
+        XCTAssertTrue(SettingsText.messagesNote(codexJudge: "gpt-6-luna")
             .contains("The judge (Haiku for Claude Code, gpt-6-luna for Codex) reads"))
+        XCTAssertTrue(SettingsText.messagesNote(codexJudge: "gpt-6-luna", showsCursor: true)
+            .contains("The judge (Haiku for Claude Code, gpt-6-luna for Codex, Auto for Cursor) reads"))
+        XCTAssertTrue(SettingsText.messagesNote(codexJudge: nil, showsCursor: true)
+            .contains("The judge (Haiku for Claude Code, Auto for Cursor) reads"))
     }
 
     func testACardsHeader() {

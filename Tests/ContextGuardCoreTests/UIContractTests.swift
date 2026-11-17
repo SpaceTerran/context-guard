@@ -10,7 +10,7 @@ import XCTest
 ///   byte order. After a deliberate change, `CONTEXT_GUARD_UPDATE_CONTRACT=1 swift test --filter
 ///   UIContractTests` rewrites them; read the diff before committing it.
 /// - `intents/`: what the app sends, written by hand and read here into the intents they mean.
-/// - `names.json`: every symbol and tone name a board uses.
+/// - `names.json`: every symbol, tone and tool name a board uses.
 ///
 /// The files hold the Windows app's words. On the Mac its own two (`install.sh`, the menu bar) are
 /// swapped for them before comparing.
@@ -165,11 +165,13 @@ final class UIContractTests: XCTestCase {
 
     // MARK: Names
 
-    /// Every `symbol` and `tone` a board can name, so the app's icon and color maps can be checked complete.
+    /// Every `symbol`, `tone` and `tool` a board can name, so the app's icon, color and mark maps can be
+    /// checked complete.
     func testNames() throws {
         struct Names: Encodable {
             let symbols = Symbol.allCases.map(\.rawValue)
             let tones = Tone.allCases.map(\.rawValue)
+            let tools = SessionHost.allCases.map(\.rawValue)
         }
         let line = String(decoding: try JSONEncoder().encode(Names()), as: UTF8.self)
         try check("names.json", line)

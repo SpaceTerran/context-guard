@@ -3,7 +3,8 @@ import Foundation
 /// "Watch This Session" turned off for one tab. Keyed to the Claude process rather than the session,
 /// so it lasts through /compact and /clear and ends when the tab closes. A Codex session has no
 /// process of its own (the app server runs it), so its mark is keyed to the thread and ends with it;
-/// `/new` in Codex starts a new thread, which is watched. Only the app and CLI write these.
+/// `/new` in Codex starts a new thread, which is watched. A Cursor chat's is keyed to the chat (the
+/// app runs every chat) and ends with it. Only the app and CLI write these.
 public struct Mute: Codable, Equatable, Sendable {
     public var pid: Int32
     public var start: ProcessStart
@@ -18,11 +19,22 @@ public struct Mute: Codable, Equatable, Sendable {
         self.sessionId = sessionId
     }
 
-    /// Whether you stopped watching the Claude process that runs this session, or this Codex session.
+    /// Whether you stopped watching the Claude process that runs this session, or this Codex session
+    /// or Cursor chat.
     public static func isMuted(_ s: SessionState, _ paths: Paths) -> Bool {
-        if s.hostKind == .codex { return FileManager.default.fileExists(atPath: paths.codexMuteFile(s.sessionId).path) }
+        if let file = sessionFile(s, paths) { return FileManager.default.fileExists(atPath: file.path) }
         guard let pid = s.claudePid, let start = s.claudeStart else { return false }
         return isMuted(pid: pid, start: start, paths)
+    }
+
+    /// The mark of a session that has no process of its own: Codex and Cursor's. nil for Claude
+    /// Code, whose mark is its process's, and for a tool this build doesn't know.
+    static func sessionFile(_ s: SessionState, _ paths: Paths) -> URL? {
+        switch s.hostKind {
+        case .codex: return paths.codexMuteFile(s.sessionId)
+        case .cursor: return paths.cursorMuteFile(s.sessionId)
+        case .claude, nil: return nil
+        }
     }
 
     public static func isMuted(pid: Int32, start: ProcessStart, _ paths: Paths) -> Bool {
@@ -40,11 +52,10 @@ public struct Mute: Codable, Equatable, Sendable {
     /// Stop or start watching the Claude process that runs `s`. Stopping throws `UnknownProcess`
     /// when the session hasn't said which process that is.
     public static func set(_ muted: Bool, for s: SessionState, _ paths: Paths, now: Date = Date()) throws {
-        if s.hostKind == .codex {
-            let file = paths.codexMuteFile(s.sessionId)
+        if let file = sessionFile(s, paths) {
             if muted {
                 try paths.ensureDirectories()
-                try FileIO.writeJSON(CodexMute(threadId: s.sessionId, at: now), to: file)
+                try FileIO.writeJSON(SessionMute(sessionId: s.sessionId, at: now), to: file)
             } else if FileManager.default.fileExists(atPath: file.path) {
                 try FileManager.default.removeItem(at: file)
             }
@@ -64,13 +75,14 @@ public struct Mute: Codable, Equatable, Sendable {
         }
     }
 
-    /// Remove the files of Claude processes that have exited, and of Codex sessions that ended or
-    /// are gone.
+    /// Remove the files of Claude processes that have exited, and of Codex sessions and Cursor chats
+    /// that ended or are gone.
     public static func prune(_ paths: Paths, probe: any ProcessProbing) {
         let files = (try? FileManager.default.contentsOfDirectory(at: paths.mutedDir, includingPropertiesForKeys: nil)) ?? []
         for file in files where file.pathExtension == "json" {
-            if let c = FileIO.readJSON(CodexMute.self, from: file), file.lastPathComponent.hasPrefix("codex-") {
-                if let s = SessionState.load(c.threadId, paths), !s.ended { continue }
+            let name = file.lastPathComponent
+            if name.hasPrefix("codex-") || name.hasPrefix("cursor-"), let c = FileIO.readJSON(SessionMute.self, from: file) {
+                if let s = SessionState.load(c.sessionId, paths), !s.ended { continue }
                 try? FileManager.default.removeItem(at: file)
                 continue
             }
@@ -80,13 +92,20 @@ public struct Mute: Codable, Equatable, Sendable {
     }
 }
 
-/// A Codex session you stopped watching (`Paths.codexMuteFile`).
-public struct CodexMute: Codable, Equatable, Sendable {
-    public var threadId: String
+/// A Codex session or Cursor chat you stopped watching (`Paths.codexMuteFile`, `cursorMuteFile`).
+public struct SessionMute: Codable, Equatable, Sendable {
+    /// The Codex thread or Cursor conversation.
+    public var sessionId: String
     public var at: Date
 
-    public init(threadId: String, at: Date) {
-        self.threadId = threadId
+    public init(sessionId: String, at: Date) {
+        self.sessionId = sessionId
         self.at = at
+    }
+
+    // Codex's marks were written before Cursor's, with the thread's name for the key.
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "threadId"
+        case at
     }
 }

@@ -10,6 +10,8 @@ public struct SettingsForm: Equatable, Sendable {
         case askK, laterK
         /// Codex's thresholds, in percent of a session's window.
         case codexAsk, codexLater
+        /// Cursor's thresholds, in percent of a chat's window (the Mac only).
+        case cursorAsk, cursorLater
         /// The question's countdown, in seconds.
         case autoYes
         case message, continueMessage
@@ -22,6 +24,8 @@ public struct SettingsForm: Equatable, Sendable {
     public private(set) var laterK: Int
     public private(set) var codexAsk: Int
     public private(set) var codexLater: Int
+    public private(set) var cursorAsk: Int
+    public private(set) var cursorLater: Int
     public private(set) var autoYes: Int
     public private(set) var message: String
     public private(set) var continueMessage: String
@@ -29,6 +33,7 @@ public struct SettingsForm: Equatable, Sendable {
     /// Whether each card's changes are on disk.
     public private(set) var thresholdsSaved = SaveStatus.unchanged
     public private(set) var codexSaved = SaveStatus.unchanged
+    public private(set) var cursorSaved = SaveStatus.unchanged
     public private(set) var countdownSaved = SaveStatus.unchanged
     public private(set) var messageSaved = SaveStatus.unchanged
     public private(set) var continueSaved = SaveStatus.unchanged
@@ -38,6 +43,8 @@ public struct SettingsForm: Equatable, Sendable {
         laterK = c.laterAt / 1_000
         codexAsk = c.codexAskPercent
         codexLater = c.codexLaterPercent
+        cursorAsk = c.cursorAskPercent
+        cursorLater = c.cursorLaterPercent
         autoYes = c.autoYesSeconds
         message = c.message
         continueMessage = c.continueMessage
@@ -54,6 +61,8 @@ public struct SettingsForm: Equatable, Sendable {
         case .laterK: return laterK
         case .codexAsk: return codexAsk
         case .codexLater: return codexLater
+        case .cursorAsk: return cursorAsk
+        case .cursorLater: return cursorLater
         case .autoYes: return autoYes
         case .message, .continueMessage: return 0
         }
@@ -92,6 +101,8 @@ public struct SettingsForm: Equatable, Sendable {
         case .laterK: laterK = number
         case .codexAsk: codexAsk = number
         case .codexLater: codexLater = number
+        case .cursorAsk: cursorAsk = number
+        case .cursorLater: cursorLater = number
         case .autoYes: autoYes = number
         case .message, .continueMessage: return
         }
@@ -110,6 +121,13 @@ public struct SettingsForm: Equatable, Sendable {
                 $0.codexAskPercent = ask
                 $0.codexLaterPercent = later
             }
+        case .cursorAsk, .cursorLater:
+            guard cursorProblem == nil else { return }
+            let (ask, later) = (cursorAsk, cursorLater)
+            cursorSaved = Self.saved(now, save) {
+                $0.cursorAskPercent = ask
+                $0.cursorLaterPercent = later
+            }
         case .autoYes:
             let seconds = autoYes
             countdownSaved = Self.saved(now, save) { $0.autoYesSeconds = seconds }
@@ -119,9 +137,9 @@ public struct SettingsForm: Equatable, Sendable {
     }
 
     /// A number field's − or + button.
-    public mutating func step(_ f: Field, up: Bool, showsCodex: Bool, now: Date = Date(), save: Save) {
+    public mutating func step(_ f: Field, up: Bool, now: Date = Date(), save: Save) {
         guard f.isNumber else { return }
-        set(f, number: field(f, showsCodex: showsCodex).stepped(number(f), up: up), now: now, save: save)
+        set(f, number: field(f, ownCountdownCard: true).stepped(number(f), up: up), now: now, save: save)
     }
 
     /// Restore Default under a message.
@@ -148,14 +166,16 @@ public struct SettingsForm: Equatable, Sendable {
     // MARK: What each field and card shows
 
     /// A number field's label, unit, step and range. The countdown's label depends on whether it
-    /// has its own card (once Codex is in the picture).
-    public func field(_ f: Field, showsCodex: Bool) -> SettingsText.Field {
+    /// has its own card (once another tool is in the picture, and always in the Mac's tabs).
+    public func field(_ f: Field, ownCountdownCard: Bool) -> SettingsText.Field {
         switch f {
         case .askK: return SettingsText.askField
         case .laterK: return SettingsText.laterField
-        case .codexAsk: return SettingsText.codexAskField
-        case .codexLater: return SettingsText.codexLaterField
-        case .autoYes, .message, .continueMessage: return SettingsText.countdownField(showsCodex: showsCodex)
+        case .codexAsk: return SettingsText.askField(.codex)
+        case .codexLater: return SettingsText.laterField(.codex)
+        case .cursorAsk: return SettingsText.askField(.cursor)
+        case .cursorLater: return SettingsText.laterField(.cursor)
+        case .autoYes, .message, .continueMessage: return SettingsText.countdownField(ownCard: ownCountdownCard)
         }
     }
 
@@ -164,14 +184,17 @@ public struct SettingsForm: Equatable, Sendable {
         switch f {
         case .askK: return SettingsText.askInvalid(askK: askK, laterK: laterK)
         case .laterK: return SettingsText.laterInvalid(askK: askK, laterK: laterK)
-        case .codexAsk: return SettingsText.codexAskInvalid(codexAsk)
-        case .codexLater: return SettingsText.codexLaterInvalid(ask: codexAsk, later: codexLater)
+        case .codexAsk: return SettingsText.askInvalid(.codex, ask: codexAsk)
+        case .codexLater: return SettingsText.laterInvalid(.codex, ask: codexAsk, later: codexLater)
+        case .cursorAsk: return SettingsText.askInvalid(.cursor, ask: cursorAsk)
+        case .cursorLater: return SettingsText.laterInvalid(.cursor, ask: cursorAsk, later: cursorLater)
         case .autoYes, .message, .continueMessage: return false
         }
     }
 
     public var thresholdProblem: String? { SettingsText.thresholdProblem(askK: askK, laterK: laterK) }
-    public var codexProblem: String? { SettingsText.codexProblem(ask: codexAsk, later: codexLater) }
+    public var codexProblem: String? { SettingsText.problem(.codex, ask: codexAsk, later: codexLater) }
+    public var cursorProblem: String? { SettingsText.problem(.cursor, ask: cursorAsk, later: cursorLater) }
 
     /// Claude Code's card, once Codex is in the picture.
     public var claudeStatus: SaveStatus { thresholdProblem.map(SaveStatus.notSaved) ?? thresholdsSaved }
@@ -181,12 +204,19 @@ public struct SettingsForm: Equatable, Sendable {
 
     public var codexStatus: SaveStatus { codexProblem.map(SaveStatus.notSaved) ?? codexSaved }
     public var codexNote: SettingsNote {
-        SettingsNote(problem: codexProblem, else: SettingsText.codexThresholdsNote(ask: codexAsk, later: codexLater))
+        SettingsNote(problem: codexProblem, else: SettingsText.thresholdsNote(.codex, ask: codexAsk, later: codexLater))
     }
 
-    /// The countdown's own card, once Codex is in the picture.
+    public var cursorStatus: SaveStatus { cursorProblem.map(SaveStatus.notSaved) ?? cursorSaved }
+    public var cursorNote: SettingsNote {
+        SettingsNote(problem: cursorProblem, else: SettingsText.thresholdsNote(.cursor, ask: cursorAsk, later: cursorLater))
+    }
+
+    /// The countdown's own card, once another tool is in the picture (always in the Mac's tabs).
     public var countdownStatus: SaveStatus { countdownSaved }
-    public var countdownNote: SettingsNote { SettingsNote(text: SettingsText.countdownNote(autoYes), tone: .muted) }
+    public func countdownNote(otherTools: Bool = true) -> SettingsNote {
+        SettingsNote(text: SettingsText.countdownNote(autoYes, otherTools: otherTools), tone: .muted)
+    }
 
     /// The one "When to ask" card before Codex: thresholds and countdown together.
     public var whenToAskStatus: SaveStatus {
@@ -202,6 +232,7 @@ public struct SettingsForm: Equatable, Sendable {
         case .continueMessage: return continueSaved
         case .askK, .laterK: return claudeStatus
         case .codexAsk, .codexLater: return codexStatus
+        case .cursorAsk, .cursorLater: return cursorStatus
         case .autoYes: return countdownStatus
         }
     }

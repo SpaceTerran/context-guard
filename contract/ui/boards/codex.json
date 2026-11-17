@@ -28,6 +28,10 @@
           "symbol": "asking",
           "title": "Add retries to the sync job",
           "tokens": "160k",
+          "tool": {
+            "id": "codex",
+            "name": "Codex"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": true
@@ -44,6 +48,10 @@
           "symbol": "watching",
           "title": "Tidy the test helpers",
           "tokens": "88k",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": true
@@ -77,7 +85,11 @@
           "heading": "Context at 61% (160k)",
           "session": "01a1c7f0-4d8a-7870-aab2-07bc76ea7401",
           "subtitle": "Codex · C:\\code\\sync",
-          "title": "Add retries to the sync job"
+          "title": "Add retries to the sync job",
+          "tool": {
+            "id": "codex",
+            "name": "Codex"
+          }
         }
       }
     ],

@@ -48,6 +48,7 @@ public sealed partial class PopupView : UserControl
         BadgeGlyph.Glyph = Gauge;
         badgeState = "BadgePlanet";
         HeadingText.Text = q.Heading;
+        Logo.Show(q.Tool);
         Line(q.Title, lines: 1, "Title");
         Small(q.Subtitle, "Subtitle");
         Show(CaptionText, null);
@@ -87,6 +88,7 @@ public sealed partial class PopupView : UserControl
         BadgeGlyph.Glyph = Feed.Glyphs.For(n.Symbol);
         badgeState = "Badge" + Pascal(Feed.Tones.For(n.Tone));
         HeadingText.Text = n.Title;
+        Logo.Show(n.Tool);
         Line(n.Detail, lines: 2, "Detail");
         // A reason wraps; a name and folder stays on one line, cut in the middle.
         Small(n.CaptionWraps ? null : n.Caption, "Caption");

@@ -1,0 +1,11 @@
+<UserControl
+    x:Class="ContextGuard.App.ToolLogoView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    IsTabStop="False">
+    <!-- The mark of the tool a session runs in (the Mac's ToolLogo): the same path data on its 24 DIP square, scaled
+         to the size it's given, in the foreground it inherits, so it recolors with the text beside it. -->
+    <Viewbox>
+        <PathIcon x:Name="Mark" Width="24" Height="24" />
+    </Viewbox>
+</UserControl>

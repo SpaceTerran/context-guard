@@ -29,18 +29,21 @@ public struct NoticeContent: Equatable, Sendable {
     public var tone: Tone
     public var title: String
     public var detail: String
+    /// When it's about a session (`detail` is its title), the session's tool: its mark goes before `detail`.
+    public var tool: SessionHost?
     public var caption: String
     /// A reason wraps; a name and folder stays on one line, cut in the middle.
     public var captionWraps: Bool
     /// How long it stays up.
     public var seconds: TimeInterval
 
-    public init(symbol: Symbol, tone: Tone, title: String, detail: String, caption: String = "",
+    public init(symbol: Symbol, tone: Tone, title: String, detail: String, tool: SessionHost? = nil, caption: String = "",
                 captionWraps: Bool = false, seconds: TimeInterval = 8) {
         self.symbol = symbol
         self.tone = tone
         self.title = title
         self.detail = detail
+        self.tool = tool
         self.caption = caption
         self.captionWraps = captionWraps
         self.seconds = seconds
@@ -62,6 +65,9 @@ public final class Presenter {
     /// the menu and Settings show each tool's own lines. Otherwise they read as they did before
     /// Codex. The installer's `--no-codex` and uninstall remove both, so the views go back at once.
     public private(set) var showsCodex = false
+    /// Context Guard's hooks are in Cursor's hooks file, or a Cursor chat has run (the Mac only): the
+    /// menu and Settings show Cursor's lines too.
+    public private(set) var showsCursor = false
     /// How `context-guard codex` stands, and the model it judges Codex sessions with.
     public private(set) var codexLink = CodexLinkStatus.State.notRunning
     public private(set) var codexJudge: String?
@@ -69,6 +75,7 @@ public final class Presenter {
     private let registry: any RegistryReading
     private let probe: any ProcessProbing
     private let codexLinkInstalled: () -> Bool
+    private let cursorHooksInstalled: () -> Bool
     private let startedAt: Date
     private var pruneAt = Date.distantPast
     /// Sends and compactions already announced (and everything from before it started).
@@ -87,14 +94,18 @@ public final class Presenter {
     /// their turn.
     public static let maxOpen = 5
 
-    /// - Parameter codexLinkInstalled: whether the Codex link's background task is installed
-    ///   (a LaunchAgent on the Mac).
+    /// - Parameters:
+    ///   - codexLinkInstalled: whether the Codex link's background task is installed (a LaunchAgent
+    ///     on the Mac).
+    ///   - cursorHooksInstalled: whether Cursor runs Context Guard's hooks (never on Windows).
     public init(paths: Paths, registry: any RegistryReading, probe: any ProcessProbing = SystemProcessProbe(),
-                codexLinkInstalled: @escaping () -> Bool, now: Date = Date()) {
+                codexLinkInstalled: @escaping () -> Bool, cursorHooksInstalled: @escaping () -> Bool = { false },
+                now: Date = Date()) {
         self.paths = paths
         self.registry = registry
         self.probe = probe
         self.codexLinkInstalled = codexLinkInstalled
+        self.cursorHooksInstalled = cursorHooksInstalled
         self.startedAt = now
         self.config = Config.load(paths)
     }
@@ -130,6 +141,7 @@ public final class Presenter {
         codexLink = CodexLinkStatus.state(link, now: now)
         codexJudge = link?.judgeModel
         showsCodex = codexLinkInstalled() || link != nil
+        showsCursor = cursorHooksInstalled() || sessions.contains { $0.host == .cursor }
         if now > pruneAt {
             SessionCatalog.prune(paths, sessions: sessions, olderThan: Self.pruneAge, now: now, probe: probe)
             pruneAt = now.addingTimeInterval(Self.pruneEvery)
@@ -202,7 +214,7 @@ public final class Presenter {
                 // "Compacting" once it's done.
                 host.close { $0.hasPrefix("notice:follow-up:\(f.nonce):") }
                 if let n = FollowUpText.notice(f, continueMessage: config.continueMessage) {
-                    show(NoticeContent(symbol: n.symbol, tone: n.tone, title: n.title, detail: info.title,
+                    show(NoticeContent(symbol: n.symbol, tone: n.tone, title: n.title, detail: info.title, tool: info.host,
                                        caption: n.reason ?? info.toolSubtitle, captionWraps: n.reason != nil, seconds: n.seconds),
                          key: "notice:\(Self.followUpKey(f))", host)
                 }
@@ -214,7 +226,8 @@ public final class Presenter {
                     let title = s.sendReason == .later
                         ? "Reached \(info.size(s.sentTokens ?? s.tokens)): saving, then compacting"
                         : Words.Notice.saving
-                    show(NoticeContent(symbol: .saving, tone: .accent, title: title, detail: info.title, caption: info.toolSubtitle),
+                    show(NoticeContent(symbol: .saving, tone: .accent, title: title, detail: info.title, tool: info.host,
+                                       caption: info.toolSubtitle),
                          key: "notice:\(nonce)", host)
                 }
             }
@@ -225,7 +238,7 @@ public final class Presenter {
                 guard c.trigger == "auto" else { continue }
                 let size = c.preTokens.map { " at \(info.size($0))" } ?? ""
                 show(NoticeContent(symbol: .compacting, tone: .warning, title: "Auto-compacted\(size) before it could save",
-                                   detail: info.title, caption: info.toolSubtitle),
+                                   detail: info.title, tool: info.host, caption: info.toolSubtitle),
                      key: "notice:\(key)", host)
             }
         }

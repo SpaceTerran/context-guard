@@ -2,10 +2,17 @@
 
 ![Context Guard asking whether to compact a session](docs/popup.png)
 
-A small app for [Claude Code](https://code.claude.com/docs/en/overview) and the
-[Codex CLI](https://github.com/openai/codex), in the Mac menu bar or on the
-[Windows](#windows) taskbar. When a session's context gets big, it asks before compacting. If you
-say yes, the session saves its work first, then it's compacted and told to carry on.
+A small app for [Claude Code](https://code.claude.com/docs/en/overview), the
+[Codex CLI](https://github.com/openai/codex) and, on the Mac, [Cursor](https://cursor.com), in the
+Mac menu bar or on the [Windows](#windows) taskbar. When a session's context gets big, it asks before
+compacting. If you say yes, the session saves its work first, then it's compacted and told to carry
+on.
+
+| | Mac | Windows |
+|---|---|---|
+| Claude Code, in a terminal | Yes | Yes |
+| Codex CLI | Yes | Yes |
+| Cursor: the app, and the Cursor CLI in a terminal | Yes | No |
 
 There are about a thousand ways to handle context in Claude Code: `/compact` by hand, auto-compact,
 and plenty of other tools. This is just the one I like. The story behind it is on the blog:
@@ -54,11 +61,16 @@ Each session's menu has **Watch This Session**. Turned off, that tab gets no que
 compacted by itself until it closes or you turn it back on. **Compact Now** always works, even there
 and with Context Guard off.
 
-Settings has three tabs: **General** (on or off, open at login, and for each tool what's installed and
-its judge), **When to Ask** (the thresholds, and how long a question waits before it compacts by
-itself; 0 for never) and **Messages** (the save message and the continue message). Changes save as
-you type. The When to Ask and Messages cards say in their header when your last change was saved, or
-that it wasn't and why.
+Each session shows the mark of the tool it runs in before its title, in the menu, its question and
+its notices: Anthropic's for Claude Code, OpenAI's for Codex, Cursor's for Cursor. The marks belong
+to their owners and are there only to tell the tools apart (`design/logos`).
+
+Settings has a tab for each tool, between **General** (on or off, open at login, and how long a
+question waits before it compacts by itself; 0 for never) and **Messages** (the save message and the
+continue message). **Claude Code**, **Codex** and **Cursor** each say what's installed and who
+judges, and hold that tool's thresholds. The Codex tab shows once the Codex link is installed, the
+Cursor tab once Cursor's hooks are. Changes save as you type. The cards you can change say in their
+header when your last change was saved, or that it wasn't and why.
 
 | The session's menu | Settings |
 |---|---|
@@ -71,12 +83,19 @@ through Claude Code's own hooks and plugins.
 context window (60% and 80%), and a small OpenAI model reads whether the session has saved, in place
 of Haiku. See [Codex](#codex).
 
+**Cursor** chats, on the Mac, get the same in the Cursor app and in the Cursor CLI: thresholds as a
+share of each chat's window (60% and 80%), Cursor's Auto model as the judge, and Cursor's own
+`/summarize` to compact, typed into the chat. See [Cursor](#cursor).
+
 ## Requirements
 
 - macOS 14 or newer.
 - Xcode Command Line Tools 16.4 or newer (Swift 6.1 or newer): `xcode-select --install`.
 - Claude Code with plugin support (tested with 2.1.318), signed in as usual.
 - For Codex sessions: the Codex CLI (tested with 0.167.1), signed in as usual. Without it, nothing
+  changes.
+- For Cursor chats: the Cursor app (tested with 3.30.14), the Cursor CLI `cursor-agent` (tested with
+  2026.11.13), or both, signed in as usual. The judge needs the Cursor CLI. Without Cursor, nothing
   changes.
 
 ## Install, update, uninstall
@@ -86,7 +105,8 @@ git clone https://github.com/SpaceTerran/context-guard.git
 cd context-guard
 ./install.sh                 # install, or update after a git pull
 ./install.sh --no-codex      # the same, without the Codex link (removes one installed before)
-./install.sh --uninstall     # remove the hooks, the hook program, the mod, the Codex link and the app
+./install.sh --uninstall     # remove the hooks (Claude Code's and Cursor's), the hook program, the mod,
+                             # the Codex link and the app
 ```
 
 It builds on your Mac (about a minute), so there's nothing to download and nothing for Gatekeeper to
@@ -96,6 +116,8 @@ block. `install.sh` does the following:
 - puts the hook program at `~/.claude/hooks/context-guard/context-guard`;
 - adds the hooks to `~/.claude/settings.json`, after backing it up next to itself. Other hooks are
   left alone, and running it again doesn't add the hooks twice;
+- when Cursor is on your Mac (the app or `cursor-agent`), adds Cursor's hooks to
+  `~/.cursor/hooks.json` the same way (see [Cursor](#cursor));
 - copies the mod to `~/.claude/hooks/context-guard/mod` and installs it as the user plugin
   `context-guard@context-guard`. Claude Code reads it from that folder, so an update is a copy;
 - adds a LaunchAgent, `~/Library/LaunchAgents/com.spaceterran.ContextGuard.codex.plist`, that keeps
@@ -181,6 +203,10 @@ sends a save message afterwards, and keeps your settings and session records in
 
 ### Differences from the Mac
 
+- **Cursor** isn't guarded on Windows, the app or the CLI.
+- **Settings** has three tabs: **General** (on or off, open at login, and for each tool what's
+  installed and who judges), **When to Ask** (each tool's thresholds, and how long a question waits
+  before it compacts by itself) and **Messages**.
 - **The icon** sits under ^ in the notification area until you pin it to the taskbar. Clicking it
   opens the menu. A right-click gives **Context Guard On**, **Settings…** and **Quit Context
   Guard**.
@@ -244,6 +270,8 @@ context-guard watch <id> on|off       # watch a session's tab, or stop
 context-guard on | off
 context-guard codex [--only-cwd <folder>] [--verbose]
                                       # the Codex link (the LaunchAgent runs it)
+context-guard cursor install | uninstall
+                                      # Cursor's hooks in ~/.cursor/hooks.json (Mac only)
 ```
 
 ## Codex
@@ -276,10 +304,10 @@ holds it.
 
 **Thresholds.** Codex models have different context windows (258k on most today), so the
 thresholds are a share of each session's window: it asks at **60%** and, told to wait, compacts at
-**80%**. Settings → When to Ask has a Codex card for both. Codex compacts by itself at about 95% of
-the window, and that would cut a save short, so Wait goes no higher than 84%, and stays a tenth of
-the window below Codex's own point if you've lowered it (`model_auto_compact_token_limit`). The
-popup shows both numbers: "Context at 62% (160k)".
+**80%**. Settings has both on its Codex tab (on Windows, in a Codex card on When to Ask). Codex
+compacts by itself at about 95% of the window, and that would cut a save short, so Wait goes no
+higher than 84%, and stays a tenth of the window below Codex's own point if you've lowered it
+(`model_auto_compact_token_limit`). The popup shows both numbers: "Context at 62% (160k)".
 
 What's different from Claude Code:
 
@@ -305,12 +333,81 @@ What's different from Claude Code:
 | `codex-link.stderr` | launchd: anything the link printed as an error |
 | `muted/codex-<id>.json` | the app and `context-guard watch`: a Codex session you stopped watching |
 
+## Cursor
+
+On the Mac, Context Guard also guards chats in the Cursor app and in the Cursor CLI (`cursor-agent`
+in a terminal). Not on Windows. The app and the CLI both run Cursor's user hooks,
+`~/.cursor/hooks.json`, and that's where `install.sh` adds Context Guard's when Cursor is on your Mac
+(`context-guard cursor install` does the same, and `uninstall` takes them out). Your other hooks in
+that file stay as they were, and it's backed up next to itself first.
+
+| Hook | What it does |
+|---|---|
+| `postToolUse` | Runs after each step. It reads the chat's context size, asks at 60%, and adds a waiting save message to the step's result. |
+| `stop` | Stays in the background after every turn, until the next turn replaces it (up to 12 hours). It does what Claude Code's `Stop` hook and the mod do: sends the save message as your next prompt when it's due, asks the judge, compacts the chat and sends the continue message. |
+| `beforeSubmitPrompt` | A turn starts. It notes whether Context Guard's message is the one going in. |
+| `preCompact` | Notes that Cursor is summarizing the chat, typed or by itself. |
+| `sessionEnd` | Notes that the chat was closed. |
+
+Each chat's size and window come from Cursor's own records, read only: the app's
+`~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`, and the CLI's
+`~/.cursor/chats`. The app records a chat's full size only when a turn ends, so during a turn Context
+Guard adds what each step brought in (a file read counts at its length), at about four characters a
+token, until Cursor's figure catches up.
+
+**Compacting.** Nothing outside Cursor can start a summary, so Context Guard types `/summarize` into
+the chat, as you would:
+
+- **In the Cursor app,** the typing runs inside Cursor's hook, with Cursor's own Accessibility
+  permission (System Settings › Privacy & Security › Accessibility). Context Guard needs no
+  permission of its own. It types only when the chat is on screen (its panel in the Agents window,
+  or its tab in an editor window), its prompt box is empty, and you haven't used the keyboard or
+  mouse for 10 seconds. It brings Cursor to the front, types `/summarize`, picks Summarize, types the
+  continue message (Cursor sends it once the summary is done), and gives the focus back to the app
+  you were in. Using the keyboard or mouse while it types stops it. It never switches which chat a
+  window shows. Reading Cursor's window turns on Cursor's accessibility support, so with
+  `editor.accessibilitySupport` on `auto` (Cursor's default) Cursor switches the editor to Screen
+  Reader Optimized and asks once whether to keep it. **No** sets it to `off`, and the typing works
+  the same.
+- **In a terminal,** a CLI chat running in a tmux or Herdr pane is typed into with tmux's or Herdr's
+  own commands. The continue message goes in when the summary ends.
+- **Otherwise** (Cursor doesn't have Accessibility, the chat isn't on screen, or the CLI runs in
+  another terminal), a notice says the chat has saved and asks you to type `/summarize` in it. Once
+  you do, the continue message goes in by itself.
+
+Text in the prompt box holds the compaction. It's never typed over, and it's looked at again a
+minute later.
+
+**The judge.** Cursor's **Auto** model, through the Cursor CLI with your Cursor sign-in: no API key.
+Each check is one `cursor-agent -p` run in ask mode (read only) in an empty folder of Context
+Guard's, and its chat is deleted once it answers. It follows the same rules as Haiku. Without the
+Cursor CLI, or signed out of it, you're asked whether the chat has saved instead.
+
+**Thresholds.** A share of each chat's window (200k for most): it asks at **60%** and, told to wait,
+compacts at **80%**. Both are on Settings' Cursor tab. Cursor summarizes a chat by itself at a point
+its servers set and don't announce. Once a chat has done that, Wait stays a tenth of its window
+below that point. Wait goes no higher than 84%.
+
+What's different from Claude Code:
+
+- **Watch This Session** belongs to the chat, not the tab.
+- **Which chats:** chats in the Cursor app and `cursor-agent` chats in a terminal. `cursor-agent -p`
+  runs, Context Guard's own judge among them, are left alone.
+
+| File | Written by |
+|---|---|
+| `~/.cursor/hooks.json` | `install.sh` and `context-guard cursor install`: Context Guard's hooks among yours |
+| `~/.claude/context-guard/sessions/<id>.json` | the hooks: each chat's size, where its save message stands, and how compacting is going |
+| `~/.claude/context-guard/turns/<id>.json` | the hooks: whether the chat's latest turn is running |
+| `~/.claude/context-guard/muted/cursor-<id>.json` | the app and `context-guard watch`: a Cursor chat you stopped watching |
+
 ## Development
 
 ```
-swift test                                     # the rules, transcript reading, hook runs, the Codex link
+swift test                                     # the rules, transcript reading, hook runs, the Codex link,
+                                               # Cursor's hooks
 claude plugin test mod                         # the mod, against a mocked clock and program
-live-test/ui-demo.sh start dark                # the app on staged sessions (four Claude Code, one Codex)
+live-test/ui-demo.sh start dark                # the app on staged sessions (four Claude Code, one Codex, one Cursor)
 live-test/ui-demo.sh snap <folder> <name>      # the app draws its windows to PNGs (works with the
                                                # screen locked)
 live-test/session.sh start <name> 60 75        # a real Haiku session with low thresholds
@@ -320,6 +417,9 @@ CG_TEST_TERMINAL=terminal CG_TEST_PROMPT="Read filler-1.txt" live-test/session.s
                                                # the same in a Terminal.app window (or ghostty)
 CG_TEST_CODEX_DIR=<folder> live-test/codex-session.sh start <name>
                                                # a real Codex session (gpt-6-luna), asks at 10%
+live-test/cursor-session.sh start <name>       # a real Cursor CLI chat (Auto), asks at 10%
+CG_TEST_TERMINAL=herdr live-test/cursor-session.sh start <name>
+                                               # the same in a Herdr pane
 ```
 
 The live tests keep their files in `.scratch/` at the repo root. They never touch your real
@@ -332,6 +432,12 @@ trust a folder it doesn't know and saves the answer in your settings, so `CG_TES
 be a folder inside a project Codex already trusts, not a git repo of its own. The test folder gets
 Codex settings of its own: gpt-6-luna and no update check. Codex itself may note first-run flags in
 `~/.codex/config.toml`; `stop` says when it did. The script's header lists its other commands.
+
+`cursor-session.sh` runs `cursor-agent` in a tmux server of the test's own (with
+`CG_TEST_TERMINAL=herdr`, in a Herdr session of its own), guarded by test hooks in the test
+folder's `.cursor/hooks.json` that run the debug build with a scratch home. `~/.cursor/hooks.json`
+and your other chats are left alone, and `stop` deletes the test's chats. The script's header lists
+its other commands.
 
 On Windows, in PowerShell from the repo root:
 

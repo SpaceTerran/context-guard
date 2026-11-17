@@ -22,6 +22,10 @@
           "symbol": "watching",
           "title": "Refactor the billing API",
           "tokens": "302k",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": true

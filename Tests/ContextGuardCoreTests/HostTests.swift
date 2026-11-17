@@ -127,7 +127,7 @@ final class HostTests: HookTestCase {
     }
 
     func testClaudesHooksLeaveOtherToolsSessionsAlone() throws {
-        for host in ["codex", "newtool"] {
+        for host in ["codex", "cursor", "newtool"] {
             let before = try otherToolsSession(host)
             try answer(.yes, from: .menu)
             for name in ["SessionStart", "UserPromptSubmit", "PostToolBatch", "Stop", "SessionEnd"] {
@@ -140,7 +140,7 @@ final class HostTests: HookTestCase {
     /// Saved and judged ready by Haiku, then the file says another tool runs the session: the mod
     /// neither compacts it nor records its turns.
     func testTheModLeavesOtherToolsSessionsAlone() throws {
-        for host in ["codex", "newtool"] {
+        for host in ["codex", "cursor", "newtool"] {
             try? FileManager.default.removeItem(at: paths.sessionsDir)
             try? FileManager.default.removeItem(at: paths.turnFile(sid))
             try configure()

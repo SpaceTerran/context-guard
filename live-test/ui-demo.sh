@@ -1,15 +1,17 @@
 #!/bin/bash
 # Run the app against staged sessions, to look at it without real Claude Code sessions.
 #
-#   live-test/ui-demo.sh start [light|dark] [no-codex]   stage four Claude Code sessions and a Codex one (E),
-#                                             with a stand-in for `context-guard codex`, and launch the debug app
-#   live-test/ui-demo.sh phase <A-E> <phase> [tokens]   change a staged session (as the hook or the link would)
-#   live-test/ui-demo.sh followup <A-E> <stage> [note] [compacted]  set where compacting stands after
+#   live-test/ui-demo.sh start [light|dark] [no-codex] [no-cursor]  stage four Claude Code sessions, a Codex
+#                                             one (E) with a stand-in for `context-guard codex`, and a chat in
+#                                             the Cursor app (F) with Cursor's hooks "installed"; launch the debug app
+#   live-test/ui-demo.sh phase <A-F> <phase> [tokens]   change a staged session (as the hook or the link would)
+#   live-test/ui-demo.sh followup <A-F> <stage> [note] [compacted]  set where compacting stands after
 #                                             the save message (continuing, done and tookOver are always compacted)
 #   live-test/ui-demo.sh watch <A-D> on|off   watch a staged Claude Code session's tab, or stop
 #   live-test/ui-demo.sh link connected|waiting|watching|stopped   what the stand-in link says
 #   live-test/ui-demo.sh settings             open Settings (from the menu, through accessibility)
-#   live-test/ui-demo.sh tab <General|When to Ask|Messages>  show a Settings tab (pressed through accessibility)
+#   live-test/ui-demo.sh tab <General|Claude Code|Codex|Cursor|Messages>  show a Settings tab (pressed through
+#                                             accessibility)
 #   live-test/ui-demo.sh press "<label>" [n|text]  press a button or switch in the app's windows, by its label
 #                                             (n: the nth with that label, in `controls` order; text: the one
 #                                             in the window that shows that text, such as a popup's session title)
@@ -19,13 +21,15 @@
 #   live-test/ui-demo.sh snap <folder> <name>  have the app draw each window to <folder>/<name>-<n>.png
 #                                             and write its menu to <folder>/<name>-menu.txt
 #                                             (works with the display asleep or the screen locked)
-#   live-test/ui-demo.sh capture <general|asking|messages> <file.png>  screen-capture a Settings window on
+#   live-test/ui-demo.sh capture <general|claude|codex|cursor|messages> <file.png>  screen-capture a Settings window on
 #                                             that tab, behind your windows and never focused (display awake)
 #   live-test/ui-demo.sh stop
 #
 # Each staged Claude Code session is "run" by a placeholder `sleep`, and a scratch registry says which
-# are busy. The Codex session is live while the stand-in link keeps codex-link.json fresh. Everything
-# lives in .scratch/ui at the repo root; nothing touches real sessions.
+# are busy. The Codex session is live while the stand-in link keeps codex-link.json fresh; the Cursor
+# chat while its own placeholder `sleep` (standing in for the Cursor app) runs. Everything lives in
+# .scratch/ui at the repo root; nothing touches real sessions, and the app reads a staged Cursor hooks
+# file, never ~/.cursor/hooks.json.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -36,6 +40,8 @@ home="$dir/home"
 reg="$dir/registry"
 app="$pkg/.build/debug/ContextGuardApp"
 cmd="${1:?command}"
+# start's options, in any order after the appearance.
+has() { case " ${*:2} " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # Finds controls by label through accessibility (live-test/ax.swift), compiled once.
 ax() {
@@ -48,6 +54,7 @@ stage() {
 import json, os, sys, datetime, subprocess
 home, reg, d = sys.argv[1:4]
 codex = "no-codex" not in sys.argv[4:]
+cursor = "no-cursor" not in sys.argv[4:]
 now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 H = os.path.expanduser("~")
 sessions = {
@@ -60,6 +67,9 @@ sessions = {
 if codex:
     # 51% of its window: it asks at 60% (155k).
     sessions["E"] = dict(title="Add retries to the sync job", cwd=f"{H}/code/sync-service", tokens=131_800, phase="watching", codex=True)
+if cursor:
+    # 52% of its window: it asks at 60% (120k).
+    sessions["F"] = dict(title="Tidy the onboarding screens", cwd=f"{H}/code/mobile-app", tokens=104_600, phase="watching", cursor=True)
 pids = json.load(open(f"{d}/pids.json"))
 
 def start(pid):
@@ -73,7 +83,17 @@ def start(pid):
     sec, usec = ctypes.c_long.from_buffer(buf, 0).value, ctypes.c_int.from_buffer(buf, 8).value
     return {"seconds": sec, "microseconds": usec}
 for key, s in sessions.items():
-    sid = f"00000000-0000-4000-8000-00000000000{'ABCDE'.index(key) + 1}"
+    sid = f"00000000-0000-4000-8000-00000000000{'ABCDEF'.index(key) + 1}"
+    if s.get("cursor"):
+        state = {
+          "schemaVersion": 1, "sessionId": sid, "host": "cursor", "cwd": s["cwd"], "title": s["title"],
+          "tokens": s["tokens"], "tokensAt": now, "updatedAt": now, "guarded": True, "phase": s["phase"], "cycle": 1,
+          "stopsSinceSent": 0, "resendCount": 0, "awaitingCompactionRecord": False, "ended": False,
+          "cursorChat": {"surface": "app", "window": 200_000, "model": "auto", "pid": pids[key], "start": start(pids[key]),
+                         "canType": True},
+        }
+        json.dump(state, open(f"{home}/sessions/{sid}.json", "w"), indent=2)
+        continue
     if s.get("codex"):
         state = {
           "schemaVersion": 1, "sessionId": sid, "host": "codex", "cwd": s["cwd"], "title": s["title"],
@@ -108,11 +128,18 @@ case "$cmd" in
     rm -rf "$dir"; mkdir -p "$home/sessions" "$home/answers" "$reg" "$dir/LaunchAgents"
     printf '{"schemaVersion":1,"enabled":true,"askAt":300000,"laterAt":500000}\n' > "$home/config.json"
     echo "{" > "$dir/pids.json"
-    for k in A B C D waiter; do
+    keys=(A B C D waiter)
+    has no-cursor "$@" || keys+=(F)
+    for k in "${keys[@]}"; do
       nohup sleep 86400 >/dev/null 2>&1 &
       printf '"%s": %d,\n' "$k" $! >> "$dir/pids.json"
     done
-    if [ "${3:-}" != no-codex ]; then
+    if ! has no-cursor "$@"; then
+      # Context Guard's hooks in a staged Cursor hooks file (the app reads it instead of ~/.cursor/hooks.json).
+      jq -n --arg c "/bin/sh -c '\$HOME/.claude/hooks/context-guard/context-guard cursor hook'" \
+        '{version: 1, hooks: {stop: [{command: $c, timeout: 43800}]}}' > "$dir/cursor-hooks.json"
+    fi
+    if ! has no-codex "$@"; then
       # The Codex link counts as installed (the app looks here, not in ~/Library/LaunchAgents).
       : > "$dir/LaunchAgents/com.spaceterran.ContextGuard.codex.plist"
       "$0" link connected
@@ -123,17 +150,17 @@ case "$cmd" in
       printf '"link": %d,\n' $! >> "$dir/pids.json"
     fi
     printf '"_": 0}\n' >> "$dir/pids.json"
-    stage "${3:-}"
+    stage "${@:2}"
     # Launch arguments set the appearance for this app only: Aqua-only for light, Dark for dark.
     if [ "${2:-light}" = dark ]; then look=(-AppleInterfaceStyle Dark); else look=(-NSRequiresAquaSystemAppearance YES); fi
     CONTEXT_GUARD_HOME="$home" CONTEXT_GUARD_REGISTRY="$reg" CONTEXT_GUARD_SNAPSHOTS="$dir/snaps" \
-      CONTEXT_GUARD_LAUNCH_AGENTS="$dir/LaunchAgents" \
+      CONTEXT_GUARD_LAUNCH_AGENTS="$dir/LaunchAgents" CONTEXT_GUARD_CURSOR_HOOKS="$dir/cursor-hooks.json" \
       nohup "$app" "${look[@]}" > "$dir/app.log" 2>&1 &
     echo $! > "$dir/app.pid"
     echo "app pid $(cat "$dir/app.pid"), home $home"
     ;;
   phase)
-    key="${2:?A-E}"; phase="${3:?phase}"; tokens="${4:-}"
+    key="${2:?A-F}"; phase="${3:?phase}"; tokens="${4:-}"
     f="$home/sessions/00000000-0000-4000-8000-00000000000$(( $(printf '%d' "'$key") - 64 )).json"
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     # A question starts its countdown when it's asked.
@@ -141,7 +168,7 @@ case "$cmd" in
         | (if $p == "asking" and .askedAt == null then .askedAt = $now | .askedTokens = .tokens else . end)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
     ;;
   followup)
-    key="${2:?A-E}"; stage="${3:?stage}"; note="${4:-}"; compacted="${5:-}"
+    key="${2:?A-F}"; stage="${3:?stage}"; note="${4:-}"; compacted="${5:-}"
     f="$home/sessions/00000000-0000-4000-8000-00000000000$(( $(printf '%d' "'$key") - 64 )).json"
     now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     case "$stage" in continuing|done|tookOver) compacted=compacted ;; esac
@@ -206,7 +233,7 @@ case "$cmd" in
     ;;
   capture)
     # The Settings window on one tab, as docs/settings.png shows it. Needs the display awake.
-    tab="${2:?general|asking|messages}"; out="${3:?file.png}"
+    tab="${2:?general|claude|codex|cursor|messages}"; out="${3:?file.png}"
     mkdir -p "$dir/snaps"; rm -f "$dir/snaps/shown"
     echo "$tab" > "$dir/snaps/show"
     kill -USR2 "$(cat "$dir/app.pid")"

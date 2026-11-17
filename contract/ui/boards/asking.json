@@ -27,6 +27,10 @@
           "symbol": "asking",
           "title": "Refactor the billing API",
           "tokens": "302k",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": true
@@ -43,6 +47,10 @@
           "symbol": "watching",
           "title": "Write the release notes",
           "tokens": "120k",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          },
           "watch": {
             "label": "Watch This Session",
             "on": true
@@ -76,7 +84,11 @@
           "heading": "Context at 302k",
           "session": "00000000-0000-4000-8000-000000000001",
           "subtitle": "billing-3f · C:\\code\\billing",
-          "title": "Refactor the billing API"
+          "title": "Refactor the billing API",
+          "tool": {
+            "id": "claude",
+            "name": "Claude Code"
+          }
         }
       }
     ],
