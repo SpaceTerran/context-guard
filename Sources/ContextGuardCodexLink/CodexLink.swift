@@ -34,14 +34,10 @@ public final class CodexLink: @unchecked Sendable {
 
     public static let version = "1"
 
-    final class Worker: @unchecked Sendable {
-        let queue: DispatchQueue
-        var busy = false
-        var pending: CodexThreadLook?
-
-        init(_ id: String) {
-            queue = DispatchQueue(label: "codex-link.\(id)")
-        }
+    /// An empty folder outside any project, so the judge reads no AGENTS.md.
+    public static var defaultJudgeFolder: URL {
+        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("context-guard-codex-judge", isDirectory: true)
     }
 
     public let paths: Paths
@@ -51,6 +47,10 @@ public final class CodexLink: @unchecked Sendable {
     let options: Options
     let clock: @Sendable () -> Date
     let log: CodexLinkLog
+    /// Which chats this connection drives, and which the Codex app's does.
+    public let drivers: CodexDrivers
+    /// The connection to the Codex app, whose state `codex-link.json` reports too. Set before `run()`.
+    public var app: CodexAppLink?
     let waiters = TurnWaiters()
     /// An empty folder outside any project, so the judge reads no AGENTS.md.
     let judgeFolder: URL
@@ -58,8 +58,8 @@ public final class CodexLink: @unchecked Sendable {
     private let judgeSlots: DispatchSemaphore
     private let wake = DispatchSemaphore(value: 0)
 
+    private let workers: SessionWorkers<CodexThreadLook>
     private let lock = NSLock()
-    private var workers: [String: Worker] = [:]
     private var configs: [String: (facts: CodexConfigFacts, at: Date)] = [:]
     private var connected = false
     private var connectionClosed = false
@@ -78,8 +78,11 @@ public final class CodexLink: @unchecked Sendable {
     private var stopped = false
 
     public init(paths: Paths, connector: CodexConnecting, terminals: CodexTerminalProbing = SystemCodexTerminals(),
-                options: Options = Options(), clock: @escaping @Sendable () -> Date = { Date() }, log: CodexLinkLog? = nil) {
+                options: Options = Options(), clock: @escaping @Sendable () -> Date = { Date() }, log: CodexLinkLog? = nil,
+                drivers: CodexDrivers = CodexDrivers()) {
         self.paths = paths
+        self.drivers = drivers
+        self.workers = SessionWorkers(label: "codex-link", inline: options.inline)
         self.runner = CodexRunner(paths: paths, clock: clock)
         self.connector = connector
         self.terminals = terminals
@@ -88,8 +91,7 @@ public final class CodexLink: @unchecked Sendable {
         self.log = log ?? CodexLinkLog(url: nil)
         self.judgeSlots = DispatchSemaphore(value: max(1, options.judges))
         self.onlyCwd = options.onlyCwd.map { CodexAttachment.resolved(($0 as NSString).expandingTildeInPath) }
-        self.judgeFolder = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("context-guard-codex-judge", isDirectory: true)
+        self.judgeFolder = Self.defaultJudgeFolder
     }
 
     // MARK: - Running
@@ -210,6 +212,7 @@ public final class CodexLink: @unchecked Sendable {
             while wake.wait(timeout: .now()) == .success {}
         }
         close(daemon)
+        drivers.setTerminal([])
         lock.lock()
         connected = false
         lock.unlock()
@@ -288,9 +291,11 @@ public final class CodexLink: @unchecked Sendable {
             }
         }
         let attached = CodexAttachment.attached(threads: infos, terminals: terms)
+        drivers.setTerminal(Set(infos.filter { attached[$0.id] == true }.map(\.id)))
         let actOnNothing = currentObserveOnly != nil
         let canSteer = !currentNoSteer
-        for info in infos {
+        // Open in the Codex app and in no terminal: the app's connection drives it.
+        for info in infos where !(drivers.appHas(info.id) && attached[info.id] != true) {
             let facts = config(for: info.cwd, daemon, now: now)
             schedule(CodexThreadLook(
                 threadId: info.id, path: info.path, cwd: info.cwd, name: info.name, status: info.status,
@@ -300,15 +305,16 @@ public final class CodexLink: @unchecked Sendable {
                 canSteer: canSteer), daemon)
         }
         // Closed while the link was away, or the app server restarted: they close after a while.
+        // The Codex app's chats are its connection's to close.
         let loaded = Set(ids)
-        for s in runner.openSessions() where !loaded.contains(s.sessionId) && wanted(s.cwd) {
+        for s in runner.openSessions() where !loaded.contains(s.sessionId) && wanted(s.cwd) && s.codex?.surface != .app {
             schedule(CodexThreadLook(threadId: s.sessionId, status: "notLoaded"), daemon)
         }
     }
 
     /// Not connected and no Codex terminal: its sessions have closed (after `closedAfter`).
     func closeAbandoned() {
-        for s in runner.openSessions() where wanted(s.cwd) {
+        for s in runner.openSessions() where wanted(s.cwd) && s.codex?.surface != .app {
             _ = runner.tick(CodexThreadLook(threadId: s.sessionId, status: "notLoaded"))
         }
     }
@@ -337,49 +343,14 @@ public final class CodexLink: @unchecked Sendable {
 
     /// One session's work runs in order; a newer look waits for the one being handled.
     func schedule(_ look: CodexThreadLook, _ daemon: CodexDaemon) {
-        lock.lock()
-        let w = workers[look.threadId] ?? Worker(look.threadId)
-        workers[look.threadId] = w
-        if w.busy {
-            w.pending = look
-            lock.unlock()
-            return
-        }
-        w.busy = true
-        lock.unlock()
-        if options.inline {
-            work(w, look, daemon)
-        } else {
-            w.queue.async { [self] in work(w, look, daemon) }
-        }
-    }
-
-    func work(_ w: Worker, _ first: CodexThreadLook, _ daemon: CodexDaemon) {
-        var next: CodexThreadLook? = first
-        var fresh = true
-        while true {
-            if var look = next {
-                // A look that waited is read again first: acting on an old one could compact a
-                // session that has started a turn since.
-                if !fresh, look.status != "notLoaded" {
-                    look = refreshed(look, daemon) ?? look
-                }
-                let again = perform(runner.tick(look), look, daemon)
-                next = again ? look : nil
-                fresh = !again
-                if again { continue }
+        workers.schedule(look.threadId, look) { [self] look, waited in
+            var look = look
+            // A look that waited is read again first: acting on an old one could compact a
+            // session that has started a turn since.
+            if waited, look.status != "notLoaded" {
+                look = refreshed(look, daemon) ?? look
             }
-            lock.lock()
-            if let p = w.pending {
-                w.pending = nil
-                lock.unlock()
-                next = p
-                fresh = false
-                continue
-            }
-            w.busy = false
-            lock.unlock()
-            return
+            return perform(runner.tick(look), look, daemon)
         }
     }
 
@@ -631,9 +602,10 @@ public final class CodexLink: @unchecked Sendable {
             return
         }
         lastStatusAt = now
-        let status = CodexLinkStatus(at: now, connected: connected && !stopped, pid: ProcessInfo.processInfo.processIdentifier, serverVersion: serverVersion,
+        var status = CodexLinkStatus(at: now, connected: connected && !stopped, pid: ProcessInfo.processInfo.processIdentifier, serverVersion: serverVersion,
                                      judgeModel: judgeModel, observeOnly: observeOnly, lastError: lastError, stopped: stopped)
         lock.unlock()
+        status.app = app?.status(stopped: status.stopped)
         try? status.save(paths)
     }
 

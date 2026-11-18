@@ -26,9 +26,17 @@ public enum CodexLinkService {
         guard lock != nil else { fail("Couldn't open \(PathRules.native(paths.codexLinkLock.path)).") }
 
         let connector = CodexSocketConnector(socketPath: CodexSocketConnector.defaultSocketPath(env))
-        let link = CodexLink(paths: paths, connector: connector, options: options, log: log)
+        let drivers = CodexDrivers()
+        let link = CodexLink(paths: paths, connector: connector, options: options, log: log, drivers: drivers)
+        let app = appLink(paths: paths, env: env, options: options, log: log, drivers: drivers)
+        if let app {
+            link.app = app
+            app.onStatusChange = { [weak link] in link?.writeStatus(now: Date(), force: true) }
+            app.start()
+        }
         // Stopped, it says so in codex-link.json first; one that doesn't stop in time just exits.
         let stopping: @Sendable () -> Void = {
+            app?.stop()
             link.stop()
             DispatchQueue.global().asyncAfter(deadline: .now() + 5) { exit(0) }
         }
@@ -50,6 +58,19 @@ public enum CodexLinkService {
         #endif
         withExtendedLifetime((lock, stops)) {}
         exit(0)
+    }
+
+    /// The connection to the Codex app, where Context Guard has one (the Mac; Windows: P3).
+    static func appLink(paths: Paths, env: [String: String], options: CodexLink.Options, log: CodexLinkLog,
+                        drivers: CodexDrivers) -> CodexAppLink? {
+        #if os(Windows)
+        return nil
+        #else
+        let home = CodexHome.path(env)
+        return CodexAppLink(paths: paths, connector: CodexAppSocketConnector(codexHome: home),
+                            launcher: CodexAppServerLauncher(codexHome: home, folder: CodexLink.defaultJudgeFolder),
+                            codexHome: home, drivers: drivers, options: CodexAppLink.Options(onlyCwd: options.onlyCwd), log: log)
+        #endif
     }
 
     // MARK: The background link's arguments

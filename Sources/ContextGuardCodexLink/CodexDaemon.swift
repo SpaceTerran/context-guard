@@ -45,17 +45,9 @@ public struct CodexSocketConnector: CodexConnecting {
 
     public static func defaultSocketPath(_ env: [String: String] = ProcessInfo.processInfo.environment) -> String {
         #if os(Windows)
-        // `%USERPROFILE%\.codex` unless CODEX_HOME says otherwise; Windows separators throughout.
-        let home = env["CODEX_HOME"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory() + "\\.codex"
-        return PathRules.native(home) + "\\app-server-control\\app-server-control.sock"
+        return CodexHome.path(env) + "\\app-server-control\\app-server-control.sock"
         #else
-        let home: String
-        if let codexHome = env["CODEX_HOME"], !codexHome.isEmpty {
-            home = (codexHome as NSString).expandingTildeInPath
-        } else {
-            home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
-        }
-        return (home as NSString).appendingPathComponent("app-server-control/app-server-control.sock")
+        return (CodexHome.path(env) as NSString).appendingPathComponent("app-server-control/app-server-control.sock")
         #endif
     }
 
@@ -99,23 +91,45 @@ public struct CodexSocketConnector: CodexConnecting {
     }
 }
 
-/// JSON-RPC over the WebSocket, the way the app server speaks it (no `"jsonrpc"` field).
+/// What an app server's JSON-RPC messages travel over: the WebSocket of the shared app server's
+/// control socket, or the standard input and output of one Context Guard runs itself.
+public protocol RPCChannel: AnyObject, Sendable {
+    /// The next message's text; nil at the end. One thread reads.
+    func receive() throws -> String?
+    /// Any thread may send.
+    func send(text: String) throws
+    /// Ends the conversation: a `receive` in progress sees the end.
+    func end()
+    /// Lets go of what's left, once nothing reads any more.
+    func release()
+}
+
+extension WebSocketClient: RPCChannel {
+    public func end() { close() }
+    public func release() { stream.close() }
+}
+
+/// JSON-RPC the way the app server speaks it (no `"jsonrpc"` field).
 public final class RPCConnection: CodexDaemon, @unchecked Sendable {
     private final class Pending {
         let done = DispatchSemaphore(value: 0)
         var result: Result<JSONValue, CodexLinkError>?
     }
 
-    private let socket: WebSocketClient
+    private let channel: RPCChannel
     private let onEvent: @Sendable (CodexEvent) -> Void
     private let lock = NSLock()
     private var nextId = 1
     private var pending: [Int: Pending] = [:]
     private var closedReason: String?
 
-    public init(socket: WebSocketClient, onEvent: @escaping @Sendable (CodexEvent) -> Void) {
-        self.socket = socket
+    public init(channel: RPCChannel, onEvent: @escaping @Sendable (CodexEvent) -> Void) {
+        self.channel = channel
         self.onEvent = onEvent
+    }
+
+    public convenience init(socket: WebSocketClient, onEvent: @escaping @Sendable (CodexEvent) -> Void) {
+        self.init(channel: socket, onEvent: onEvent)
     }
 
     public func start() {
@@ -127,7 +141,7 @@ public final class RPCConnection: CodexDaemon, @unchecked Sendable {
     private func readLoop() {
         var reason = "the app server closed the connection"
         do {
-            while let text = try socket.receive() {
+            while let text = try channel.receive() {
                 // Something unreadable is skipped rather than ending the connection.
                 guard let message = try? JSONValue.parse(text) else { continue }
                 handle(message)
@@ -136,7 +150,7 @@ public final class RPCConnection: CodexDaemon, @unchecked Sendable {
             reason = (error as? CodexLinkError)?.description ?? "\(error)"
         }
         finish(reason)
-        socket.stream.close()
+        channel.release()
     }
 
     private func handle(_ message: JSONValue) {
@@ -188,7 +202,7 @@ public final class RPCConnection: CodexDaemon, @unchecked Sendable {
 
         let message: JSONValue = ["id": .number(Double(id)), "method": .string(method), "params": params]
         do {
-            try socket.send(text: message.text)
+            try channel.send(text: message.text)
         } catch {
             lock.lock()
             pending.removeValue(forKey: id)
@@ -214,13 +228,13 @@ public final class RPCConnection: CodexDaemon, @unchecked Sendable {
         var message: [String: JSONValue] = ["method": .string(method)]
         if let params { message["params"] = params }
         do {
-            try socket.send(text: JSONValue.object(message).text)
+            try channel.send(text: JSONValue.object(message).text)
         } catch {
             throw CodexLinkError.closed((error as? CodexLinkError)?.description ?? "\(error)")
         }
     }
 
     public func close() {
-        socket.close()
+        channel.end()
     }
 }

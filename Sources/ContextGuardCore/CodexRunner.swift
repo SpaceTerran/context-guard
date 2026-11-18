@@ -1,6 +1,7 @@
 import Foundation
 
-/// A Codex thread as `context-guard codex` sees it in the app server, for one tick.
+/// A Codex thread as `context-guard codex` sees it, for one tick: in the Codex app server (a
+/// terminal's), or in the Codex app.
 public struct CodexThreadLook: Equatable, Sendable {
     public var threadId: String
     /// Its rollout file.
@@ -22,10 +23,15 @@ public struct CodexThreadLook: Equatable, Sendable {
     public var postTurnCompactPercent: Int?
     /// The link can send into a running turn (`turn/steer`). False on a Codex without it.
     public var canSteer: Bool
+    /// Where it's open. Only a loaded look (not `notLoaded`) says.
+    public var surface: CodexSurface
+    /// It has ended for good, and why (`archived`, `deleted`): the app said so.
+    public var endReason: String?
 
     public init(threadId: String, path: String? = nil, cwd: String? = nil, name: String? = nil, status: String,
                 flags: [String] = [], ephemeral: Bool = false, attached: Bool? = nil, autoCompactAt: Int? = nil,
-                postTurnCompactPercent: Int? = nil, canSteer: Bool = true) {
+                postTurnCompactPercent: Int? = nil, canSteer: Bool = true, surface: CodexSurface = .terminal,
+                endReason: String? = nil) {
         self.threadId = threadId
         self.path = path
         self.cwd = cwd
@@ -37,6 +43,8 @@ public struct CodexThreadLook: Equatable, Sendable {
         self.autoCompactAt = autoCompactAt
         self.postTurnCompactPercent = postTurnCompactPercent
         self.canSteer = canSteer
+        self.surface = surface
+        self.endReason = endReason
     }
 
     /// Between turns: a prompt starts a new turn, and the session can be compacted.
@@ -120,8 +128,10 @@ public struct CodexRunner: Sendable {
             // The app server's settings for it; one it doesn't list keeps the last ones seen.
             c.autoCompactAt = t.autoCompactAt
             c.postTurnCompactPercent = t.postTurnCompactPercent
+            c.surface = t.surface
         }
         noteLoaded(&s, &c, loaded: t.status != "notLoaded", now: now)
+        if let why = t.endReason { noteEnded(&s, why, now: now) }
         if let cwd = t.cwd, !cwd.isEmpty { s.cwd = cwd }
         if let name = t.name, !name.isEmpty { s.title = name }
         if let p = t.path, p != s.transcriptPath {
@@ -129,9 +139,10 @@ public struct CodexRunner: Sendable {
             s.cursor = nil
             c.terminal = nil
         }
-        if c.terminal == nil || c.terminalRule != CodexMeta.terminalRule, let p = s.transcriptPath,
+        if c.terminal == nil || c.userChat == nil || c.terminalRule != CodexMeta.terminalRule, let p = s.transcriptPath,
            let meta = CodexRollout.meta(path: p) {
             c.terminal = meta.isTerminalSession
+            c.userChat = meta.isUserChat
             c.terminalRule = CodexMeta.terminalRule
             c.originator = meta.originator
             if s.cwd == nil { s.cwd = meta.cwd }
@@ -141,7 +152,7 @@ public struct CodexRunner: Sendable {
         if let p = s.transcriptPath {
             observe(&s, rollout: p, config: config, now: now)
         }
-        s.guarded = s.codex?.terminal == true && s.codex?.window != nil
+        s.guarded = s.codex?.isGuardable == true
         let resolved = config.resolved(for: s)
         let watched = !Mute.isMuted(s, paths)
 
@@ -261,6 +272,16 @@ public struct CodexRunner: Sendable {
             s.endedAt = now
             s.endReason = "closed"
         }
+    }
+
+    /// Ended for good: archived or deleted in the app. Your next prompt in it opens it again, as a
+    /// resumed session does (`noteLoaded`).
+    func noteEnded(_ s: inout SessionState, _ why: String, now: Date) {
+        if !s.ended {
+            s.ended = true
+            s.endedAt = now
+        }
+        s.endReason = why
     }
 
     /// Fold in what the rollout added since the last read.
