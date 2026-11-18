@@ -18,6 +18,7 @@ final class CursorAppStoreTests: XCTestCase {
         db.run("INSERT INTO cursorDiskKV VALUES (?, ?)", "composerData:" + Self.chat, json([
             "_v": 16, "composerId": Self.chat, "name": "Fix the parser", "status": "completed",
             "contextTokensUsed": 115_251, "contextTokenLimit": 256_000, "contextUsagePercent": 45.02,
+            "promptTokenBreakdown": breakdown(115_251, of: 256_000),
             "modelConfig": ["modelName": "grok-4.7", "maxMode": false], "subagentInfo": NSNull(),
             "fullConversationHeadersOnly": (0..<200).map { ["bubbleId": "b\($0)", "type": 1] },
         ]))
@@ -55,7 +56,7 @@ final class CursorAppStoreTests: XCTestCase {
         let dir = TempDir()
         let db = Self.makeStore(dir)
         db.run("INSERT INTO cursorDiskKV VALUES (?, ?)", "composerData:" + Self.chat, json([
-            "name": "Fix the parser", "contextTokensUsed": 130_000, "contextTokenLimit": 256_000,
+            "name": "Fix the parser", "promptTokenBreakdown": breakdown(130_000, of: 256_000),
         ]))
         XCTAssertEqual(CursorAppStore(file: db.url).chat(Self.chat)?.tokens, 130_000)
     }
@@ -79,6 +80,47 @@ final class CursorAppStoreTests: XCTestCase {
         let store = CursorAppStore(file: Self.makeStore(dir).url)
         XCTAssertEqual(store.chat(Self.subagent), CursorStoredChat(tokens: 71_786, window: 200_000, name: "Audit history", helper: true))
         XCTAssertEqual(store.chat(Self.background)?.helper, true)
+        XCTAssertEqual(store.chat(Self.fresh), CursorStoredChat())
+    }
+
+    /// Cursor has kept a chat's size two ways: `contextTokensUsed` of `contextTokenLimit`, and
+    /// `promptTokenBreakdown`. Chats from one build have both, from another only the breakdown.
+    func testReadsAChatsSizeWhereverCursorKeptIt() {
+        let dir = TempDir()
+        let db = Self.makeStore(dir)
+        let store = CursorAppStore(file: db.url)
+        func put(_ id: String, _ fields: [String: Any]) {
+            db.run("INSERT INTO cursorDiskKV VALUES (?, ?)", "composerData:" + id,
+                   json(["composerId": id, "name": "Sized"].merging(fields) { $1 }))
+        }
+        func size(_ id: String) -> [Int?] { [store.chat(id)?.tokens, store.chat(id)?.window] }
+
+        put("a0000000-0000-0000-0000-000000000001", ["contextTokensUsed": 71_786, "contextTokenLimit": 200_000])
+        XCTAssertEqual(size("a0000000-0000-0000-0000-000000000001"), [71_786, 200_000], "the older fields alone")
+
+        put("a0000000-0000-0000-0000-000000000002", [
+            "promptTokenBreakdown": breakdown(111_603, of: 256_000), "contextUsagePercent": 43.6,
+        ])
+        XCTAssertEqual(store.chat("a0000000-0000-0000-0000-000000000002"),
+                       CursorStoredChat(tokens: 111_603, window: 256_000, name: "Sized"), "the breakdown alone")
+
+        put("a0000000-0000-0000-0000-000000000003", [
+            "contextTokensUsed": 90_000, "contextTokenLimit": 200_000, "promptTokenBreakdown": breakdown(52_758, of: 256_000),
+        ])
+        XCTAssertEqual(size("a0000000-0000-0000-0000-000000000003"), [52_758, 256_000], "both, and they differ: the breakdown")
+
+        put("a0000000-0000-0000-0000-000000000004", [
+            "contextTokensUsed": 40_000, "contextTokenLimit": 200_000, "promptTokenBreakdown": breakdown(0, of: 0),
+        ])
+        XCTAssertEqual(size("a0000000-0000-0000-0000-000000000004"), [40_000, 200_000],
+                       "an empty breakdown: the older fields, tokens and window together")
+
+        put("a0000000-0000-0000-0000-000000000005", ["promptTokenBreakdown": breakdown(0, of: 0)])
+        XCTAssertEqual(size("a0000000-0000-0000-0000-000000000005"), [0, nil], "a subagent's empty breakdown")
+
+        put("a0000000-0000-0000-0000-000000000006", ["promptTokenBreakdown": NSNull(), "contextUsagePercent": 12.5])
+        XCTAssertEqual(store.chat("a0000000-0000-0000-0000-000000000006"), CursorStoredChat(name: "Sized"),
+                       "neither: a share alone gives no tokens or window")
         XCTAssertEqual(store.chat(Self.fresh), CursorStoredChat())
     }
 
@@ -127,4 +169,10 @@ final class CursorAppStoreTests: XCTestCase {
         XCTAssertEqual(CursorAppStore.defaultFile(home: URL(fileURLWithPath: "/Users/me")).path,
                        "/Users/me/Library/Application Support/Cursor/User/globalStorage/state.vscdb")
     }
+}
+
+/// `promptTokenBreakdown` as Cursor writes it.
+private func breakdown(_ used: Int, of max: Int) -> [String: Any] {
+    ["totalUsedTokens": used, "maxTokens": max,
+     "categories": used == 0 ? [] : [["id": "conversation", "label": "Conversation", "estimatedTokens": used]]]
 }
