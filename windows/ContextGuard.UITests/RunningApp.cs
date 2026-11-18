@@ -150,7 +150,7 @@ sealed partial class RunningApp : IDisposable
     public static bool IsVisible(AutomationElement window) => Native.IsWindowVisible(window.Properties.NativeWindowHandle.Value);
 
     public AutomationElement Find(AutomationElement within, string automationId) =>
-        Until(() => within.FindFirstDescendant(cf => cf.ByAutomationId(automationId)), automationId, 5);
+        Explained(() => Until(() => within.FindFirstDescendant(cf => cf.ByAutomationId(automationId)), automationId, 5));
 
     public static bool Has(AutomationElement within, string automationId) =>
         within.FindFirstDescendant(cf => cf.ByAutomationId(automationId)) is not null;
@@ -188,7 +188,7 @@ sealed partial class RunningApp : IDisposable
 
     /// <summary>A popup by its window's name (what a screen reader calls it), once it shows.</summary>
     public AutomationElement Popup(string name) =>
-        Until(() => Popups().FirstOrDefault(w => w.Name == name), $"the popup '{name}'");
+        Explained(() => Until(() => Popups().FirstOrDefault(w => w.Name == name), $"the popup '{name}'"));
 
     /// <summary>What a board's popup is called: a question's heading and session, a notice's title and session.</summary>
     public static string PopupName(JsonElement popup) =>
@@ -243,7 +243,63 @@ sealed partial class RunningApp : IDisposable
 
     /// <summary>The first intent that does <paramref name="what"/>, once the app has sent it.</summary>
     public JsonElement Sent(string what) =>
-        Until(() => Intents().Where(i => i.GetProperty("do").GetString() == what).Select(i => (JsonElement?)i).FirstOrDefault(), $"a '{what}' intent");
+        Explained(() => Until(() => Intents().Where(i => i.GetProperty("do").GetString() == what).Select(i => (JsonElement?)i).FirstOrDefault(), $"a '{what}' intent"));
+
+    // Why a wait ran out
+
+    /// <summary>Runs a wait; if it runs out, its message says what the app and the stand-in were doing.</summary>
+    public T Explained<T>(Func<T> wait)
+    {
+        try
+        {
+            return wait();
+        }
+        catch (TimeoutException e)
+        {
+            throw new TimeoutException($"{e.Message}\n{Explain()}", e);
+        }
+    }
+
+    /// <inheritdoc cref="Explained{T}(Func{T})"/>
+    public void Explained(Action wait) => Explained(() => { wait(); return true; });
+
+    /// <summary>
+    /// The time, the intents the stand-in got, what it read and wrote and what stopped it (StandIn.ps1), and what
+    /// this copy of the app logged (its program's exits and errors, and what it couldn't send).
+    /// </summary>
+    public string Explain()
+    {
+        static string Read(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return "";
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                return reader.ReadToEnd();
+            }
+            catch (IOException e)
+            {
+                return $"(couldn't read it: {e.Message})";
+            }
+        }
+        string intents;
+        try
+        {
+            intents = string.Join(", ", Intents().Select(i => i.GetProperty("do").GetString()));
+        }
+        catch (JsonException e)
+        {
+            intents = $"(a line being written: {e.Message})";
+        }
+        var app = Read(AppLog).Split('\n').Where(line => line.Contains($"[{Process.Id}]", StringComparison.Ordinal)).Select(line => line.TrimEnd('\r'));
+        return $"Now {DateTime.Now:HH:mm:ss.fff}. Intents: [{intents}]." +
+            $"\nThe stand-in:\n{Read(IntentLog + ".trace").TrimEnd()}" +
+            $"\nThe app's log:\n{string.Join('\n', app)}";
+    }
+
+    /// <summary>The app's log (its Log.cs): every copy's lines, each with its process id.</summary>
+    static string AppLog => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Context Guard", "app.log");
 
     // Quitting
 
