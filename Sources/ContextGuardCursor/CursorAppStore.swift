@@ -34,20 +34,30 @@ public struct CursorAppStore: Sendable {
     }
 
     /// The chat, or nil if the app has no such chat (or its store can't be read).
+    ///
+    /// Cursor keeps a chat's size in `promptTokenBreakdown` (`totalUsedTokens` of `maxTokens`) and, in
+    /// the builds that wrote it, also in `contextTokensUsed` of `contextTokenLimit`; newer chats have
+    /// only the breakdown. The breakdown wins. A size comes whole from one place, its tokens with its
+    /// own window, so an empty breakdown (0 of 0) leaves the older fields to say it.
     public func chat(_ id: String) -> CursorStoredChat? {
         guard Paths.isValidSessionID(id), let db = ReadOnlyDatabase(file) else { return nil }
         let sql = """
-            SELECT json_extract(v, '$.contextTokensUsed'), json_extract(v, '$.contextTokenLimit'),
+            SELECT json_extract(v, '$.promptTokenBreakdown.totalUsedTokens'),
+                   json_extract(v, '$.promptTokenBreakdown.maxTokens'),
+                   json_extract(v, '$.contextTokensUsed'), json_extract(v, '$.contextTokenLimit'),
                    json_extract(v, '$.name'), json_type(v, '$.subagentInfo'),
                    json_type(v, '$.createdFromBackgroundAgent')
             FROM (SELECT CAST(value AS TEXT) AS v FROM cursorDiskKV WHERE key = ?1)
             """
-        guard let row = db.row(sql, ["composerData:" + id]), row.count == 5 else { return nil }
-        let name = row[2].text.flatMap { $0.isEmpty ? nil : $0 }
+        guard let row = db.row(sql, ["composerData:" + id]), row.count == 7 else { return nil }
+        let sizes = [(row[0], row[1]), (row[2], row[3])].map { tokens, window in
+            (tokens: tokens.int.flatMap { $0 >= 0 ? $0 : nil }, window: window.int.flatMap { $0 > 0 ? $0 : nil })
+        }
+        let size = sizes.first { $0.window != nil } ?? sizes.first { $0.tokens != nil }
+        let name = row[4].text.flatMap { $0.isEmpty ? nil : $0 }
         // Background agents' chats are named "bc-…" and carry where they came from.
-        let helper = row[3].text == "object" || row[4].text == "object" || id.hasPrefix("bc-")
-        return CursorStoredChat(tokens: row[0].int.flatMap { $0 >= 0 ? $0 : nil },
-                                window: row[1].int.flatMap { $0 > 0 ? $0 : nil }, name: name, helper: helper)
+        let helper = row[5].text == "object" || row[6].text == "object" || id.hasPrefix("bc-")
+        return CursorStoredChat(tokens: size?.tokens, window: size?.window, name: name, helper: helper)
     }
 
     /// Whether the app still lists the chat. Archiving one sets `isArchived` on its row of the

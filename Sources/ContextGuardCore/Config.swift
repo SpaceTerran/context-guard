@@ -23,7 +23,7 @@ public struct Config: Codable, Equatable, Sendable {
     /// same limits as Codex: Wait keeps a tenth of the window as room, asking comes 5 points before.
     public static let cursorLaterPercentRange = 15...84
     public static let cursorAskPercentRange = 10...79
-    /// Most Cursor chats' window (`contextTokenLimit`): the example Settings shows.
+    /// Most Cursor chats' window (`promptTokenBreakdown.maxTokens`): the example Settings shows.
     public static let typicalCursorWindow = 200_000
 
     public var schemaVersion: Int = Config.schema

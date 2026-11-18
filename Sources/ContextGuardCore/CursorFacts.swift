@@ -33,7 +33,7 @@ public struct CursorTerminal: Codable, Equatable, Sendable {
 public struct CursorFacts: Codable, Equatable, Sendable {
     /// The app or the CLI. nil in a file that doesn't say: the app.
     public var surface: CursorSurface?
-    /// The chat's context window, as Cursor counts it (`contextTokenLimit`).
+    /// The chat's context window, as Cursor counts it (`promptTokenBreakdown.maxTokens`).
     public var window: Int?
     /// The model the chat last ran.
     public var model: String?
