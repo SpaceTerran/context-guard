@@ -63,6 +63,27 @@ final class FakeJudge: CursorJudging, @unchecked Sendable {
     }
 }
 
+/// Cursor's own list of chats, as a test sets it.
+final class FakeChats: CursorChatChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private var said: CursorChatStanding? = .open
+    private var count = 0
+
+    /// What every look-up says from now on (nil: Cursor's store can't be read).
+    var now: CursorChatStanding? {
+        get { lock.lock(); defer { lock.unlock() }; return said }
+        set { lock.lock(); said = newValue; lock.unlock() }
+    }
+
+    var asked: Int { lock.lock(); defer { lock.unlock() }; return count }
+
+    func standing(_ chat: CursorChatRef) -> CursorChatStanding? {
+        lock.lock(); defer { lock.unlock() }
+        count += 1
+        return said
+    }
+}
+
 /// A Cursor chat through `CursorRunner`, against real files: its transcript as Cursor writes it and
 /// the hook calls as Cursor makes them.
 final class CursorRunnerTests: XCTestCase {
@@ -71,6 +92,7 @@ final class CursorRunnerTests: XCTestCase {
     let probe = FakeProbe()
     let typing = FakeTyping()
     let judge = FakeJudge()
+    let chats = FakeChats()
     let id = "0b6f3d2e-5a41-4c7e-9d0a-3f2e1c4b5a69"
     let appPid: Int32 = 4242
     let appStart = ProcessStart(seconds: 1_700_000_000, microseconds: 0)
@@ -81,6 +103,7 @@ final class CursorRunnerTests: XCTestCase {
     var terminal: CursorTerminal?
     var canType: Bool?
     var turnNumber = 0
+    var standingEvery: TimeInterval = 10
 
     override func setUp() {
         paths = Paths(root: dir.file("home"), claudeDir: dir.file("claude"))
@@ -92,7 +115,9 @@ final class CursorRunnerTests: XCTestCase {
 
     var runner: CursorRunner {
         let clock = self.clock
-        return CursorRunner(paths: paths, probe: probe, clock: { clock.now })
+        var runner = CursorRunner(paths: paths, probe: probe, clock: { clock.now })
+        runner.standingEvery = standingEvery
+        return runner
     }
 
     var state: SessionState? { SessionState.load(id, paths) }
@@ -146,7 +171,8 @@ final class CursorRunnerTests: XCTestCase {
 
     func hold(_ seconds: TimeInterval = 1.5) -> String? {
         guard let token = state?.waiterToken else { return nil }
-        return runner.hold(sessionId: id, token: token, maxDuration: seconds, poll: 0.05, typing: typing, judge: judge)
+        return runner.hold(sessionId: id, token: token, maxDuration: seconds, poll: 0.05, typing: typing, judge: judge,
+                           chats: chats)
     }
 
     /// A chat at 130k of 200k (65%) that you said Yes to, with the save message sent between turns and
@@ -431,9 +457,10 @@ final class CursorRunnerTests: XCTestCase {
         turn("Add a settings screen", reply: "Added it.", tokens: 100_000)
         let token = try XCTUnwrap(state?.waiterToken)
         let done = expectation(description: "the hold ends")
-        let runner = self.runner, id = self.id, typing = self.typing, judge = self.judge
+        let runner = self.runner, id = self.id, typing = self.typing, judge = self.judge, chats = self.chats
         DispatchQueue.global().async {
-            XCTAssertNil(runner.hold(sessionId: id, token: token, maxDuration: 30, poll: 0.05, typing: typing, judge: judge))
+            XCTAssertNil(runner.hold(sessionId: id, token: token, maxDuration: 30, poll: 0.05, typing: typing, judge: judge,
+                                     chats: chats))
             done.fulfill()
         }
         Thread.sleep(forTimeInterval: 0.2)
@@ -458,6 +485,72 @@ final class CursorRunnerTests: XCTestCase {
         XCTAssertNil(state?.waiterToken)
         turn("Back again", reply: "Hi", tokens: 101_000)
         XCTAssertEqual(state?.ended, false, "opened again")
+    }
+
+    /// Archiving a chat in the app runs no hook (Cursor 3.30): the hold finds it in Cursor's store.
+    func testArchivingTheChatEndsIt() throws {
+        try configure()
+        turn("Add a settings screen", reply: "Added it.", tokens: 100_000)
+        XCTAssertEqual(SessionCatalog.load(paths, registry: FakeRegistry(), probe: probe).first?.isLive, true)
+        chats.now = .archived
+        let started = Date()
+        XCTAssertNil(hold(5))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2, "its first look-up finds it")
+        XCTAssertEqual(state?.ended, true)
+        XCTAssertEqual(state?.endReason, "archived")
+        XCTAssertNil(state?.waiterToken)
+        XCTAssertEqual(SessionCatalog.load(paths, registry: FakeRegistry(), probe: probe).first?.isLive, false,
+                       "it leaves the list")
+
+        chats.now = .open
+        turn("Back again", reply: "Hi", tokens: 101_000)
+        XCTAssertEqual(state?.ended, false, "your next prompt in it opens it again")
+        XCTAssertNil(state?.endReason)
+    }
+
+    func testDeletingTheChatWhileItWaitsEndsIt() throws {
+        try configure()
+        turn("Add a settings screen", reply: "Added it.", tokens: 100_000)
+        standingEvery = 0.1
+        let token = try XCTUnwrap(state?.waiterToken)
+        let done = expectation(description: "the hold ends")
+        let runner = self.runner, id = self.id, typing = self.typing, judge = self.judge, chats = self.chats
+        DispatchQueue.global().async {
+            XCTAssertNil(runner.hold(sessionId: id, token: token, maxDuration: 30, poll: 0.05, typing: typing, judge: judge,
+                                     chats: chats))
+            done.fulfill()
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(state?.waiterToken, token, "still waiting while the chat is open")
+        chats.now = .deleted
+        wait(for: [done], timeout: 5)
+        XCTAssertEqual(state?.ended, true)
+        XCTAssertEqual(state?.endReason, "deleted")
+    }
+
+    func testTheHoldLooksTheChatUpNowAndThen() throws {
+        try configure()
+        turn("Add a settings screen", reply: "Added it.", tokens: 100_000)
+        XCTAssertNil(hold(0.6))
+        XCTAssertEqual(chats.asked, 1, "once, then every standingEvery (10 s), not every poll")
+    }
+
+    func testAStoreItCantReadKeepsTheChat() throws {
+        try configure()
+        turn("Add a settings screen", reply: "Added it.", tokens: 100_000)
+        chats.now = nil
+        XCTAssertNil(hold(0.3))
+        XCTAssertEqual(state?.ended, false)
+    }
+
+    func testACLIChatIsNeverLookedUp() throws {
+        try configure()
+        surface = .cli
+        turn("Add a settings screen", reply: "Added it.", tokens: 100_000)
+        chats.now = .archived
+        XCTAssertNil(hold(0.3))
+        XCTAssertEqual(chats.asked, 0, "it ends when its cursor-agent does")
+        XCTAssertEqual(state?.ended, false)
     }
 
     // MARK: - A turn's growth

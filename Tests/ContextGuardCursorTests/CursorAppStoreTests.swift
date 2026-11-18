@@ -1,3 +1,4 @@
+import ContextGuardCore
 import ContextGuardTestSupport
 @testable import ContextGuardCursor
 import XCTest
@@ -91,6 +92,35 @@ final class CursorAppStoreTests: XCTestCase {
         // Not a database.
         try! Data("not sqlite".utf8).write(to: dir.file("junk.vscdb"))
         XCTAssertNil(CursorAppStore(file: dir.file("junk.vscdb")).chat(Self.chat))
+    }
+
+    func testAnArchivedOrDeletedChatIsNoLongerOpen() {
+        let dir = TempDir()
+        let db = Self.makeStore(dir)
+        let store = CursorAppStore(file: db.url)
+        XCTAssertEqual(store.standing(Self.chat), .open, "a store without composerHeaders (before Cursor 3.30)")
+
+        // Cursor 3.30's table, as it stands on disk.
+        db.exec("""
+            CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, workspaceId TEXT, createdAt INTEGER, \
+            lastUpdatedAt INTEGER, isArchived INTEGER, isSubagent INTEGER, recency INTEGER, checkpointAt INTEGER, \
+            value TEXT, subagentTypeName TEXT)
+            """)
+        db.run("INSERT INTO composerHeaders (composerId, isArchived) VALUES (?, 0)", Self.chat)
+        XCTAssertEqual(store.standing(Self.chat), .open)
+        XCTAssertEqual(store.standing(Self.fresh), .open, "no header row yet")
+
+        db.exec("UPDATE composerHeaders SET isArchived = 1")
+        XCTAssertEqual(store.standing(Self.chat), .archived)
+        XCTAssertEqual(store.standing(CursorChatRef(id: Self.chat, name: nil, surface: .app, pid: 1)), .archived)
+        XCTAssertNil(store.standing(CursorChatRef(id: Self.chat, name: nil, surface: .cli, pid: 1)),
+                     "a CLI chat ends with its cursor-agent")
+
+        XCTAssertEqual(store.standing("9a9a9a9a-0000-0000-0000-000000000000"), .deleted)
+        XCTAssertNil(store.standing("x' OR 1=1 --"))
+        XCTAssertNil(CursorAppStore(file: dir.file("missing.vscdb")).standing(Self.chat), "can't tell")
+        try! Data("not sqlite".utf8).write(to: dir.file("junk.vscdb"))
+        XCTAssertNil(CursorAppStore(file: dir.file("junk.vscdb")).standing(Self.chat), "can't tell")
     }
 
     func testDefaultFile() {

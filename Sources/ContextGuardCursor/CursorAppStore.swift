@@ -49,4 +49,25 @@ public struct CursorAppStore: Sendable {
         return CursorStoredChat(tokens: row[0].int.flatMap { $0 >= 0 ? $0 : nil },
                                 window: row[1].int.flatMap { $0 > 0 ? $0 : nil }, name: name, helper: helper)
     }
+
+    /// Whether the app still lists the chat. Archiving one sets `isArchived` on its row of the
+    /// `composerHeaders` table (Cursor 3.30); deleting one takes its `composerData` away. nil when the
+    /// store can't be read. A chat is only held once `chat(_:)` found it, so a store laid out some
+    /// other way never reads as every chat deleted.
+    public func standing(_ id: String) -> CursorChatStanding? {
+        guard Paths.isValidSessionID(id), let db = ReadOnlyDatabase(file),
+              let kept = db.row("SELECT count(*) FROM cursorDiskKV WHERE key = ?1", ["composerData:" + id])?.first?.int
+        else { return nil }
+        guard kept > 0 else { return .deleted }
+        // No row, or no such table (a Cursor before 3.30): nothing says it's archived.
+        let archived = db.row("SELECT isArchived FROM composerHeaders WHERE composerId = ?1", [id])?.first?.int ?? 0
+        return archived != 0 ? .archived : .open
+    }
+}
+
+extension CursorAppStore: CursorChatChecking {
+    /// App chats only: a CLI chat ends when its `cursor-agent` does.
+    public func standing(_ chat: CursorChatRef) -> CursorChatStanding? {
+        chat.surface == .app ? standing(chat.id) : nil
+    }
 }

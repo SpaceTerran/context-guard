@@ -189,7 +189,8 @@ struct CLI {
         let maxDuration = env["CONTEXT_GUARD_WAITER_MAX"].flatMap(TimeInterval.init) ?? CursorRunner.holdFor
         let poll = env["CONTEXT_GUARD_WAITER_POLL"].flatMap(TimeInterval.init) ?? 2
         let text = runner.hold(sessionId: input.conversationId, token: token, maxDuration: maxDuration, poll: poll,
-                               typing: CursorTypist(environment: env), judge: CursorAutoJudge(environment: env))
+                               typing: CursorTypist(environment: env), judge: CursorAutoJudge(environment: env),
+                               chats: CursorAppStore())
         emit(text.map { ["followup_message": $0] } ?? [:])
     }
     #endif
