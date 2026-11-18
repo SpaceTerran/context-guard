@@ -11,6 +11,14 @@ param(
     [switch]$Chime
 )
 $ErrorActionPreference = 'Stop'
+# What it read and wrote, and what stopped it, next to the log: a test whose wait runs out says (RunningApp.Explain).
+function Note([string]$Text) {
+    [System.IO.File]::AppendAllText($Log + '.trace', [DateTime]::Now.ToString('HH:mm:ss.fff') + ' ' + $Text + "`n")
+}
+trap {
+    Note ("stopped: " + $_.Exception.GetType().FullName + ': ' + $_.Exception.Message + ' ' + $_.InvocationInfo.PositionMessage)
+    break
+}
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $out = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)
 $out.NewLine = "`n"
@@ -23,8 +31,10 @@ $in = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), $utf8)
 function Write-Board([string]$Path) {
     $line = (Get-Content -LiteralPath $Path -Encoding UTF8 | ForEach-Object { $_.Trim() }) -join ''
     $out.WriteLine($line)
+    Note ('wrote board ' + [System.IO.Path]::GetFileNameWithoutExtension($Path))
 }
 
+Note "started ($PID)"
 Write-Board $Board
 if ($Chime) { $out.WriteLine('{"v":1,"type":"chime"}') }
 
@@ -33,10 +43,13 @@ $queue = @($Next -split ',' | Where-Object { $_ -ne '' })
 $turn = 0
 while ($null -ne ($intent = $in.ReadLine())) {
     [System.IO.File]::AppendAllText($Log, $intent + "`n", $utf8)
+    Note ('read ' + $intent)
     $id = ($intent | ConvertFrom-Json).id
     $out.WriteLine('{"v":1,"type":"result","id":"' + $id + '"}')
+    Note ('wrote result ' + $id)
     if ($turn -lt $queue.Count) {
         Write-Board (Join-Path $folder ($queue[$turn] + '.json'))
         $turn++
     }
 }
+Note 'input closed: done'

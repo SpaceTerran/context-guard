@@ -65,7 +65,7 @@ public sealed class PopupTests
         {
             var answered = app.Popup(RunningApp.PopupName(popup));
             var progress = popup.GetProperty("question").GetProperty("progress");
-            RunningApp.Until(() => RunningApp.Has(answered, "Progress"), "the progress line");
+            app.Explained(() => RunningApp.Until(() => RunningApp.Has(answered, "Progress"), "the progress line"));
             Assert.Equal(Text(progress, "text"), app.Find(answered, "Progress").Name);
             Assert.False(RunningApp.Has(answered, "Compact"));
             Assert.False(RunningApp.Has(answered, "Dismiss"));
