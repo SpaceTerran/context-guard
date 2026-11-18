@@ -22,6 +22,10 @@ public enum CodexLinkError: Error, Equatable, CustomStringConvertible {
     case timeout(String)
     /// The app server answered with an error: the request wasn't carried out.
     case rpc(code: Int, message: String)
+    /// Another user's process answered at this socket.
+    case notYours(String)
+    /// Something it needs isn't there (why).
+    case unavailable(String)
 
     public var description: String {
         switch self {
@@ -35,6 +39,8 @@ public enum CodexLinkError: Error, Equatable, CustomStringConvertible {
         case .closed(let why): return why
         case .timeout(let method): return "\(method) got no answer"
         case .rpc(let code, let message): return "\(message) (\(code))"
+        case .notYours(let p): return "another user's program answered at \(p)"
+        case .unavailable(let why): return why
         }
     }
 
@@ -137,6 +143,18 @@ public final class SocketStream: @unchecked Sendable {
         setsockopt(native, SOL_SOCKET, SO_SNDTIMEO, &w, socklen_t(MemoryLayout<timeval>.size))
         #endif
     }
+
+    #if !os(Windows)
+    /// Who is at the other end: their user, and their process when the system says.
+    public func peer() throws -> (uid: uid_t, pid: pid_t?) {
+        var uid = uid_t(), gid = gid_t()
+        guard getpeereid(native, &uid, &gid) == 0 else { throw CodexLinkError.io(errno) }
+        var pid = pid_t()
+        var length = socklen_t(MemoryLayout<pid_t>.size)
+        let known = getsockopt(native, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) == 0 && pid > 0
+        return (uid, known ? pid : nil)
+    }
+    #endif
 
     /// Up to `max` bytes; empty at end of stream.
     public func read(max: Int = 64 << 10) throws -> Data {

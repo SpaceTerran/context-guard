@@ -519,6 +519,40 @@ final class CodexLinkTests: XCTestCase {
         XCTAssertEqual(daemon.calls("config/read").count, 2)
     }
 
+    // MARK: - The Codex app's chats
+
+    func testAChatOpenInTheAppAndInNoTerminalIsTheAppsToDrive() throws {
+        try configure()
+        log.append(CodexLine.turn("two", reply: "ok", tokens: 160_000))
+        link.drivers.setApp([id])
+        terminals.set([CodexTerminalProcess(pid: 4242, cwd: "/Users/demo/elsewhere", args: ["codex"])])
+        try pass()
+        XCTAssertNil(state, "the app's connection looks at it")
+        XCTAssertFalse(link.drivers.terminalHas(id))
+
+        // A terminal resumes it: it's the terminal's, though the app shows it too.
+        terminals.set([CodexTerminalProcess(pid: 4243, cwd: "/Users/demo/other", args: ["codex", "resume", id])])
+        try pass()
+        XCTAssertEqual(state?.codex?.attached, true)
+        XCTAssertTrue(link.drivers.terminalHas(id))
+    }
+
+    func testTheAppsChatsAreItsConnectionsToClose() throws {
+        try configure()
+        log.append(CodexLine.turn("one", reply: "ok", tokens: 30_000))
+        let clock = self.clock
+        _ = CodexRunner(paths: paths, clock: { clock.now }).tick(CodexThreadLook(
+            threadId: id, path: log.path, cwd: "/Users/demo/code", status: "idle", attached: true, surface: .app))
+        XCTAssertEqual(state?.codex?.surface, .app)
+        daemon.unload(id)
+        try pass()
+        XCTAssertEqual(state?.codex?.loaded, true, "not the app server's to close")
+        clock.advance(CodexRunner.closedAfter + 1)
+        try pass()
+        link.closeAbandoned()
+        XCTAssertEqual(state?.ended, false)
+    }
+
     func testLosingTheAppServerEndsThePass() {
         daemon.failing["thread/loaded/list"] = .closed("gone")
         XCTAssertThrowsError(try pass())

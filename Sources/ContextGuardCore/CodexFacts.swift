@@ -1,5 +1,13 @@
 import Foundation
 
+/// Where you drive a Codex session.
+public enum CodexSurface: String, Codable, Equatable, Sendable {
+    /// The Codex terminal app (`codex`), through the Codex app server.
+    case terminal
+    /// The Codex app (the ChatGPT desktop app), through its own router.
+    case app
+}
+
 /// What Context Guard knows about a Codex session, from its rollout file and the Codex app server.
 /// Claude Code sessions don't have it.
 public struct CodexFacts: Codable, Equatable, Sendable {
@@ -18,8 +26,15 @@ public struct CodexFacts: Codable, Equatable, Sendable {
     /// A session you drive in a terminal, in a format Context Guard reads (`CodexMeta`). nil until
     /// its rollout's first line has been read.
     public var terminal: Bool?
-    /// The `CodexMeta.terminalRule` that made `terminal`: one made by an older rule is made again.
+    /// A chat you started, in a format Context Guard reads (`CodexMeta.isUserChat`): the Codex app
+    /// guards any of these it has open, whichever client started it. nil until the rollout's first
+    /// line has been read.
+    public var userChat: Bool?
+    /// The `CodexMeta.terminalRule` that made `terminal` and `userChat`: ones made by an older rule
+    /// are made again.
     public var terminalRule: Int?
+    /// Where it was last seen open: a terminal, or the Codex app. nil: a terminal (older states).
+    public var surface: CodexSurface?
     /// Its turns as the rollout showed them, carried from one read to the next.
     public var turn: CodexTurn?
 
@@ -64,7 +79,9 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         model = try? c.decode(String.self, forKey: .model)
         originator = try? c.decode(String.self, forKey: .originator)
         terminal = try? c.decode(Bool.self, forKey: .terminal)
+        userChat = try? c.decode(Bool.self, forKey: .userChat)
         terminalRule = try? c.decode(Int.self, forKey: .terminalRule)
+        surface = try? c.decode(CodexSurface.self, forKey: .surface)
         turn = try? c.decode(CodexTurn.self, forKey: .turn)
         status = try? c.decode(String.self, forKey: .status)
         flags = try? c.decode([String].self, forKey: .flags)
@@ -73,6 +90,13 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         unloadedAt = try? c.decode(Date.self, forKey: .unloadedAt)
         attached = try? c.decode(Bool.self, forKey: .attached)
         steerRefused = try? c.decode(Date.self, forKey: .steerRefused)
+    }
+
+    /// It's guarded where it was last seen open: one you drive in a terminal by the terminal rules,
+    /// one open in the Codex app as any chat of yours.
+    public var isGuardable: Bool {
+        guard let window, window > 0 else { return false }
+        return surface == .app ? userChat == true : terminal == true
     }
 
     /// The lowest point where Codex compacts by itself, as far as is known. By default it compacts

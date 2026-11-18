@@ -14,6 +14,8 @@ final class CodexRunnerTests: XCTestCase {
     var flags: [String] = []
     var attached: Bool? = true
     var canSteer = true
+    var surface = CodexSurface.terminal
+    var endReason: String?
 
     override func setUp() {
         paths = Paths(root: dir.file("home"), claudeDir: dir.file("claude"))
@@ -28,7 +30,13 @@ final class CodexRunnerTests: XCTestCase {
 
     var thread: CodexThreadLook {
         CodexThreadLook(threadId: id, path: log.path, cwd: "/Users/demo/code", name: "Settings screen", status: status,
-                        flags: flags, attached: attached, canSteer: canSteer)
+                        flags: flags, attached: attached, canSteer: canSteer, surface: surface, endReason: endReason)
+    }
+
+    /// The session's rollout starts as a Codex app chat's does, or as another client's.
+    func startedBy(_ originator: String, source: Any = "vscode", threadSource: String = "user") {
+        log = Transcript(dir, name: "rollout-app-\(UUID().uuidString.prefix(8))-\(CodexLine.thread).jsonl")
+        log.append(CodexLine.meta(originator: originator, source: source, threadSource: threadSource))
     }
 
     var state: SessionState? { SessionState.load(id, paths) }
@@ -531,6 +539,109 @@ final class CodexRunnerTests: XCTestCase {
         tick()
         XCTAssertFalse(state?.ended ?? true)
         XCTAssertNil(state?.codex?.unloadedAt)
+    }
+
+    // MARK: - Codex app chats
+
+    func testAnAppChatIsGuardedWhileTheAppHasItOpen() throws {
+        try configure()
+        startedBy(CodexMeta.appOriginator)
+        surface = .app
+        log.append(CodexLine.turn("hi", reply: "hello", tokens: 160_000))
+        try settle()
+        tick()
+        let s = try XCTUnwrap(state)
+        XCTAssertEqual(s.codex?.surface, .app)
+        XCTAssertEqual(s.codex?.terminal, false, "not a terminal's")
+        XCTAssertEqual(s.codex?.userChat, true)
+        XCTAssertEqual(s.codex?.originator, CodexMeta.appOriginator)
+        XCTAssertTrue(s.guarded)
+        XCTAssertEqual(s.phase, .asking)
+        try answer(.yes)
+        guard case .deliver = tick() else { return XCTFail("the save message goes in as in a terminal") }
+    }
+
+    func testATerminalsChatOpenInTheAppIsGuardedThereButNotAsTheTerminals() throws {
+        try configure()
+        startedBy("codex_exec", source: "exec")
+        log.append(CodexLine.turn("hi", reply: "hello", tokens: 30_000))
+        tick()
+        XCTAssertFalse(state?.guarded ?? true, "codex exec isn't a terminal session")
+        surface = .app
+        tick()
+        XCTAssertTrue(state?.guarded ?? false, "but you drive it in the app now")
+        // Seen in a terminal again.
+        surface = .terminal
+        tick()
+        XCTAssertFalse(state?.guarded ?? true)
+    }
+
+    func testASubagentsThreadIsNotGuardedInTheApp() throws {
+        try configure()
+        startedBy(CodexMeta.appOriginator, source: ["subagent": ["thread_spawn": ["depth": 1]]], threadSource: "subagent")
+        surface = .app
+        log.append(CodexLine.turn("hi", reply: "hello", tokens: 30_000))
+        tick()
+        XCTAssertEqual(state?.codex?.userChat, false)
+        XCTAssertFalse(state?.guarded ?? true)
+    }
+
+    func testOnlyALoadedLookSaysWhereItsOpen() throws {
+        try configure()
+        startedBy(CodexMeta.appOriginator)
+        surface = .app
+        log.append(CodexLine.turn("hi", reply: "hello", tokens: 30_000))
+        tick()
+        // Its owner went away: the look is the app link's, but says nothing of where it's open.
+        status = "notLoaded"
+        surface = .terminal
+        tick()
+        XCTAssertEqual(state?.codex?.surface, .app)
+        XCTAssertTrue(state?.guarded ?? false, "guarded until it closes")
+        clock.advance(CodexRunner.closedAfter)
+        tick()
+        XCTAssertTrue(state?.ended ?? false)
+        XCTAssertEqual(state?.endReason, "closed")
+    }
+
+    func testAnArchivedChatEndsAtOnceAndOpensAgainWhenTheAppHasItAgain() throws {
+        try configure()
+        startedBy(CodexMeta.appOriginator)
+        surface = .app
+        log.append(CodexLine.turn("hi", reply: "hello", tokens: 30_000))
+        tick()
+        status = "notLoaded"
+        endReason = "archived"
+        tick()
+        XCTAssertTrue(state?.ended ?? false)
+        XCTAssertEqual(state?.endReason, "archived")
+        let endedAt = state?.endedAt
+        // Then deleted from the archive.
+        clock.advance(30)
+        endReason = "deleted"
+        tick()
+        XCTAssertEqual(state?.endReason, "deleted")
+        XCTAssertEqual(state?.endedAt, endedAt, "it ended when it was archived")
+        XCTAssertEqual(runner.openSessions().count, 0)
+        // Unarchived and open in the app again.
+        status = "idle"
+        endReason = nil
+        tick()
+        XCTAssertFalse(state?.ended ?? true)
+        XCTAssertNil(state?.endReason)
+    }
+
+    func testAStateFromAnOlderVersionIsReadAgainForTheAppsRule() throws {
+        try configure()
+        tick()
+        var s = try XCTUnwrap(state)
+        s.codex?.userChat = nil
+        s.codex?.terminalRule = 2
+        try s.save(paths)
+        tick()
+        XCTAssertEqual(state?.codex?.userChat, true)
+        XCTAssertEqual(state?.codex?.terminalRule, CodexMeta.terminalRule)
+        XCTAssertEqual(state?.codex?.surface, .terminal)
     }
 
     func testNotWatchingStopsAskingButCompactNowStillWorks() throws {

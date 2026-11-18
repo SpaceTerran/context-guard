@@ -26,19 +26,29 @@ public struct CodexMeta: Equatable, Sendable {
     /// and have no rollout, so a rollout with this name is another client's.
     public static let linkOriginator = "context_guard"
 
-    /// Which `isTerminalSession` rule a stored verdict was made by (`CodexFacts.terminalRule`); a
-    /// session judged by an older one is judged again. 2: sessions named after the link count.
-    public static let terminalRule = 2
+    /// The originator of the Codex app's own chats.
+    public static let appOriginator = "Codex Desktop"
+
+    /// Which `isTerminalSession` and `isUserChat` rule a stored verdict was made by
+    /// (`CodexFacts.terminalRule`); a session judged by an older one is judged again. 2: sessions
+    /// named after the link count. 3: `isUserChat` too.
+    public static let terminalRule = 3
 
     /// Started by the terminal app, by its originator. `codex exec` never is.
     public static func isTerminalOriginator(_ originator: String?, source: String? = nil) -> Bool {
         originator == terminalOriginator || (originator == linkOriginator && source != "exec")
     }
 
+    /// A chat you started (not a subagent's, whose `source` is an object), in a format Context Guard
+    /// knows how to read. The Codex app guards any of these it has open: its own, and a terminal's or
+    /// `codex exec`'s you opened in it.
+    public var isUserChat: Bool {
+        source != nil && (threadSource ?? "user") == "user" && Self.readableHistory.contains(historyMode ?? "legacy")
+    }
+
     /// A session you drive in a terminal, in a format Context Guard knows how to read.
     public var isTerminalSession: Bool {
-        Self.isTerminalOriginator(originator, source: source) && source != nil && (threadSource ?? "user") == "user"
-            && Self.readableHistory.contains(historyMode ?? "legacy")
+        Self.isTerminalOriginator(originator, source: source) && isUserChat
     }
 }
 
