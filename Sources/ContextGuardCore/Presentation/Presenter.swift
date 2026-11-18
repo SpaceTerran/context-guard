@@ -139,7 +139,7 @@ public final class Presenter {
         sessions = SessionCatalog.load(paths, registry: registry, probe: probe)
         let link = CodexLinkStatus.load(paths)
         codexLink = CodexLinkStatus.state(link, now: now)
-        codexJudge = link?.judgeModel
+        codexJudge = link?.judgeModel ?? link?.app?.judgeModel
         showsCodex = codexLinkInstalled() || link != nil
         showsCursor = cursorHooksInstalled() || sessions.contains { $0.host == .cursor }
         if now > pruneAt {

@@ -1,7 +1,7 @@
 import Foundation
 
-/// `context-guard status` as text: the settings for each tool, the Codex link, and each running
-/// session. Until the Codex link has run (no `codex-link.json`), with Cursor's hooks out and no
+/// `context-guard status` as text: the settings for each tool, the Codex link (and its connection
+/// to the Codex app, on the Mac), and each running session. Until the Codex link has run (no `codex-link.json`), with Cursor's hooks out and no
 /// Cursor chats, it reads as it always has.
 public enum StatusText {
     /// - Parameter cursorHooks: whether Cursor runs Context Guard's hooks. Cursor's line shows once
@@ -19,6 +19,9 @@ public enum StatusText {
             if codex {
                 out.append("  Codex: asks at \(config.codexAskPercent)% · compacts at \(config.codexLaterPercent)% of each session's window when told to wait")
                 out.append("  Codex link: \(linkState(link, now: now))")
+                if let link, link.isRunning(now: now), let app = link.app {
+                    out.append("  Codex app: \(appState(app))")
+                }
             }
             if cursor {
                 out.append("  Cursor: asks at \(config.cursorAskPercent)% · compacts at \(config.cursorLaterPercent)% of each chat's window when told to wait")
@@ -45,7 +48,12 @@ public enum StatusText {
         if let window = s.state.window {
             line += " · \(s.state.tokens * 100 / window)% of \(Format.tokens(window))"
         }
-        if s.host == .codex, s.state.codex?.attached == false { line += " · no terminal shows it" }
+        if s.host == .codex, s.state.codex?.surface == .app {
+            line += " · Codex app"
+            if s.state.codex?.attached == false { line += " · only watching" }
+        } else if s.host == .codex, s.state.codex?.attached == false {
+            line += " · no terminal shows it"
+        }
         if s.waiterAlive { line += " · waiting in background" }
         if let f = s.state.followUp {
             line += " · compacting: \(f.stage.rawValue)\(f.note.map { " (\($0))" } ?? "")"
@@ -65,9 +73,21 @@ public enum StatusText {
             parts.append("judge: \(link.judgeModel ?? "each session's own model")")
             if let why = link.observeOnly { parts.append("only watching: \(why)") }
         } else {
-            parts.append("waiting for Codex")
+            // With the Codex app's line below, this one is about terminals.
+            parts.append(link.app == nil ? "waiting for Codex" : "waiting for a Codex terminal")
             if let e = link.lastError { parts.append("last error: \(e)") }
         }
+        return parts.joined(separator: " · ")
+    }
+
+    /// How the link's connection to the Codex app stands (the Mac).
+    static func appState(_ app: CodexAppLinkStatus) -> String {
+        guard app.connected else {
+            return (["waiting for the Codex app"] + (app.lastError.map { ["last error: \($0)"] } ?? [])).joined(separator: " · ")
+        }
+        var parts = ["connected", app.chats == 1 ? "1 chat open" : "\(app.chats) chats open"]
+        if let model = app.judgeModel { parts.append("judge: \(model)") }
+        if let why = app.unsupported { parts.append("only watching: \(why)") }
         return parts.joined(separator: " · ")
     }
 

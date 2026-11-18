@@ -704,6 +704,30 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertFalse(try info().isLive, "and so is one that was stopped, however recently")
     }
 
+    func testAnAppChatIsLiveWhileTheLinkIsInTheCodexApp() throws {
+        try configure()
+        surface = .app
+        log.append(CodexLine.turn("one", reply: "ok", tokens: 30_000))
+        tick()
+        func info() throws -> SessionInfo {
+            try XCTUnwrap(SessionCatalog.load(paths, registry: FakeRegistry(), probe: FakeProbe()).first { $0.id == id })
+        }
+        // No Codex terminal: the link isn't connected to the app server, only to the app.
+        try CodexLinkStatus(at: Date(), connected: false, app: CodexAppLinkStatus(connected: true, chats: 1)).save(paths)
+        XCTAssertTrue(try info().isLive, "status, the menu and its popup see it")
+        XCTAssertTrue(try info().reachableNow)
+        try CodexLinkStatus(at: Date(), connected: true, app: CodexAppLinkStatus(connected: false)).save(paths)
+        XCTAssertFalse(try info().isLive, "the app server doesn't have the app's chats")
+        try CodexLinkStatus(at: Date().addingTimeInterval(-60), connected: false, app: CodexAppLinkStatus(connected: true)).save(paths)
+        XCTAssertFalse(try info().isLive, "a link that stopped writing is gone")
+
+        // A terminal session isn't live through the app.
+        surface = .terminal
+        tick()
+        try CodexLinkStatus(at: Date(), connected: false, app: CodexAppLinkStatus(connected: true, chats: 1)).save(paths)
+        XCTAssertFalse(try info().isLive)
+    }
+
     func testALinkFileFromBeforeStopsWereNotedReadsAsRunning() throws {
         try paths.ensureDirectories()
         try Data(#"{"at":"2026-11-10T18:00:00Z","connected":true}"#.utf8).write(to: paths.codexLinkFile)

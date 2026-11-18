@@ -13,13 +13,14 @@ final class StatusTextTests: XCTestCase {
         return SessionInfo(state: s, isLive: true, waiterAlive: false)
     }
 
-    func codex(_ tokens: Int, window: Int? = 258_400, attached: Bool? = true) -> SessionInfo {
+    func codex(_ tokens: Int, window: Int? = 258_400, attached: Bool? = true, surface: CodexSurface? = nil) -> SessionInfo {
         var s = SessionState(sessionId: "01a1c7f0-4d8a-7870-aab2-07bc76ea7408", host: .codex, now: now)
         s.guarded = window != nil
         s.tokens = tokens
         s.title = "Release notes"
         s.codex = CodexFacts(window: window, status: "idle", loaded: true)
         s.codex?.attached = attached
+        s.codex?.surface = surface
         return SessionInfo(state: s, isLive: true, waiterAlive: false)
     }
 
@@ -126,6 +127,51 @@ final class StatusTextTests: XCTestCase {
         XCTAssertEqual(claude(40_000).shortSize(500_000), "500k")
         XCTAssertEqual(SessionHost.claude.whenOutOfReach, "when it next runs")
         XCTAssertEqual(SessionHost.codex.whenOutOfReach, "when a terminal shows it")
+    }
+
+    func testWithTheCodexAppItHasALineAndItsChatsSaySo() {
+        // No Codex terminal is open: the link is in the app only.
+        let app = CodexAppLinkStatus(connected: true, chats: 2, judgeModel: "gpt-6-luna")
+        let link = CodexLinkStatus(at: now, connected: false, app: app)
+        XCTAssertEqual(StatusText.lines(config: Config(), sessions: [codex(160_000, surface: .app)], link: link, now: now), [
+            "Context Guard is on",
+            "  Claude Code: asks at 300k · compacts at 500k when told to wait",
+            "  Codex: asks at 60% · compacts at 80% of each session's window when told to wait",
+            "  Codex link: waiting for a Codex terminal",
+            "  Codex app: connected · 2 chats open · judge: gpt-6-luna",
+            "01a1c7f0  Codex  160k   watching  Release notes · 61% of 258k · Codex app",
+        ])
+        XCTAssertEqual(StatusText.row(codex(30_000, attached: false, surface: .app), tools: true),
+                       "01a1c7f0  Codex  30k    watching  Release notes · 11% of 258k · Codex app · only watching")
+
+        let stopped = CodexLinkStatus(at: now, connected: false, stopped: true, app: CodexAppLinkStatus(connected: false))
+        XCTAssertFalse(StatusText.lines(config: Config(), sessions: [], link: stopped, now: now).contains { $0.contains("Codex app") },
+                       "a link that isn't running has nothing to say about the app")
+    }
+
+    func testHowTheCodexAppStands() {
+        XCTAssertEqual(StatusText.appState(CodexAppLinkStatus(connected: false)), "waiting for the Codex app")
+        XCTAssertEqual(StatusText.appState(CodexAppLinkStatus(connected: false, lastError: "the Codex app closed the connection")),
+                       "waiting for the Codex app · last error: the Codex app closed the connection")
+        XCTAssertEqual(StatusText.appState(CodexAppLinkStatus(connected: true)), "connected · 0 chats open")
+        XCTAssertEqual(StatusText.appState(CodexAppLinkStatus(connected: true, chats: 1, unsupported: "thread-archived version 3")),
+                       "connected · 1 chat open · only watching: thread-archived version 3")
+    }
+
+    func testTheCodexAppCountsForSettings() {
+        func state(connected: Bool = false, observeOnly: String? = nil, app: CodexAppLinkStatus?) -> CodexLinkStatus.State {
+            CodexLinkStatus.state(CodexLinkStatus(at: now, connected: connected, observeOnly: observeOnly, app: app), now: now)
+        }
+        XCTAssertEqual(state(app: CodexAppLinkStatus(connected: true)), .connected)
+        XCTAssertEqual(state(app: CodexAppLinkStatus(connected: false)), .waiting)
+        XCTAssertEqual(state(app: CodexAppLinkStatus(connected: true, unsupported: "thread-archived version 3")),
+                       .onlyWatching("thread-archived version 3"))
+        XCTAssertEqual(state(connected: true, observeOnly: "no thread/queue/add", app: CodexAppLinkStatus(connected: true)),
+                       .onlyWatching("no thread/queue/add"))
+        XCTAssertEqual(state(connected: true, app: CodexAppLinkStatus(connected: false, unsupported: "an old version")), .connected,
+                       "what an app it isn't in says doesn't count")
+        XCTAssertEqual(CodexLinkStatus.state(CodexLinkStatus(at: now.addingTimeInterval(-60), connected: false,
+                                                             app: CodexAppLinkStatus(connected: true)), now: now), .notRunning)
     }
 
     func testALinkWithNoSessionsYet() {
