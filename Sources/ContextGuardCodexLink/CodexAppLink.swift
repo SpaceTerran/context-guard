@@ -94,6 +94,8 @@ public final class CodexAppLink: @unchecked Sendable {
     private var unsupported: String?
     private var lastError: String?
     private var server: Server?
+    /// The model the app's own app server picked to judge with, kept while it's stopped.
+    private var judgeModel: String?
     private var serverFailedAt: Date?
     private var noChatsSince: Date?
     private var stopped = false
@@ -233,7 +235,7 @@ public final class CodexAppLink: @unchecked Sendable {
             let expected = closingItself
             if !expected { lastError = why }
             lock.unlock()
-            if !expected { log.write("the Codex app closed the connection: \(why)") }
+            if !expected { log.write("disconnected: \(why)") }
             poke()
         }
     }
@@ -625,8 +627,10 @@ public final class CodexAppLink: @unchecked Sendable {
             let s = Server(daemon: daemon, waiters: waiters, model: model)
             lock.lock()
             server = s
+            judgeModel = model
             serverFailedAt = nil
             lock.unlock()
+            statusChanged()
             log.write("started the Codex app's own app server (\(agent ?? "codex")); judge: \(model ?? "each chat's own model")")
             return s
         } catch {
@@ -714,7 +718,7 @@ public final class CodexAppLink: @unchecked Sendable {
         defer { lock.unlock() }
         return CodexAppLinkStatus(connected: connected && !stopped && !linkStopped,
                                   chats: chats.values.filter { $0.owner != nil }.count,
-                                  unsupported: unsupported, lastError: lastError)
+                                  unsupported: unsupported, lastError: lastError, judgeModel: judgeModel)
     }
 
     func statusChanged() { onStatusChange?() }

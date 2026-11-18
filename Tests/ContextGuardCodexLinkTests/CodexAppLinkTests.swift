@@ -553,9 +553,11 @@ final class CodexAppLinkTests: XCTestCase {
     // MARK: - The app's own Codex
 
     func testTheAppsOwnCodexStopsWhenNoChatIsOpenAndStartsAgainWhenOneIs() throws {
+        XCTAssertNil(link.status(stopped: false).judgeModel)
         follow()
         pass()
         XCTAssertEqual(launcher.launches, 1)
+        XCTAssertEqual(link.status(stopped: false).judgeModel, "gpt-6-luna", "status and Settings show the app's judge")
         app.windowCloses()
         waitFor("let go") { link.chat(id)?.owner == nil }
         pass()
@@ -563,6 +565,7 @@ final class CodexAppLinkTests: XCTestCase {
         clock.advance(301)
         pass()
         XCTAssertTrue(daemon.closed, "nothing to judge for five minutes")
+        XCTAssertEqual(link.status(stopped: false).judgeModel, "gpt-6-luna", "still the judge while it's stopped")
 
         app.open(id, cwd: cwd, rollout: log.path)
         clock.advance(31)

@@ -9,12 +9,16 @@ public struct CodexAppLinkStatus: Codable, Equatable, Sendable {
     /// Why it only watches the app's chats, if so: an app version that speaks differently.
     public var unsupported: String?
     public var lastError: String?
+    /// The model that judges the app's chats, once the app's own app server has run.
+    public var judgeModel: String?
 
-    public init(connected: Bool, chats: Int = 0, unsupported: String? = nil, lastError: String? = nil) {
+    public init(connected: Bool, chats: Int = 0, unsupported: String? = nil, lastError: String? = nil,
+                judgeModel: String? = nil) {
         self.connected = connected
         self.chats = chats
         self.unsupported = unsupported
         self.lastError = lastError
+        self.judgeModel = judgeModel
     }
 
     public init(from decoder: Decoder) throws {
@@ -23,6 +27,7 @@ public struct CodexAppLinkStatus: Codable, Equatable, Sendable {
         chats = (try? c.decode(Int.self, forKey: .chats)) ?? 0
         unsupported = try? c.decode(String.self, forKey: .unsupported)
         lastError = try? c.decode(String.self, forKey: .lastError)
+        judgeModel = try? c.decode(String.self, forKey: .judgeModel)
     }
 }
 
@@ -91,20 +96,33 @@ public struct CodexLinkStatus: Codable, Equatable, Sendable {
     /// The link is running and connected to the app server.
     public func isUp(now: Date) -> Bool { connected && isRunning(now: now) }
 
+    /// The link is running and has joined the Codex app.
+    public func isAppUp(now: Date) -> Bool { app?.connected == true && isRunning(now: now) }
+
+    /// The link is running and connected to where a session is open: the Codex app for the
+    /// app's chats, the app server for a terminal's.
+    public func isUp(for surface: CodexSurface?, now: Date) -> Bool {
+        surface == .app ? isAppUp(now: now) : isUp(now: now)
+    }
+
     /// Where the link stands, as Settings shows it.
     public enum State: Equatable, Sendable {
         case notRunning
-        /// Running, not connected: no Codex terminal lately, or the app server isn't up.
+        /// Running, not connected: no Codex terminal lately or the app server isn't up, and the
+        /// Codex app isn't running.
         case waiting
         case connected
         /// Connected, but this Codex lacks something it needs to act (why).
         case onlyWatching(String)
     }
 
-    /// nil (no file) reads as not running.
+    /// nil (no file) reads as not running. Connected to the app server or the Codex app counts;
+    /// either one that can only watch says why.
     public static func state(_ link: CodexLinkStatus?, now: Date) -> State {
         guard let link, link.isRunning(now: now) else { return .notRunning }
-        guard link.connected else { return .waiting }
-        return link.observeOnly.map(State.onlyWatching) ?? .connected
+        let app = link.app?.connected == true ? link.app : nil
+        guard link.connected || app != nil else { return .waiting }
+        let why = (link.connected ? link.observeOnly : nil) ?? app?.unsupported
+        return why.map(State.onlyWatching) ?? .connected
     }
 }

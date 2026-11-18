@@ -4,8 +4,8 @@ import Foundation
 public struct SessionInfo: Identifiable, Equatable, Sendable {
     public var id: String { state.sessionId }
     public var state: SessionState
-    /// Its Claude process is still running this conversation; for Codex, the app server has it
-    /// loaded and `context-guard codex` is connected to it; for Cursor, the app or CLI that runs the
+    /// Its Claude process is still running this conversation; for Codex, the app server or the
+    /// Codex app has it loaded and `context-guard codex` is connected to that; for Cursor, the app or CLI that runs the
     /// chat is running and the chat had a turn within the hold after one.
     public var isLive: Bool
     public var registry: RegistryEntry?
@@ -95,7 +95,8 @@ public enum SessionCatalog {
         let files = (try? FileManager.default.contentsOfDirectory(at: paths.sessionsDir, includingPropertiesForKeys: nil)) ?? []
         let byPid = Dictionary(registry.all().map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
         let registryAvailable = registry.isAvailable
-        let linkUp = CodexLinkStatus.load(paths)?.isUp(now: Date()) ?? false
+        let link = CodexLinkStatus.load(paths)
+        let now = Date()
         var out: [SessionInfo] = []
         for file in files where file.pathExtension == "json" {
             let id = file.deletingPathExtension().lastPathComponent
@@ -105,7 +106,8 @@ public enum SessionCatalog {
             let waiter = s.waiterToken != nil && (s.waiterPid.map { probe.isRunning($0, startedAt: s.waiterStart) } ?? false)
             switch s.hostKind {
             case .codex:
-                live = linkUp && !s.ended && s.codex?.loaded == true
+                // The link's connection to where it's open: the app server, or the Codex app.
+                live = (link?.isUp(for: s.codex?.surface, now: now) ?? false) && !s.ended && s.codex?.loaded == true
             case .cursor:
                 // The app keeps every chat, so a chat counts while its `stop` hook waits after a turn
                 // (or could still be: the hold's length) and Cursor runs.
