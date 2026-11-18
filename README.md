@@ -344,7 +344,7 @@ that file stay as they were, and it's backed up next to itself first.
 | Hook | What it does |
 |---|---|
 | `postToolUse` | Runs after each step. It reads the chat's context size, asks at 60%, and adds a waiting save message to the step's result. |
-| `stop` | Stays in the background after every turn, until the next turn replaces it (up to 12 hours). It does what Claude Code's `Stop` hook and the mod do: sends the save message as your next prompt when it's due, asks the judge, compacts the chat and sends the continue message. |
+| `stop` | Stays in the background after every turn, until the next turn replaces it or you archive or delete the chat (up to 12 hours). It does what Claude Code's `Stop` hook and the mod do: sends the save message as your next prompt when it's due, asks the judge, compacts the chat and sends the continue message. |
 | `beforeSubmitPrompt` | A turn starts. It notes whether Context Guard's message is the one going in. |
 | `preCompact` | Notes that Cursor is summarizing the chat, typed or by itself. |
 | `sessionEnd` | Notes that the chat was closed. |

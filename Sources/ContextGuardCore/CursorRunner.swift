@@ -206,6 +206,22 @@ public protocol CursorTyping: Sendable {
     func send(_ chat: CursorChatRef, text: String) -> CursorTypingResult
 }
 
+/// Where a chat stands in the Cursor app's own list of chats.
+public enum CursorChatStanding: String, Equatable, Sendable {
+    case open
+    /// You archived it: it left the Agents window's list.
+    case archived
+    /// It's gone from Cursor's store.
+    case deleted
+}
+
+/// Looks a chat up in Cursor's own store. Archiving or deleting a chat in the app runs no hook, so
+/// this is how a held chat learns it ended (`ContextGuardCursor`).
+public protocol CursorChatChecking: Sendable {
+    /// nil when it can't tell: the store can't be read just now, or the chat isn't the app's.
+    func standing(_ chat: CursorChatRef) -> CursorChatStanding?
+}
+
 /// Asks Cursor's model whether a chat is done saving.
 public protocol CursorJudging: Sendable {
     /// The judge's reply, or why there's none.
@@ -240,6 +256,8 @@ public struct CursorRunner: Sendable {
     public let clock: @Sendable () -> Date
     /// How long the hot path waits for the chat's lock before giving up (the next event catches up).
     public var lockTimeout: TimeInterval = 0.3
+    /// How often a hold looks the chat up in Cursor's store, to end it once it's archived or deleted.
+    public var standingEvery: TimeInterval = 10
 
     /// How long the `stop` hook waits after a turn (as long as Claude Code's), and so how long a
     /// chat with no turns counts as open.
@@ -498,17 +516,18 @@ public struct CursorRunner: Sendable {
 
     // MARK: - Between turns
 
-    /// Runs in the `stop` hook after every turn, until a new turn starts, the chat closes, Cursor
-    /// quits or `maxDuration` passes. Returns the save message once it's due (Cursor sends it as your
-    /// next prompt); meanwhile asks the judge and compacts the chat once it has saved. nil: nothing to
-    /// send.
+    /// Runs in the `stop` hook after every turn, until a new turn starts, the chat closes, is
+    /// archived or deleted, Cursor quits or `maxDuration` passes. Returns the save message once it's
+    /// due (Cursor sends it as your next prompt); meanwhile asks the judge and compacts the chat once
+    /// it has saved. nil: nothing to send.
     public func hold(sessionId id: String, token: String, maxDuration: TimeInterval, poll: TimeInterval = 2,
-                     typing: any CursorTyping, judge: any CursorJudging) -> String? {
+                     typing: any CursorTyping, judge: any CursorJudging, chats: any CursorChatChecking) -> String? {
         let deadline = clock().addingTimeInterval(maxDuration)
         let changed = DispatchSemaphore(value: 0)
         let watcher = FolderWatcher(paths.answersDir) { changed.signal() }
         defer { withExtendedLifetime(watcher) {} }
         var again = false
+        var lookUpAt = Date.distantPast
 
         while true {
             if !again { _ = changed.wait(timeout: .now() + poll) }
@@ -529,12 +548,20 @@ public struct CursorRunner: Sendable {
                 release(id, token: token)
                 return nil
             }
+            let chat = CursorChatRef(id: id, name: snap.title, surface: facts.runsIn, pid: pid, terminal: facts.terminal)
+            if chat.surface == .app, now >= lookUpAt {
+                lookUpAt = now.addingTimeInterval(standingEvery)
+                if let standing = chats.standing(chat), standing != .open {
+                    // No hook says so: the chat ends here, as a closed one does.
+                    if ended(id, token: token, why: standing) { return nil }
+                    lookUpAt = now
+                }
+            }
             guard due(snap, now: now) else { continue }
 
             // Gathered before taking the lock: reading the transcript can take a moment.
             var look = SessionLook(activity: .idle, quiet: true)
             look.draft = snap.cursorChat?.draftAt.map { now.timeIntervalSince($0) < Self.draftRecheck } ?? false
-            let chat = CursorChatRef(id: id, name: snap.title, surface: facts.runsIn, pid: pid, terminal: facts.terminal)
             // Asked only when typing is next: finding the chat on screen takes a moment.
             if let f = snap.followUp, f.verdict == .ready || f.stage == .continuing {
                 look.typing = typing.reach(chat)
@@ -695,6 +722,22 @@ public struct CursorRunner: Sendable {
             guard (try? s.save(paths)) != nil else { return nil }
         }
         return out
+    }
+
+    /// Ends a chat you archived or deleted in the app, as `sessionEnd` ends a closed one; your next
+    /// prompt in it opens it again (`note`). false: not recorded yet (its lock is busy).
+    func ended(_ id: String, token: String, why: CursorChatStanding) -> Bool {
+        guard let lock = FileLock.acquire(paths.lockFile(id), timeout: 1) else { return false }
+        defer { lock.release() }
+        // A newer turn's hook has it now, or it ended already.
+        guard var s = SessionState.load(id, paths), s.waiterToken == token, !s.ended else { return true }
+        let now = clock()
+        s.ended = true
+        s.endedAt = now
+        s.endReason = why.rawValue
+        s.waiterToken = nil
+        s.updatedAt = now
+        return (try? s.save(paths)) != nil
     }
 
     /// Clears this hold's token so the apps stop counting on it.
