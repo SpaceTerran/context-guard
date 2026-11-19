@@ -1,8 +1,8 @@
 import Foundation
 
 /// `context-guard status` as text: the settings for each tool, the Codex link (and its connection
-/// to the Codex app, on the Mac), and each running session. Until the Codex link has run (no `codex-link.json`), with Cursor's hooks out and no
-/// Cursor chats, it reads as it always has.
+/// to the Codex app), and each running session. Until the Codex link has run (no `codex-link.json`),
+/// with Cursor's hooks out and no Cursor chats, it reads as it always has.
 public enum StatusText {
     /// - Parameter cursorHooks: whether Cursor runs Context Guard's hooks. Cursor's line shows once
     ///   they're in or a chat has run, as in the app.
@@ -34,12 +34,13 @@ public enum StatusText {
             out.append("No running sessions seen yet.")
             return out
         }
-        out += live.map { row($0, tools: codex || cursor) }
+        out += live.map { row($0, tools: codex || cursor, config: config, now: now) }
         return out
     }
 
     /// One session: id, tool (with Codex in the picture), size, phase, title, then what's notable.
-    static func row(_ s: SessionInfo, tools: Bool) -> String {
+    /// Where compacting stands reads as the session's menu says it, for as long as the menu shows it.
+    static func row(_ s: SessionInfo, tools: Bool, config: Config, now: Date) -> String {
         var line = "\(s.id.prefix(8))  "
         if tools { line += pad(s.host == .claude ? "Claude" : s.host.name, 6) + " " }
         line += pad(Format.tokens(s.state.tokens), 6) + " " + pad(s.effectivePhase.rawValue, 9) + " " + s.title
@@ -48,15 +49,18 @@ public enum StatusText {
         if let window = s.state.window {
             line += " · \(s.state.tokens * 100 / window)% of \(Format.tokens(window))"
         }
-        if s.host == .codex, s.state.codex?.surface == .app {
-            line += " · Codex app"
-            if s.state.codex?.attached == false { line += " · only watching" }
-        } else if s.host == .codex, s.state.codex?.attached == false {
-            line += " · no terminal shows it"
+        if s.host == .codex {
+            let app = s.state.codex?.surface == .app
+            if app { line += " · Codex app" }
+            if s.onlyWatching {
+                line += " · only watching"
+            } else if !app, s.state.codex?.attached == false {
+                line += " · no terminal shows it"
+            }
         }
         if s.waiterAlive { line += " · waiting in background" }
-        if let f = s.state.followUp {
-            line += " · compacting: \(f.stage.rawValue)\(f.note.map { " (\($0))" } ?? "")"
+        if let f = s.followUpText(config, now: now) {
+            line += " · " + f.prefix(1).lowercased() + f.dropFirst()
         }
         return line
     }
@@ -80,7 +84,7 @@ public enum StatusText {
         return parts.joined(separator: " · ")
     }
 
-    /// How the link's connection to the Codex app stands (the Mac).
+    /// How the link's connection to the Codex app stands.
     static func appState(_ app: CodexAppLinkStatus) -> String {
         guard app.connected else {
             return (["waiting for the Codex app"] + (app.lastError.map { ["last error: \($0)"] } ?? [])).joined(separator: " · ")

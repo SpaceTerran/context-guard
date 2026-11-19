@@ -74,7 +74,7 @@ public struct Board: Encodable, Equatable, Sendable {
         public var heading: String
         /// When no session runs, what it says instead of the list.
         public var empty: String?
-        /// Terminal sessions that are running, largest context first.
+        /// Sessions that are running, largest context first.
         public var sessions: [Session]
         public var settings: String
         public var quit: String

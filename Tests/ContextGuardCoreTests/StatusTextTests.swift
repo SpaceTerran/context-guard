@@ -13,7 +13,8 @@ final class StatusTextTests: XCTestCase {
         return SessionInfo(state: s, isLive: true, waiterAlive: false)
     }
 
-    func codex(_ tokens: Int, window: Int? = 258_400, attached: Bool? = true, surface: CodexSurface? = nil) -> SessionInfo {
+    func codex(_ tokens: Int, window: Int? = 258_400, attached: Bool? = true, surface: CodexSurface? = nil,
+               onlyWatching: Bool = false) -> SessionInfo {
         var s = SessionState(sessionId: "01a1c7f0-4d8a-7870-aab2-07bc76ea7408", host: .codex, now: now)
         s.guarded = window != nil
         s.tokens = tokens
@@ -21,6 +22,7 @@ final class StatusTextTests: XCTestCase {
         s.codex = CodexFacts(window: window, status: "idle", loaded: true)
         s.codex?.attached = attached
         s.codex?.surface = surface
+        s.codex?.onlyWatching = onlyWatching ? true : nil
         return SessionInfo(state: s, isLive: true, waiterAlive: false)
     }
 
@@ -88,9 +90,32 @@ final class StatusTextTests: XCTestCase {
     }
 
     func testACodexSessionsOwnFacts() {
-        XCTAssertEqual(StatusText.row(codex(30_000, window: nil), tools: true), "01a1c7f0  Codex  30k    watching  Release notes (not guarded)")
-        XCTAssertEqual(StatusText.row(codex(30_000, attached: false), tools: true),
+        XCTAssertEqual(StatusText.row(codex(30_000, window: nil), tools: true, config: Config(), now: now), "01a1c7f0  Codex  30k    watching  Release notes (not guarded)")
+        XCTAssertEqual(StatusText.row(codex(30_000, attached: false), tools: true, config: Config(), now: now),
                        "01a1c7f0  Codex  30k    watching  Release notes · 11% of 258k · no terminal shows it")
+        XCTAssertEqual(StatusText.row(codex(30_000, onlyWatching: true), tools: true, config: Config(), now: now),
+                       "01a1c7f0  Codex  30k    watching  Release notes · 11% of 258k · only watching",
+                       "an older Codex: shown, but it isn't that no terminal shows it")
+    }
+
+    func testWhereCompactingStandsReadsAsTheMenuSaysIt() {
+        var s = codex(22_000)
+        var f = FollowUp(nonce: "cg-1a2b3c4d5e", manual: false, now: now.addingTimeInterval(-60))
+        f.stage = .done
+        f.stageAt = now.addingTimeInterval(-60)
+        f.note = "No files needed saving."
+        f.tokensBefore = 57_062
+        f.tokensAfter = 22_987
+        s.state.followUp = f
+        XCTAssertEqual(StatusText.row(s, tools: true, config: Config(), now: now),
+                       "01a1c7f0  Codex  22k    watching  Release notes · 8% of 258k · compacted 57k → 22k and sent \u{201C}continue now\u{201D}")
+        XCTAssertEqual(StatusText.row(s, tools: true, config: Config(), now: now.addingTimeInterval(FollowUpText.shownAfterEnd + 60)),
+                       "01a1c7f0  Codex  22k    watching  Release notes · 8% of 258k",
+                       "once the menu stops showing it, so does status")
+        s.state.followUp?.stage = .needsYou
+        s.state.followUp?.note = "Asked whether to merge."
+        XCTAssertEqual(StatusText.row(s, tools: true, config: Config(), now: now),
+                       "01a1c7f0  Codex  22k    watching  Release notes · 8% of 258k · needs you before compacting: Asked whether to merge")
     }
 
     func testHowTheLinkStands() {
@@ -126,7 +151,7 @@ final class StatusTextTests: XCTestCase {
         XCTAssertEqual(codex(160_000).shortSize(206_720), "80%")
         XCTAssertEqual(claude(40_000).shortSize(500_000), "500k")
         XCTAssertEqual(SessionHost.claude.whenOutOfReach, "when it next runs")
-        XCTAssertEqual(SessionHost.codex.whenOutOfReach, "when a terminal shows it")
+        XCTAssertEqual(SessionHost.codex.whenOutOfReach, "when a terminal or the Codex app has it open")
     }
 
     func testWithTheCodexAppItHasALineAndItsChatsSaySo() {
@@ -141,7 +166,7 @@ final class StatusTextTests: XCTestCase {
             "  Codex app: connected · 2 chats open · judge: gpt-6-luna",
             "01a1c7f0  Codex  160k   watching  Release notes · 61% of 258k · Codex app",
         ])
-        XCTAssertEqual(StatusText.row(codex(30_000, attached: false, surface: .app), tools: true),
+        XCTAssertEqual(StatusText.row(codex(30_000, surface: .app, onlyWatching: true), tools: true, config: Config(), now: now),
                        "01a1c7f0  Codex  30k    watching  Release notes · 11% of 258k · Codex app · only watching")
 
         let stopped = CodexLinkStatus(at: now, connected: false, stopped: true, app: CodexAppLinkStatus(connected: false))

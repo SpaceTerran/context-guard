@@ -440,7 +440,7 @@ final class CodexAppLinkTests: XCTestCase {
                        "the Codex app sends thread-stream-state-changed version 14; this Context Guard reads version 13")
         pass()
         XCTAssertTrue(app.requests(.startTurn).isEmpty)
-        XCTAssertEqual(state?.codex?.attached, false)
+        XCTAssertEqual(state?.codex?.onlyWatching, true)
         XCTAssertEqual(state?.phase, .queued)
         XCTAssertTrue(state?.guarded ?? false, "still watched")
     }
@@ -459,7 +459,7 @@ final class CodexAppLinkTests: XCTestCase {
         app.fail(.startTurn, with: nil)
         pass()
         XCTAssertEqual(app.requests(.startTurn).count, 1, "nothing more is sent")
-        XCTAssertEqual(state?.codex?.attached, false)
+        XCTAssertEqual(state?.codex?.onlyWatching, true)
     }
 
     // MARK: - Ending

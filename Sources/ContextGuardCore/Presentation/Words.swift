@@ -69,7 +69,7 @@ public enum Words {
         public static let typing = "Typing"
         public static let typingHelp = "Types /summarize into the chat once it has saved: in the Cursor app with Cursor's own Accessibility permission, in a terminal through tmux or Herdr"
         public static let link = "Link"
-        public static let linkHelp = "Follows each Codex session, sends it the save and continue messages and compacts it. It connects to Codex while a Codex session runs in a terminal."
+        public static let linkHelp = "Follows each Codex session, in a terminal or the Codex app, sends it the save and continue messages and compacts it. It connects while a Codex session runs in a terminal or the Codex app is open."
 
         public static let whenToAskCard = "When to ask"
         public static let ifYouDontAnswer = "If you don't answer"

@@ -390,7 +390,8 @@ final class CodexLinkTests: XCTestCase {
         try pass()
         XCTAssertEqual(queued.count, 1, "nothing more is sent")
         XCTAssertEqual(state?.phase, .queued)
-        XCTAssertEqual(state?.codex?.attached, false)
+        XCTAssertEqual(state?.codex?.onlyWatching, true)
+        XCTAssertEqual(state?.codex?.attached, true, "the terminal still shows it")
     }
 
     func testAnOlderMessageOfOursStuckInTheQueueIsTakenOut() throws {

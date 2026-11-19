@@ -3,8 +3,8 @@
 ![Context Guard asking whether to compact a session](docs/popup.png)
 
 A small app for [Claude Code](https://code.claude.com/docs/en/overview), the
-[Codex CLI](https://github.com/openai/codex) and, on the Mac, [Cursor](https://cursor.com), in the
-Mac menu bar or on the [Windows](#windows) taskbar. When a session's context gets big, it asks before
+[Codex CLI](https://github.com/openai/codex), the Codex app and, on the Mac, [Cursor](https://cursor.com),
+in the Mac menu bar or on the [Windows](#windows) taskbar. When a session's context gets big, it asks before
 compacting. If you say yes, the session saves its work first, then it's compacted and told to carry
 on.
 
@@ -12,6 +12,7 @@ on.
 |---|---|---|
 | Claude Code, in a terminal | Yes | Yes |
 | Codex CLI | Yes | Yes |
+| Codex app (desktop) | Yes | Yes |
 | Cursor: the app, and the Cursor CLI in a terminal | Yes | No |
 
 There are about a thousand ways to handle context in Claude Code: `/compact` by hand, auto-compact,
@@ -79,9 +80,9 @@ header when your last change was saved, or that it wasn't and why.
 It doesn't care which terminal you use (tested in Warp, Terminal and Ghostty): everything goes
 through Claude Code's own hooks and plugins.
 
-**Codex** sessions get the same, with two differences: the thresholds are a share of each session's
-context window (60% and 80%), and a small OpenAI model reads whether the session has saved, in place
-of Haiku. See [Codex](#codex).
+**Codex** sessions, in a terminal or the Codex app, get the same, with two differences: the
+thresholds are a share of each session's context window (60% and 80%), and a small OpenAI model
+reads whether the session has saved, in place of Haiku. See [Codex](#codex).
 
 **Cursor** chats, on the Mac, get the same in the Cursor app and in the Cursor CLI: thresholds as a
 share of each chat's window (60% and 80%), Cursor's Auto model as the judge, and Cursor's own
@@ -94,6 +95,8 @@ share of each chat's window (60% and 80%), Cursor's Auto model as the judge, and
 - Claude Code with plugin support (tested with 2.1.318), signed in as usual.
 - For Codex sessions: the Codex CLI (tested with 0.167.1), signed in as usual. Without it, nothing
   changes.
+- For Codex app chats: the Codex app (tested with 26.1111.71025), signed in as usual. They don't need
+  the Codex CLI.
 - For Cursor chats: the Cursor app (tested with 3.30.14), the Cursor CLI `cursor-agent` (tested with
   2026.11.13), or both, signed in as usual. The judge needs the Cursor CLI. Without Cursor, nothing
   changes.
@@ -147,6 +150,8 @@ below. `~` in the paths here is your user folder, `%USERPROFILE%`.
 - Claude Code 2.1.287 or newer (tested with 2.1.322), signed in as usual.
 - For Codex sessions: the Codex CLI 0.154 or newer (tested with 0.167.2), signed in as usual.
   Without it, nothing changes.
+- For Codex app chats: the Codex app (tested with 26.1111.2228.0), signed in as usual. They don't
+  need the Codex CLI.
 - Smart App Control not on (Windows Security > App & browser control). Context Guard isn't signed,
   and Smart App Control blocks unsigned programs it doesn't know, even ones built on the same PC.
 - To build it: Swift 6.4.2, Visual Studio 2022 Build Tools with the C++ workload and a Windows 11
@@ -276,24 +281,34 @@ context-guard cursor install | uninstall
 
 ## Codex
 
-Codex hooks can't start a turn or a compaction, so Codex sessions are reached another way. A plain
-`codex` in any terminal runs its session in Codex's shared background server, and
-`context-guard codex` (kept running by the LaunchAgent) connects to that server's socket,
-`~/.codex/app-server-control/app-server-control.sock`, the same way the terminal does. There's no
-Codex hook or plugin to install. The link:
+Codex hooks can't start a turn or a compaction, so Codex sessions are reached another way:
+`context-guard codex`, the Codex link (kept running by the LaunchAgent), talks to Codex itself. There's
+no Codex hook or plugin to install. Sessions in a terminal and chats in the Codex app are guarded
+the same way. For each one, the link:
 
-- reads each session's size from its file in `~/.codex/sessions`;
-- sends the save message as a prompt from you, and the terminal shows it like one. While Codex is
-  working, it goes into the running turn, as a prompt you type then does, and Codex takes it at its
-  next step; between turns, it starts a turn. It ends with a tag like `[cg-1a2b3c4d5e]`, which marks
-  it as Context Guard's;
+- reads its size from its file in `~/.codex/sessions`;
+- sends the save message as a prompt from you, and the terminal or the app shows it like one. While
+  Codex is working, it goes into the running turn, as a prompt you type then does, and Codex takes
+  it at its next step; between turns, it starts a turn. It ends with a tag like `[cg-1a2b3c4d5e]`,
+  which marks it as Context Guard's;
 - asks the judge whether the session has finished saving;
 - compacts the session, as `/compact` does, then sends the continue message the same way, between
   turns.
 
-It connects only while a Codex terminal has run in the last 5 minutes, and never starts or stops
-Codex's server. It doesn't care which terminal you use (tested in Warp and Terminal): it talks to
-Codex's server, not to the terminal.
+**In a terminal.** A plain `codex` in any terminal runs its session in Codex's shared background
+server, and the link connects to that server's socket,
+`~/.codex/app-server-control/app-server-control.sock`, the same way the terminal does. It connects
+only while a Codex terminal has run in the last 5 minutes, and never starts or stops Codex's server.
+It doesn't care which terminal you use (tested in Warp and Terminal): it talks to Codex's server, not
+to the terminal.
+
+**In the Codex app.** The app's windows share its chats through a channel of the app's own: a socket
+in `~/.codex/ipc` on the Mac, the named pipe `\\.\pipe\codex-ipc` on Windows. While the app runs, the
+link joins it, once it has checked that the app at the other end runs as you, and follows each chat
+the app has open, as another of the app's windows would. What it sends shows in the chat as if you'd
+typed it there. The app's chats are judged by the Codex that comes with the app, on the app's
+sign-in, so they don't need the Codex CLI. It starts when a chat first needs it and stops after 5
+minutes with no chat open in the app.
 
 **The judge.** Haiku isn't available to Codex, so the judge is OpenAI's smallest model,
 **gpt-6-luna** (or gpt-5.6-luna, else the session's own model), at low effort. It runs as a
@@ -313,22 +328,30 @@ What's different from Claude Code:
 
 - **The prompt box can't be read** from outside Codex, so text you've typed but not sent doesn't
   hold the compaction. It stays in the box.
-- **A terminal has to show the session.** Messages go out only to a session a terminal has open.
-  Which ones are open is worked out from the `codex` processes running in terminals: the folder
-  each runs in, the session a `codex resume <id>` names, and a session started there since (as
-  `/new` does). A `codex resume` from another folder, without an id, isn't seen; its messages wait
-  and `status` says "no terminal shows it".
+- **A terminal or the Codex app has to have the session open.** Messages go out only to a session
+  one of them has open. Which ones a terminal has open is worked out from the `codex` processes
+  running in terminals: the folder each runs in, the session a `codex resume <id>` names, and a
+  session started there since (as `/new` does). A `codex resume` from another folder, without an id,
+  isn't seen; its messages wait and `status` says "no terminal shows it". The Codex app has a chat
+  open once you've opened it since the app started. On Windows, closing the app's window leaves its
+  chats open (the app keeps running); quitting the app closes them until you open them again.
+- **Archiving or deleting a chat** in the Codex app ends its session at once.
 - **Watch This Session** belongs to the Codex session, not the tab. `/new` starts a new session,
   which is watched again.
-- **Which sessions:** only terminal sessions in the shared server. A `codex` started with `-c`,
+- **Which sessions:** in terminals, only sessions in the shared server. A `codex` started with `-c`,
   `--profile`, `--no-daemon` or `--oss` runs its session inside the terminal's own process, where
-  nothing else can reach it. `codex exec`, the Codex app and subagents are left alone.
-- **An older Codex** missing something the link needs is only watched. Settings and `status` say
-  why. One that can't take a prompt into a running turn gets the save message between turns.
+  nothing else can reach it. In the Codex app, any chat of yours it has open, including one a
+  terminal or `codex exec` started. Subagents are left alone, and so is `codex exec` until the app
+  opens its chat.
+- **An older Codex** missing something the link needs is only watched: its sessions show their size
+  and "Only watching, not compacting", and nothing asks about them or is sent to them. Settings and
+  `status` say why. One that can't take a prompt into a running turn gets the save message between
+  turns. A Codex app that talks to its windows in a way this Context Guard doesn't know yet is only
+  watched too, and nothing is sent on a guess.
 
 | File (in `~/.claude/context-guard/`) | Written by |
 |---|---|
-| `codex-link.json` | `context-guard codex`, every 5 seconds: running or stopped, connected, Codex's version, the judge model |
+| `codex-link.json` | `context-guard codex`, every 5 seconds: running or stopped, connected, Codex's version, the judge model, and the same for the Codex app with the number of chats it has open |
 | `codex-link.log` | `context-guard codex`: what it did. At 1 MB it moves to `codex-link.log.1` and starts again |
 | `codex-link.stderr` | launchd: anything the link printed as an error |
 | `muted/codex-<id>.json` | the app and `context-guard watch`: a Codex session you stopped watching |
@@ -407,7 +430,8 @@ What's different from Claude Code:
 swift test                                     # the rules, transcript reading, hook runs, the Codex link,
                                                # Cursor's hooks
 claude plugin test mod                         # the mod, against a mocked clock and program
-live-test/ui-demo.sh start dark                # the app on staged sessions (four Claude Code, one Codex, one Cursor)
+live-test/ui-demo.sh start dark                # the app on staged sessions (four Claude Code, one Codex, one Cursor);
+                                               # add codex-app to make the Codex one a Codex app chat
 live-test/ui-demo.sh snap <folder> <name>      # the app draws its windows to PNGs (works with the
                                                # screen locked)
 live-test/session.sh start <name> 60 75        # a real Haiku session with low thresholds

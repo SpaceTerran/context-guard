@@ -15,7 +15,7 @@ public struct CodexThreadLook: Equatable, Sendable {
     public var flags: [String]
     /// A thread Codex keeps no rollout for (its own helpers, Context Guard's judge).
     public var ephemeral: Bool
-    /// A terminal has the session open. nil when that can't be told.
+    /// A terminal has the session open (the Codex app, for its chats). nil when that can't be told.
     public var attached: Bool?
     /// Codex's own compaction point, when set (`model_auto_compact_token_limit`).
     public var autoCompactAt: Int?
@@ -23,6 +23,9 @@ public struct CodexThreadLook: Equatable, Sendable {
     public var postTurnCompactPercent: Int?
     /// The link can send into a running turn (`turn/steer`). False on a Codex without it.
     public var canSteer: Bool
+    /// The link can only watch it: this Codex lacks something it needs to act, or the Codex app
+    /// speaks a version this Context Guard doesn't know. Nothing asks about it or goes to it.
+    public var onlyWatching: Bool
     /// Where it's open. Only a loaded look (not `notLoaded`) says.
     public var surface: CodexSurface
     /// It has ended for good, and why (`archived`, `deleted`): the app said so.
@@ -30,8 +33,8 @@ public struct CodexThreadLook: Equatable, Sendable {
 
     public init(threadId: String, path: String? = nil, cwd: String? = nil, name: String? = nil, status: String,
                 flags: [String] = [], ephemeral: Bool = false, attached: Bool? = nil, autoCompactAt: Int? = nil,
-                postTurnCompactPercent: Int? = nil, canSteer: Bool = true, surface: CodexSurface = .terminal,
-                endReason: String? = nil) {
+                postTurnCompactPercent: Int? = nil, canSteer: Bool = true, onlyWatching: Bool = false,
+                surface: CodexSurface = .terminal, endReason: String? = nil) {
         self.threadId = threadId
         self.path = path
         self.cwd = cwd
@@ -43,6 +46,7 @@ public struct CodexThreadLook: Equatable, Sendable {
         self.autoCompactAt = autoCompactAt
         self.postTurnCompactPercent = postTurnCompactPercent
         self.canSteer = canSteer
+        self.onlyWatching = onlyWatching
         self.surface = surface
         self.endReason = endReason
     }
@@ -124,6 +128,7 @@ public struct CodexRunner: Sendable {
         c.flags = t.flags.isEmpty ? nil : t.flags
         if t.isIdle { c.steerRefused = nil }
         c.attached = t.attached
+        c.onlyWatching = t.onlyWatching ? true : nil
         if t.status != "notLoaded" {
             // The app server's settings for it; one it doesn't list keeps the last ones seen.
             c.autoCompactAt = t.autoCompactAt
@@ -164,11 +169,12 @@ public struct CodexRunner: Sendable {
             Engine.deliveryLost(&s, idleFor: idleFor, turnSinceSend: turnSince, now: now)
         }
         Engine.apply(Answer.load(id, paths), to: &s)
-        Engine.advance(&s, config: resolved, watched: watched, now: now)
+        // One the link only watches isn't asked: nothing could be sent. A Yes already given stands.
+        Engine.advance(&s, config: resolved, watched: watched && !t.onlyWatching, now: now)
         noteInterruptedCompaction(&s, now: now)
 
-        // Nothing goes to a session that's closing or has no terminal showing it.
-        let reachable = t.isIdle && t.attached != false && !s.ended
+        // Nothing goes to a session that's closing, has no terminal showing it, or is only watched.
+        let reachable = t.isIdle && t.attached != false && !t.onlyWatching && !s.ended
         let midTurn = !reachable && canSendMidTurn(t, s)
         var command = CodexCommand.none
         if reachable || midTurn, s.guarded, s.phase == .queued {
@@ -245,10 +251,10 @@ public struct CodexRunner: Sendable {
     }
 
     /// The save message can go into the running turn: Codex is working, not waiting on you (an
-    /// approval or a question), and a terminal shows it. Not into a turn that has only compacted so
-    /// far (`/compact`), and not into one that already refused it.
+    /// approval or a question), a terminal shows it, and the link can act on it. Not into a turn that
+    /// has only compacted so far (`/compact`), and not into one that already refused it.
     func canSendMidTurn(_ t: CodexThreadLook, _ s: SessionState) -> Bool {
-        guard t.canSteer, t.status == "active", t.flags.isEmpty, t.attached != false, !s.ended,
+        guard t.canSteer, t.status == "active", t.flags.isEmpty, t.attached != false, !t.onlyWatching, !s.ended,
               let c = s.codex, let turn = c.turn, turn.open, turn.hasContent, let started = turn.startedAt else { return false }
         return c.steerRefused != started
     }

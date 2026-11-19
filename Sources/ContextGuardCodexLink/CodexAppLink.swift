@@ -387,8 +387,8 @@ public final class CodexAppLink: @unchecked Sendable {
             let facts = config(for: s.cwd, now: now)
             schedule(CodexThreadLook(
                 threadId: id, path: path, cwd: s.cwd, name: s.title, status: s.status ?? "active", flags: s.activeFlags,
-                attached: !actOnNothing, autoCompactAt: facts.autoCompactLimit,
-                postTurnCompactPercent: facts.postTurnCompactPercent, surface: .app), connection)
+                attached: true, autoCompactAt: facts.autoCompactLimit,
+                postTurnCompactPercent: facts.postTurnCompactPercent, onlyWatching: actOnNothing, surface: .app), connection)
         }
         sweep(now: now, except: looked, connection)
     }

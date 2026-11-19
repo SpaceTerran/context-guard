@@ -304,7 +304,9 @@ struct CLI {
         } catch {
             fail("Couldn't \(args[1] == "off" ? "stop watching" : "watch") \(target.title): \(error.localizedDescription)")
         }
-        print(args[1] == "on" ? "Watching \(target.title) again." : "Not watching \(target.title) until its tab closes.")
+        // A Claude Code session's mark is its tab's; a Codex session's or Cursor chat's is its own.
+        let until = target.host == .claude ? "its tab closes" : "it ends"
+        print(args[1] == "on" ? "Watching \(target.title) again." : "Not watching \(target.title) until \(until).")
     }
 
     static func session(paths: Paths, prefix: String) -> SessionInfo {
@@ -350,9 +352,11 @@ struct CLI {
         var askAt: Int
         var laterAt: Int
         var reachableNow: Bool
-        /// A terminal shows it (Codex), as far as the link can tell.
+        /// A terminal shows it (Codex; the Codex app, for its chats), as far as the link can tell.
         var attached: Bool?
-        /// Cursor: `app` or `cli`.
+        /// The link can only watch it (Codex): nothing asks about it or goes to it.
+        var onlyWatching: Bool?
+        /// Cursor: `app` or `cli`. Codex: `terminal` or `app`.
         var surface: String?
         var phase: String
         var effectivePhase: String
@@ -377,7 +381,12 @@ struct CLI {
             laterAt = config.laterAt
             reachableNow = s.reachableNow
             attached = s.state.codex?.attached
-            surface = s.host == .cursor ? s.state.cursorChat?.runsIn.rawValue : nil
+            onlyWatching = s.state.codex?.onlyWatching
+            switch s.host {
+            case .cursor: surface = s.state.cursorChat?.runsIn.rawValue
+            case .codex: surface = (s.state.codex?.surface ?? .terminal).rawValue
+            case .claude: surface = nil
+            }
             phase = s.state.phase.rawValue
             effectivePhase = s.effectivePhase.rawValue
             guarded = s.state.guarded

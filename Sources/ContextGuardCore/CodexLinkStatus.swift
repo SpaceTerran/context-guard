@@ -52,7 +52,7 @@ public struct CodexLinkStatus: Codable, Equatable, Sendable {
     public var lastError: String?
     /// It was told to stop (and has, or is about to): not running, however recent `at` is.
     public var stopped: Bool
-    /// Its connection to the Codex app, where it has one (the Mac).
+    /// Its connection to the Codex app, once it has looked for one.
     public var app: CodexAppLinkStatus?
 
     public init(at: Date, connected: Bool, pid: Int32? = nil, serverVersion: String? = nil, judgeModel: String? = nil,

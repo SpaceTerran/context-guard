@@ -300,9 +300,9 @@ public final class CodexLink: @unchecked Sendable {
             schedule(CodexThreadLook(
                 threadId: info.id, path: info.path, cwd: info.cwd, name: info.name, status: info.status,
                 flags: info.flags, ephemeral: info.ephemeral,
-                attached: actOnNothing ? false : attached[info.id],
+                attached: attached[info.id],
                 autoCompactAt: facts.autoCompactLimit, postTurnCompactPercent: facts.postTurnCompactPercent,
-                canSteer: canSteer), daemon)
+                canSteer: canSteer, onlyWatching: actOnNothing), daemon)
         }
         // Closed while the link was away, or the app server restarted: they close after a while.
         // The Codex app's chats are its connection's to close.

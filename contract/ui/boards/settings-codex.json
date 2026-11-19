@@ -96,7 +96,7 @@
                 "rows": [
                   {
                     "status": {
-                      "help": "Follows each Codex session, sends it the save and continue messages and compacts it. It connects to Codex while a Codex session runs in a terminal.",
+                      "help": "Follows each Codex session, in a terminal or the Codex app, sends it the save and continue messages and compacts it. It connects while a Codex session runs in a terminal or the Codex app is open.",
                       "label": "Link",
                       "status": {
                         "symbol": "warning",

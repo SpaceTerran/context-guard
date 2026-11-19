@@ -59,8 +59,12 @@ public struct SessionInfo: Identifiable, Equatable, Sendable {
     /// waiting (Claude Code, and Cursor's `stop` hook), or the link can send it a prompt now (Codex).
     public var reachableNow: Bool {
         guard host == .codex else { return waiterAlive }
-        return isLive && state.codex?.status == "idle" && state.codex?.attached != false
+        return isLive && state.codex?.status == "idle" && state.codex?.attached != false && !onlyWatching
     }
+
+    /// The link can only watch this Codex session (an older Codex, or a Codex app version this
+    /// Context Guard doesn't know): nothing asks about it or goes to it.
+    public var onlyWatching: Bool { host == .codex && state.codex?.onlyWatching == true }
 
     /// Where its Claude process stands now. The app can't count background agents (only the mod
     /// can), so `background` work here says 0 agents. A Codex session is between turns when the

@@ -17,11 +17,19 @@ extension SessionInfo {
         state.awaitingCompactionRecord ? "compacted" : size(state.tokens)
     }
 
-    /// Its location line. A Codex or Cursor session's starts with the tool ("Codex · ~/code",
-    /// "Cursor CLI · ~/code"); Claude Code sessions' read as they always have.
+    /// Its location line. A Codex or Cursor session's starts with the tool and where it's open
+    /// ("Codex · ~/code", "Codex app · ~/code", "Cursor CLI · ~/code"); Claude Code sessions' read
+    /// as they always have.
     public var toolSubtitle: String {
         guard host != .claude else { return subtitle }
-        let tool = state.cursorChat?.runsIn == .cli ? "\(host.name) CLI" : host.name
+        let tool: String
+        if state.cursorChat?.runsIn == .cli {
+            tool = "\(host.name) CLI"
+        } else if host == .codex, state.codex?.surface == .app {
+            tool = "\(host.name) app"
+        } else {
+            tool = host.name
+        }
         return subtitle.isEmpty ? tool : "\(tool) · \(subtitle)"
     }
 
@@ -30,6 +38,8 @@ extension SessionInfo {
         let c = thresholds(config)
         let ask = size(c.askAt), later = size(c.laterAt)
         if muted, config.enabled, !isSending { return "Not watching this session" }
+        // A Yes given before it stays until the link can act, but nothing goes out meanwhile.
+        if onlyWatching, config.enabled, effectivePhase != .sent { return Self.onlyWatchingText }
         switch effectivePhase {
         case .watching:
             return config.enabled ? "Asks at \(ask)" : "Not watching: Context Guard is off"
@@ -50,9 +60,13 @@ extension SessionInfo {
         }
     }
 
+    /// What the menu says of a Codex session the link can only watch.
+    public static let onlyWatchingText = "Only watching, not compacting"
+
     /// The icon beside its title in the menu.
     public var symbol: Symbol {
         if muted, !isSending { return .notWatching }
+        if onlyWatching, effectivePhase != .sent { return .watching }
         switch effectivePhase {
         case .watching: return .watching
         case .asking: return .asking
@@ -69,9 +83,9 @@ extension SessionInfo {
     }
 
     /// Compact Now is off while one is already under way, since it would ask the session to save
-    /// twice.
+    /// twice, and for a session the link can only watch.
     public var canCompactNow: Bool {
-        !isSending && !(state.followUp?.isActive ?? false)
+        !isSending && !(state.followUp?.isActive ?? false) && !onlyWatching
     }
 
     /// When an unanswered question sends by itself (the hook's own rule), or nil when it won't.
@@ -114,9 +128,9 @@ extension SessionInfo {
     public var questionText: String {
         let base = Words.Popup.question
         // Rare: no background hook is waiting (it timed out), so an idle session hears it on its next
-        // turn; a Codex session no terminal shows hears it once one does.
+        // turn; a Codex session nothing has open hears it once a terminal or the Codex app opens it.
         guard isIdle, !reachableNow else { return base }
-        if host == .codex { return base + " No terminal shows it, so it starts when one does." }
+        if host == .codex { return base + " It isn't open in a terminal or the Codex app, so it starts once it is." }
         return base + " It's idle, so it starts when it next runs."
     }
 
@@ -147,7 +161,7 @@ public enum Deferral: Equatable, Sendable {
 
 /// What the menu shows besides each session.
 public enum Display {
-    /// Terminal sessions that are running now, largest context first.
+    /// Sessions that are running now, largest context first.
     public static func live(_ sessions: [SessionInfo]) -> [SessionInfo] {
         sessions.filter { $0.isLive && $0.state.guarded }
     }
