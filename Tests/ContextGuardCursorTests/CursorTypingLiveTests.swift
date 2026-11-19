@@ -78,7 +78,7 @@ final class CursorTypingLiveTests: XCTestCase {
         usleep(500_000)
         XCTAssertEqual(CursorAppTyping.frontApp()?.processIdentifier, before, "focus went back")
         let s = CursorAppTyping.Session(pid: pid)
-        let (_, box) = try XCTUnwrap(s.findBox(chat: name))
+        guard case .shown(_, let box)? = s.locate(chat: name, namesakes: { 0 }) else { return XCTFail("the chat is on screen") }
         s.box = box
         XCTAssertEqual(s.boxValue(), "", "what it typed was taken back")
     }

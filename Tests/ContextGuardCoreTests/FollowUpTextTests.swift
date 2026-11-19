@@ -82,6 +82,8 @@ final class FollowUpTextTests: XCTestCase {
         XCTAssertEqual(yours?.reason, "Type /summarize in it")
         XCTAssertGreaterThan(yours?.seconds ?? 0, 8, "it waits on you, so it stays up longer")
         XCTAssertEqual(line(followUp(.yours, note: "type /summarize in it")), "Saved, ready for you to compact: type /summarize in it")
+        let offScreen = FollowUpText.notice(followUp(.yours, note: "open it in Cursor, or type /summarize in it"), continueMessage: "go")
+        XCTAssertEqual(offScreen?.reason, "Open it in Cursor, or type /summarize in it")
     }
 
     func testEachNoticeIsColoredByWhatItMeans() {

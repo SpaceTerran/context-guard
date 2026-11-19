@@ -178,6 +178,61 @@ final class CompactorTests: XCTestCase {
         XCTAssertEqual(tick(&s, idle()), .compact(nonce: nonce), "the draft was cleared")
     }
 
+    func testAChatOffScreenIsLookedForAMinuteBeforeItsYours() {
+        var s = ready()
+        s.host = SessionHost.cursor.rawValue
+        let started = now
+        var look = idle()
+        look.typing = .notShown
+        XCTAssertEqual(tick(&s, look), .none)
+        XCTAssertEqual(s.followUp?.stage, .checking, "a window on its way back raises no notice")
+        XCTAssertEqual(s.followUp?.notShownSince, started)
+        now = now.addingTimeInterval(59)
+        XCTAssertEqual(tick(&s, look), .none)
+        XCTAssertEqual(s.followUp?.stage, .checking)
+        XCTAssertEqual(s.followUp?.notShownSince, started, "counted from when it was first missed")
+        now = now.addingTimeInterval(1)
+        XCTAssertEqual(tick(&s, look), .none)
+        XCTAssertEqual(s.followUp?.stage, .yours)
+        XCTAssertEqual(s.followUp?.note, "open it in Cursor, or type /summarize in it")
+
+        // You open it: it compacts it itself, and what to do is past.
+        look.typing = .ready
+        XCTAssertEqual(tick(&s, look), .compact(nonce: nonce))
+        XCTAssertNil(s.followUp?.note)
+        XCTAssertNil(s.followUp?.notShownSince)
+    }
+
+    func testAChatBackOnScreenWithinTheMinuteCompactsWithNoNotice() {
+        var s = ready()
+        var look = idle()
+        look.typing = .notShown
+        XCTAssertEqual(tick(&s, look), .none)
+        // The screen locks, or you're using the computer: it waits, still counting.
+        now = now.addingTimeInterval(40)
+        look.typing = .notNow
+        XCTAssertEqual(tick(&s, look), .none)
+        XCTAssertEqual(s.followUp?.stage, .checking)
+        XCTAssertNotNil(s.followUp?.notShownSince)
+        now = now.addingTimeInterval(10)
+        look.typing = .ready
+        XCTAssertEqual(tick(&s, look), .compact(nonce: nonce))
+
+        // Put off (a turn started first): a later miss starts its own minute.
+        report(&s, .compactDeferred)
+        XCTAssertNil(s.followUp?.notShownSince)
+    }
+
+    func testWithNothingToTypeThroughItsYoursAtOnce() {
+        var s = ready()
+        s.host = SessionHost.cursor.rawValue
+        var look = idle()
+        look.typing = .never
+        XCTAssertEqual(tick(&s, look), .none)
+        XCTAssertEqual(s.followUp?.stage, .yours)
+        XCTAssertEqual(s.followUp?.note, "type /summarize in it")
+    }
+
     func testAVerdictGoesStaleWhenTheConversationMoves() {
         var s = askedToSave()
         _ = tick(&s, idle())
@@ -557,6 +612,7 @@ final class CompactorTests: XCTestCase {
         f.judgeAskedAt = now.addingTimeInterval(3)
         f.judgeFailures = 1
         f.nextJudgeAt = now.addingTimeInterval(4)
+        f.notShownSince = now.addingTimeInterval(8)
         f.compactAttempts = 1
         f.compactFrom = 8
         f.compactStartedAt = now.addingTimeInterval(5)

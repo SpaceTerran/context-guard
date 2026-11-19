@@ -258,6 +258,9 @@ public struct CursorRunner: Sendable {
     public var lockTimeout: TimeInterval = 0.3
     /// How often a hold looks the chat up in Cursor's store, to end it once it's archived or deleted.
     public var standingEvery: TimeInterval = 10
+    /// How often a hold looks for a chat that wasn't on screen: looking goes through every Cursor
+    /// window's Accessibility tree.
+    public var notShownRecheck: TimeInterval = 10
 
     /// How long the `stop` hook waits after a turn (as long as Claude Code's), and so how long a
     /// chat with no turns counts as open.
@@ -528,6 +531,7 @@ public struct CursorRunner: Sendable {
         defer { withExtendedLifetime(watcher) {} }
         var again = false
         var lookUpAt = Date.distantPast
+        var lookForChatAt = Date.distantPast
 
         while true {
             if !again { _ = changed.wait(timeout: .now() + poll) }
@@ -564,7 +568,12 @@ public struct CursorRunner: Sendable {
             look.draft = snap.cursorChat?.draftAt.map { now.timeIntervalSince($0) < Self.draftRecheck } ?? false
             // Asked only when typing is next: finding the chat on screen takes a moment.
             if let f = snap.followUp, f.verdict == .ready || f.stage == .continuing {
-                look.typing = typing.reach(chat)
+                if now < lookForChatAt {
+                    look.typing = .notShown
+                } else {
+                    look.typing = typing.reach(chat)
+                    if look.typing == .notShown { lookForChatAt = now.addingTimeInterval(notShownRecheck) }
+                }
                 if look.typing == .ready, let until = facts.typingWaitUntil, now < until { look.typing = .notNow }
             }
             // A CLI chat's continue message goes in through the stop that ends its summary.

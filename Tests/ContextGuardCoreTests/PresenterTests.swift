@@ -282,6 +282,31 @@ final class PresenterTests: XCTestCase {
         XCTAssertEqual(host.noticeKeys, [], "a stage with no notice still closes the last")
     }
 
+    func testASlashCommandInAWrappedNoticeStaysWhole() throws {
+        let id = try session(1, phase: .sent) { s in
+            s.sentNonce = "cg-1"
+            s.confirmedAt = self.t0
+        }
+        let p = presenter()
+        try edit(id) { s in
+            var f = FollowUp(nonce: "cg-1", now: self.t0)
+            f.stage = .yours
+            f.note = "open it in Cursor, or type /summarize in it"
+            s.followUp = f
+        }
+        p.reload(now: t0)
+        p.sync(host, now: t0)
+        let notice = try XCTUnwrap(host.notices["notice:follow-up:cg-1:yours"])
+        XCTAssertEqual(notice.caption, "Open it in Cursor, or type /summarize in it")
+        XCTAssertEqual(notice.macCaption, "Open it in Cursor, or type /\u{2060}summarize in it",
+                       "a wrapped caption breaks before /summarize, not after its slash")
+        var reason = NoticeContent(symbol: .needsYou, tone: .warning, title: "t", detail: "d",
+                                   caption: "/compact, then /summarize; a/b and 1/2 stay", captionWraps: true)
+        XCTAssertEqual(reason.macCaption, "/\u{2060}compact, then /\u{2060}summarize; a/b and 1/2 stay")
+        reason.captionWraps = false
+        XCTAssertEqual(reason.macCaption, reason.caption, "a folder on one line is drawn as it is")
+    }
+
     func testAnAutoCompactionBeforeTheSaveIsAnnounced() throws {
         let id = try session(1, tokens: 188_400, phase: .watching)
         let p = presenter()

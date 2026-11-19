@@ -73,6 +73,18 @@ public struct CursorAppStore: Sendable {
         let archived = db.row("SELECT isArchived FROM composerHeaders WHERE composerId = ?1", [id])?.first?.int ?? 0
         return archived != 0 ? .archived : .open
     }
+
+    /// How many other chats the app lists (not archived, not a subagent's) under `name`, by the
+    /// `composerHeaders` table (Cursor 3.30). nil when the store can't be read or has no such table.
+    public func namesakes(of id: String, named name: String) -> Int? {
+        guard Paths.isValidSessionID(id), !name.isEmpty, let db = ReadOnlyDatabase(file) else { return nil }
+        let sql = """
+            SELECT count(*) FROM composerHeaders
+            WHERE composerId != ?1 AND IFNULL(isArchived, 0) = 0 AND IFNULL(isSubagent, 0) = 0
+              AND json_extract(value, '$.name') = ?2
+            """
+        return db.row(sql, [id, name])?.first?.int
+    }
 }
 
 extension CursorAppStore: CursorChatChecking {
