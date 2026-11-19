@@ -34,6 +34,13 @@ public struct NoticeContent: Equatable, Sendable {
     public var caption: String
     /// A reason wraps; a name and folder stays on one line, cut in the middle.
     public var captionWraps: Bool
+    /// The caption as the Mac app draws it: a wrapped line never breaks a slash command
+    /// ("/summarize") after its "/", as Unicode's line breaking would. A word joiner holds the two
+    /// together, so the line breaks before the command.
+    public var macCaption: String {
+        guard captionWraps else { return caption }
+        return caption.replacingOccurrences(of: #"(^|\s)/(?=\w)"#, with: "$1/\u{2060}", options: .regularExpression)
+    }
     /// How long it stays up.
     public var seconds: TimeInterval
 

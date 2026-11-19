@@ -17,7 +17,9 @@ public struct FollowUp: Codable, Equatable, Sendable {
         /// Ready, but there's text in the prompt box.
         case draft
         /// Ready, but Context Guard can't compact this session itself (a Cursor CLI chat outside tmux
-        /// and herdr): it waits for you to, and carries on with the continue message once you have.
+        /// and herdr, or a Cursor app chat that hasn't been on screen for a minute): it waits for you
+        /// to, and carries on with the continue message once you have. It still compacts the session
+        /// itself if it can again (the chat comes back on screen).
         case yours
         case compacting
         /// Compacted; the continue message goes out once the session is idle.
@@ -68,6 +70,10 @@ public struct FollowUp: Codable, Equatable, Sendable {
     public var judgeFailures = 0
     public var nextJudgeAt: Date?
 
+    /// Ready since then, but the chat wasn't on screen to type into (a Cursor app chat): after
+    /// `Compactor.notShownGrace` it's yours to compact.
+    public var notShownSince: Date?
+
     public var compactAttempts = 0
     /// Transcript size when compacting began: a prompt of yours after it means you took over.
     public var compactFrom: UInt64?
@@ -107,6 +113,7 @@ public struct FollowUp: Codable, Equatable, Sendable {
         judgeAskedAt = try c.decodeIfPresent(Date.self, forKey: .judgeAskedAt)
         judgeFailures = try c.decodeIfPresent(Int.self, forKey: .judgeFailures) ?? 0
         nextJudgeAt = try c.decodeIfPresent(Date.self, forKey: .nextJudgeAt)
+        notShownSince = try c.decodeIfPresent(Date.self, forKey: .notShownSince)
         compactAttempts = try c.decodeIfPresent(Int.self, forKey: .compactAttempts) ?? 0
         compactFrom = try c.decodeIfPresent(UInt64.self, forKey: .compactFrom)
         compactStartedAt = try c.decodeIfPresent(Date.self, forKey: .compactStartedAt)
@@ -201,8 +208,11 @@ public struct SessionLook: Equatable, Sendable {
 /// Whether Context Guard can type into a session.
 public enum TypingReach: Equatable, Sendable {
     case ready
-    /// Not now: you're using the keyboard or mouse.
+    /// Not now: you're using the keyboard or mouse, or the screen is locked.
     case notNow
+    /// Not where it can be typed into just now: a Cursor app chat that isn't open on this screen (its
+    /// window is on another desktop, or it's closed). Looked for again while it waits.
+    case notShown
     /// Not at all: nothing Context Guard can type through reaches it.
     case never
 }
@@ -219,6 +229,9 @@ public enum Compactor {
     static let maxWorkingRepeats = 6
     static let maxJudgeFailures = 8
     static let maxCompactAttempts = 3
+    /// A ready chat that isn't on screen is looked for this long before it's yours to compact: a
+    /// window on its way back (another desktop, a moment in full screen) shouldn't raise a notice.
+    static let notShownGrace: TimeInterval = 60
     static let maxContinueFailures = 3
     /// Compacting this long with no compaction seen, and idle: it never happened (the mod reloaded).
     static let compactStall: TimeInterval = 600
@@ -319,6 +332,16 @@ public enum Compactor {
                     case .ready:
                         break
                     case .notNow:
+                        return .none
+                    case .notShown:
+                        guard f.stage != .yours else { return .none }
+                        let since = f.notShownSince ?? now
+                        if now.timeIntervalSince(since) >= notShownGrace {
+                            set(&f, .yours, now: now)
+                            f.note = "open it in \(host.name), or type \(host.compactCommand) in it"
+                        } else {
+                            f.notShownSince = since
+                        }
                         return .none
                     case .never:
                         if f.stage != .yours {
@@ -472,6 +495,8 @@ public enum Compactor {
     static func set(_ f: inout FollowUp, _ stage: FollowUp.Stage, now: Date) {
         // That note said what to type, which is past once it moves on (compacted, by you or by itself).
         if f.stage == .yours, stage != .yours { f.note = nil }
+        // A new stage looks for the chat afresh.
+        if stage != f.stage { f.notShownSince = nil }
         f.stage = stage
         f.stageAt = now
     }

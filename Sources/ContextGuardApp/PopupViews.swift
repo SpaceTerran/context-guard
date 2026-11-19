@@ -134,7 +134,7 @@ struct NoticeView: View {
                 }
                 .foregroundStyle(Theme.text)
                 if !notice.caption.isEmpty {
-                    Text(notice.caption)
+                    Text(notice.macCaption)
                         .font(Theme.font(12))
                         .lineSpacing(2)
                         .foregroundStyle(Theme.muted)

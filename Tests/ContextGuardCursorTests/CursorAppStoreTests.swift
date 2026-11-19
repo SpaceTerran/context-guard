@@ -165,6 +165,40 @@ final class CursorAppStoreTests: XCTestCase {
         XCTAssertNil(CursorAppStore(file: dir.file("junk.vscdb")).standing(Self.chat), "can't tell")
     }
 
+    func testCountsOtherChatsListedUnderTheSameName() {
+        let dir = TempDir()
+        let db = Self.makeStore(dir)
+        let store = CursorAppStore(file: db.url)
+        XCTAssertNil(store.namesakes(of: Self.chat, named: "Fix the parser"), "no composerHeaders (before Cursor 3.30): can't tell")
+
+        db.exec("""
+            CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, workspaceId TEXT, createdAt INTEGER, \
+            lastUpdatedAt INTEGER, isArchived INTEGER, isSubagent INTEGER, recency INTEGER, checkpointAt INTEGER, \
+            subagentTypeName TEXT, value TEXT)
+            """)
+        func header(_ id: String, _ name: String?, archived: Int? = 0, subagent: Int? = 0) {
+            let value = name.map { json(["composerId": id, "name": $0, "unifiedMode": "agent"]) } ?? json(["composerId": id])
+            let flags = [archived, subagent].map { $0.map(String.init) ?? "NULL" }.joined(separator: ", ")
+            db.run("INSERT INTO composerHeaders (composerId, isArchived, isSubagent, value) VALUES (?, \(flags), ?)", id, value)
+        }
+        header(Self.chat, "Fix the parser")
+        header(Self.fresh, nil)
+        XCTAssertEqual(store.namesakes(of: Self.chat, named: "Fix the parser"), 0, "itself doesn't count")
+
+        header("11111111-2222-4333-8444-555555555555", "Fix the parser", archived: 1)
+        header("22222222-3333-4444-8555-666666666666", "Fix the parser", subagent: 1)
+        header("33333333-4444-4555-8666-777777777777", "Fix the parser test")
+        XCTAssertEqual(store.namesakes(of: Self.chat, named: "Fix the parser"), 0,
+                       "archived chats, subagents' and other names aren't in the app's list under it")
+
+        header("44444444-5555-4666-8777-888888888888", "Fix the parser", archived: nil, subagent: nil)
+        XCTAssertEqual(store.namesakes(of: Self.chat, named: "Fix the parser"), 1)
+
+        XCTAssertNil(store.namesakes(of: "x' OR 1=1 --", named: "Fix the parser"))
+        XCTAssertNil(store.namesakes(of: Self.chat, named: ""))
+        XCTAssertNil(CursorAppStore(file: dir.file("missing.vscdb")).namesakes(of: Self.chat, named: "Fix the parser"))
+    }
+
     func testDefaultFile() {
         XCTAssertEqual(CursorAppStore.defaultFile(home: URL(fileURLWithPath: "/Users/me")).path,
                        "/Users/me/Library/Application Support/Cursor/User/globalStorage/state.vscdb")

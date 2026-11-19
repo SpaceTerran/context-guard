@@ -25,14 +25,28 @@ enum CursorLine {
 /// Types into a chat the way a test says it went.
 final class FakeTyping: CursorTyping, @unchecked Sendable {
     private let lock = NSLock()
-    var reachNow: TypingReach = .ready
+    private var reachSaid: TypingReach = .ready
+    private var reachAsked = 0
     /// Runs while `/summarize` is typed: what Cursor does then (its preCompact hook).
     var onSummarize: () -> Void = {}
     var compactResult: CursorTypingResult?
     private(set) var compacts: [CursorChatRef] = []
     private(set) var typed: [String] = []
 
-    func reach(_ chat: CursorChatRef) -> TypingReach { reachNow }
+    /// What `reach` says from now on.
+    var reachNow: TypingReach {
+        get { lock.lock(); defer { lock.unlock() }; return reachSaid }
+        set { lock.lock(); reachSaid = newValue; lock.unlock() }
+    }
+
+    /// How many times `reach` was asked.
+    var reaches: Int { lock.lock(); defer { lock.unlock() }; return reachAsked }
+
+    func reach(_ chat: CursorChatRef) -> TypingReach {
+        lock.lock(); defer { lock.unlock() }
+        reachAsked += 1
+        return reachSaid
+    }
 
     func compact(_ chat: CursorChatRef, started: @escaping @Sendable () -> Bool,
                  continueText: @escaping @Sendable () -> String?) -> CursorTypingResult {
@@ -104,6 +118,7 @@ final class CursorRunnerTests: XCTestCase {
     var canType: Bool?
     var turnNumber = 0
     var standingEvery: TimeInterval = 10
+    var notShownRecheck: TimeInterval = 10
 
     override func setUp() {
         paths = Paths(root: dir.file("home"), claudeDir: dir.file("claude"))
@@ -117,6 +132,7 @@ final class CursorRunnerTests: XCTestCase {
         let clock = self.clock
         var runner = CursorRunner(paths: paths, probe: probe, clock: { clock.now })
         runner.standingEvery = standingEvery
+        runner.notShownRecheck = notShownRecheck
         return runner
     }
 
@@ -392,7 +408,8 @@ final class CursorRunnerTests: XCTestCase {
     }
 
     func testOnceTheChatIsOnScreenAgainItCompactsItItself() throws {
-        typing.reachNow = .never
+        notShownRecheck = 0.2
+        typing.reachNow = .notShown
         _ = try askAndSend()
         typing.onSummarize = { [self] in call(.preCompact, trigger: "manual", contextTokens: 140_000) }
         // The chat's panel comes back while the hook waits.
@@ -401,7 +418,42 @@ final class CursorRunnerTests: XCTestCase {
         XCTAssertNil(hold(3))
         XCTAssertEqual(typing.compacts.map(\.id), [id])
         XCTAssertEqual(state?.followUp?.stage, .done)
-        XCTAssertNil(state?.followUp?.note, "no \"type /summarize in it\" left over")
+        XCTAssertEqual(state?.followUp?.note, "Saved and pushed.", "the judge's reason: it was never yours to compact")
+    }
+
+    func testOnceTheChatIsBackItCompactsEvenAfterItWasYours() throws {
+        typing.reachNow = .never
+        _ = try askAndSend()
+        typing.onSummarize = { [self] in call(.preCompact, trigger: "manual", contextTokens: 140_000) }
+        let typing = self.typing
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { typing.reachNow = .ready }
+        XCTAssertNil(hold(3))
+        XCTAssertEqual(typing.compacts.map(\.id), [id])
+        XCTAssertEqual(state?.followUp?.stage, .done)
+        XCTAssertNil(state?.followUp?.note)
+    }
+
+    func testAnAppChatOffScreenIsLookedForAMinuteThenItsYours() throws {
+        typing.reachNow = .notShown
+        _ = try askAndSend()
+        let clock = self.clock
+        // A minute passes while the hook waits; then the hold ends.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { clock.advance(61) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) { clock.advance(600) }
+        XCTAssertNil(hold(120))
+        XCTAssertEqual(typing.compacts, [], "never typed")
+        XCTAssertEqual(state?.followUp?.stage, .yours)
+        XCTAssertEqual(state?.followUp?.note, "open it in Cursor, or type /summarize in it")
+    }
+
+    func testAnAppChatOffScreenRaisesNoNoticeWithinTheMinute() throws {
+        typing.reachNow = .notShown
+        _ = try askAndSend()
+        XCTAssertNil(hold(0.5))
+        XCTAssertEqual(state?.followUp?.stage, .checking, "its window may be on its way back")
+        XCTAssertEqual(state?.followUp?.verdict, .ready)
+        XCTAssertNotNil(state?.followUp?.notShownSince)
+        XCTAssertEqual(typing.reaches, 1, "not looked for again within notShownRecheck: looking walks every window")
     }
 
     func testWhileYoureUsingTheComputerItWaits() throws {

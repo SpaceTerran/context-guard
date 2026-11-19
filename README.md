@@ -383,20 +383,27 @@ the chat, as you would:
 
 - **In the Cursor app,** the typing runs inside Cursor's hook, with Cursor's own Accessibility
   permission (System Settings › Privacy & Security › Accessibility). Context Guard needs no
-  permission of its own. It types only when the chat is on screen (its panel in the Agents window,
-  or its tab in an editor window), its prompt box is empty, and you haven't used the keyboard or
-  mouse for 10 seconds. It brings Cursor to the front, types `/summarize`, picks Summarize, types the
-  continue message (Cursor sends it once the summary is done), and gives the focus back to the app
-  you were in. Using the keyboard or mouse while it types stops it. It never switches which chat a
-  window shows. Reading Cursor's window turns on Cursor's accessibility support, so with
-  `editor.accessibilitySupport` on `auto` (Cursor's default) Cursor switches the editor to Screen
-  Reader Optimized and asks once whether to keep it. **No** sets it to `off`, and the typing works
-  the same.
+  permission of its own. It types when the chat is open in a Cursor window on this screen (its panel
+  in the Agents window, or its tab in an editor window), its prompt box is empty, and you haven't
+  used the keyboard or mouse for 10 seconds. While the screen is locked, it waits. It brings Cursor
+  to the front, types `/summarize`, picks Summarize, types the continue message (Cursor sends it once
+  the summary is done), and gives the focus back to the app you were in. A chat tab behind another
+  tab in its editor group is brought forward for this, and the tab you had there comes back after;
+  a minimized window comes up and goes back to the Dock. Using the keyboard or mouse while it types
+  stops it, and the tab and window stay as they are then. It never switches which chat the Agents
+  window shows, and never types into a chat that has the same name as another chat Cursor lists:
+  on screen, the two can't be told apart. Reading Cursor's window turns on Cursor's accessibility
+  support, so with `editor.accessibilitySupport` on `auto` (Cursor's default) Cursor switches the
+  editor to Screen Reader Optimized and asks once whether to keep it. **No** sets it to `off`, and
+  the typing works the same.
 - **In a terminal,** a CLI chat running in a tmux or Herdr pane is typed into with tmux's or Herdr's
   own commands. The continue message goes in when the summary ends.
-- **Otherwise** (Cursor doesn't have Accessibility, the chat isn't on screen, or the CLI runs in
-  another terminal), a notice says the chat has saved and asks you to type `/summarize` in it. Once
-  you do, the continue message goes in by itself.
+- **Otherwise** (Cursor doesn't have Accessibility, or the CLI runs in another terminal), a notice
+  says the chat has saved and asks you to type `/summarize` in it. Once you do, the continue message
+  goes in by itself. An app chat that isn't on this screen (it isn't open, its window is on another
+  desktop, or another chat has its name) gets a minute first, and if it's back on screen by then
+  it's compacted with no notice. After that, the notice asks you to open it in Cursor or type
+  `/summarize` in it; once it's back on screen, Context Guard still compacts it by itself.
 
 Text in the prompt box holds the compaction. It's never typed over, and it's looked at again a
 minute later.
