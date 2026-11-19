@@ -114,7 +114,7 @@ public final class Presenter {
 
     public func session(_ id: String) -> SessionInfo? { sessions.first { $0.id == id } }
 
-    /// Terminal sessions that are running now, largest context first.
+    /// Sessions that are running now, largest context first.
     public var liveSessions: [SessionInfo] { Display.live(sessions) }
 
     // MARK: Reading

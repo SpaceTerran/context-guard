@@ -68,7 +68,7 @@ public enum QuestionProgress: Equatable, Sendable {
         switch self {
         case .nextStep: return "Asking it to save at its next step…"
         case .waking: return "Asking it to save…"
-        case .nextRun: return "Asks it to save \(info.host.whenOutOfReach)"
+        case .nextRun: return info.onlyWatching ? SessionInfo.onlyWatchingText : "Asks it to save \(info.host.whenOutOfReach)"
         case .sent: return "Asked it to save, then it compacts"
         case .scheduled(let at): return "Compacts by itself at \(info.size(at))"
         case .question, .closed: return ""

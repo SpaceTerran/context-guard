@@ -72,7 +72,7 @@ public sealed record Menu
     public required string Heading { get; init; }
     /// <summary>When no session runs, what it says instead of the list.</summary>
     public string? Empty { get; init; }
-    /// <summary>Terminal sessions that are running, largest context first.</summary>
+    /// <summary>Sessions that are running, largest context first.</summary>
     public required IReadOnlyList<Session> Sessions { get; init; }
     public required string Settings { get; init; }
     public required string Quit { get; init; }

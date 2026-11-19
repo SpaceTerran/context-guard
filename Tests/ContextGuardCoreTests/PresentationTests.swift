@@ -21,7 +21,8 @@ final class PresentationTests: XCTestCase {
     }
 
     /// A Codex session in a 258k window, idle and shown in a terminal unless told otherwise.
-    func codex(_ tokens: Int, phase: Phase = .watching, attached: Bool = true, status: String = "idle") -> SessionInfo {
+    func codex(_ tokens: Int, phase: Phase = .watching, attached: Bool = true, status: String = "idle",
+               onlyWatching: Bool = false) -> SessionInfo {
         var s = SessionState(sessionId: "01a1c7f0-4d8a-7870-aab2-07bc76ea7408", host: .codex, now: now)
         s.guarded = true
         s.tokens = tokens
@@ -31,6 +32,7 @@ final class PresentationTests: XCTestCase {
         s.cwd = "/tmp/sync-service"
         s.codex = CodexFacts(window: 258_400, status: status, loaded: true)
         s.codex?.attached = attached
+        s.codex?.onlyWatching = onlyWatching ? true : nil
         return SessionInfo(state: s, isLive: true, waiterAlive: false)
     }
 
@@ -55,6 +57,9 @@ final class PresentationTests: XCTestCase {
         var bare = codex(1)
         bare.state.cwd = nil
         XCTAssertEqual(bare.toolSubtitle, "Codex")
+        var app = codex(1)
+        app.state.codex?.surface = .app
+        XCTAssertEqual(app.toolSubtitle, "Codex app · /tmp/sync-service", "an app chat says where it's open")
     }
 
     func testStatusInEachPhase() {
@@ -71,7 +76,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(claude(302_000, phase: .queued, status: "busy").statusText(on), "Asking it to save at its next step")
         XCTAssertEqual(claude(302_000, phase: .queued, waiter: true).statusText(on), "Asking it to save…")
         XCTAssertEqual(claude(302_000, phase: .queued).statusText(on), "Asks it to save when it next runs")
-        XCTAssertEqual(codex(220_000, phase: .queued, attached: false).statusText(on), "Asks it to save when a terminal shows it")
+        XCTAssertEqual(codex(220_000, phase: .queued, attached: false).statusText(on), "Asks it to save when a terminal or the Codex app has it open")
         var sent = claude(341_250, phase: .sent)
         XCTAssertEqual(sent.statusText(on), "Asking it to save…", "not confirmed yet")
         sent.state.confirmedAt = now
@@ -79,6 +84,30 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(sent.statusText(on), "Asked it to save at 330k")
         XCTAssertEqual(claude(302_000, phase: .skipped).statusText(on), "Not asking again until it compacts")
         XCTAssertEqual(codex(100_000).statusText(on), "Asks at 60% (155k)")
+    }
+
+    func testASessionTheLinkOnlyWatchesSaysSo() {
+        let on = Config()
+        for phase in [Phase.watching, .queued, .skipped] {
+            let info = codex(220_000, phase: phase, onlyWatching: true)
+            XCTAssertEqual(info.statusText(on), "Only watching, not compacting", "\(phase)")
+            XCTAssertEqual(info.symbol, .watching, "\(phase)")
+            XCTAssertFalse(info.canCompactNow, "\(phase): nothing could be sent")
+            XCTAssertFalse(info.reachableNow, "\(phase)")
+        }
+        var sent = codex(220_000, phase: .sent, onlyWatching: true)
+        sent.state.confirmedAt = now
+        sent.state.sentTokens = 210_000
+        XCTAssertEqual(sent.statusText(on), "Asked it to save at 81% (210k)", "one sent before reads as sent")
+        var off = on
+        off.enabled = false
+        XCTAssertEqual(codex(220_000, onlyWatching: true).statusText(off), "Not watching: Context Guard is off")
+
+        // You said Yes just as the link found it could only watch.
+        let info = codex(220_000, phase: .queued, onlyWatching: true)
+        let progress = QuestionProgress.of(info, config: on, reply: Reply(cycle: 1, action: .yes, at: now))
+        XCTAssertEqual(progress, .nextRun)
+        XCTAssertEqual(progress.text(info), "Only watching, not compacting")
     }
 
     func testAnUnwatchedSessionSaysSoUnlessItsSending() {
@@ -147,7 +176,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(claude(302_000, phase: .asking).questionText, base + " It's idle, so it starts when it next runs.")
         XCTAssertEqual(codex(160_000, phase: .asking).questionText, base)
         XCTAssertEqual(codex(160_000, phase: .asking, attached: false).questionText,
-                       base + " No terminal shows it, so it starts when one does.")
+                       base + " It isn't open in a terminal or the Codex app, so it starts once it is.")
     }
 
     func testTheCountdown() {
@@ -157,7 +186,7 @@ final class PresentationTests: XCTestCase {
         XCTAssertEqual(claude(1, waiter: true).countdownText(deadline: now, now: now), "Starting…")
         XCTAssertEqual(claude(1, status: "busy").countdownText(deadline: now, now: now), "Starting…")
         XCTAssertEqual(claude(1).countdownText(deadline: now, now: now), "Starts when this session next runs")
-        XCTAssertEqual(codex(1, attached: false).countdownText(deadline: now, now: now), "Starts when a terminal shows it")
+        XCTAssertEqual(codex(1, attached: false).countdownText(deadline: now, now: now), "Starts when a terminal or the Codex app has it open")
     }
 
     func testTheCountdownsDeadlineIsTheHooks() {
@@ -257,7 +286,7 @@ final class PresentationTests: XCTestCase {
         let info = codex(160_000)
         XCTAssertEqual(QuestionProgress.nextStep.text(info), "Asking it to save at its next step…")
         XCTAssertEqual(QuestionProgress.waking.text(info), "Asking it to save…")
-        XCTAssertEqual(QuestionProgress.nextRun.text(info), "Asks it to save when a terminal shows it")
+        XCTAssertEqual(QuestionProgress.nextRun.text(info), "Asks it to save when a terminal or the Codex app has it open")
         XCTAssertEqual(QuestionProgress.sent.text(info), "Asked it to save, then it compacts")
         XCTAssertEqual(QuestionProgress.scheduled(at: 206_720).text(info), "Compacts by itself at 80% (206k)")
         XCTAssertEqual(QuestionProgress.question.text(info), "")

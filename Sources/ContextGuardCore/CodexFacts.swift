@@ -48,8 +48,11 @@ public struct CodexFacts: Codable, Equatable, Sendable {
     public var loaded: Bool?
     /// When the link last saw it unloaded, to tell a closed session from a restarting app server.
     public var unloadedAt: Date?
-    /// A terminal has it open, as far as the link can tell.
+    /// A terminal has it open (the Codex app, for its chats), as far as the link can tell.
     public var attached: Bool?
+    /// The link can only watch it (`CodexThreadLook.onlyWatching`): it isn't asked about or sent
+    /// anything. nil: the link can act.
+    public var onlyWatching: Bool?
     /// The running turn (by when it started) that wouldn't take the save message: it goes in
     /// once that turn ends instead.
     public var steerRefused: Date?
@@ -89,6 +92,7 @@ public struct CodexFacts: Codable, Equatable, Sendable {
         loaded = try? c.decode(Bool.self, forKey: .loaded)
         unloadedAt = try? c.decode(Date.self, forKey: .unloadedAt)
         attached = try? c.decode(Bool.self, forKey: .attached)
+        onlyWatching = try? c.decode(Bool.self, forKey: .onlyWatching)
         steerRefused = try? c.decode(Date.self, forKey: .steerRefused)
     }
 

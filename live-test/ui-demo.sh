@@ -1,9 +1,11 @@
 #!/bin/bash
 # Run the app against staged sessions, to look at it without real Claude Code sessions.
 #
-#   live-test/ui-demo.sh start [light|dark] [no-codex] [no-cursor]  stage four Claude Code sessions, a Codex
-#                                             one (E) with a stand-in for `context-guard codex`, and a chat in
-#                                             the Cursor app (F) with Cursor's hooks "installed"; launch the debug app
+#   live-test/ui-demo.sh start [light|dark] [no-codex] [no-cursor] [codex-app]  stage four Claude Code sessions,
+#                                             a Codex one (E) with a stand-in for `context-guard codex`, and a chat
+#                                             in the Cursor app (F) with Cursor's hooks "installed"; launch the debug
+#                                             app. codex-app: E is a chat open in the Codex app, and the stand-in
+#                                             link has joined the app
 #   live-test/ui-demo.sh phase <A-F> <phase> [tokens]   change a staged session (as the hook or the link would)
 #   live-test/ui-demo.sh followup <A-F> <stage> [note] [compacted]  set where compacting stands after
 #                                             the save message (continuing, done and tookOver are always compacted)
@@ -54,6 +56,7 @@ stage() {
 import json, os, sys, datetime, subprocess
 home, reg, d = sys.argv[1:4]
 codex = "no-codex" not in sys.argv[4:]
+codex_app = "codex-app" in sys.argv[4:]
 cursor = "no-cursor" not in sys.argv[4:]
 now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 H = os.path.expanduser("~")
@@ -102,6 +105,9 @@ for key, s in sessions.items():
           "codex": {"window": 258_400, "model": "gpt-6.1-codex", "originator": "codex-tui", "terminal": True,
                     "status": "idle", "statusAt": now, "loaded": True, "attached": True},
         }
+        if codex_app:
+            # A chat open in the Codex app (the stand-in link says it has joined the app).
+            state["codex"].update(originator="Codex Desktop", terminal=False, userChat=True, surface="app")
         json.dump(state, open(f"{home}/sessions/{sid}.json", "w"), indent=2)
         continue
     state = {
@@ -142,6 +148,7 @@ case "$cmd" in
     if ! has no-codex "$@"; then
       # The Codex link counts as installed (the app looks here, not in ~/Library/LaunchAgents).
       : > "$dir/LaunchAgents/com.spaceterran.ContextGuard.codex.plist"
+      if has codex-app "$@"; then : > "$dir/codex-app"; fi
       "$0" link connected
       # The stand-in for `context-guard codex`: keeps codex-link.json fresh, saying what link.json says.
       # shellcheck disable=SC2016  # the inner bash expands these
@@ -186,6 +193,10 @@ case "$cmd" in
       stopped) body='"connected": false, "stopped": true' ;;
       *) echo "unknown link state $2" >&2; exit 1 ;;
     esac
+    # Started with codex-app: the link has joined the Codex app too, which has the one chat open.
+    if [ -e "$dir/codex-app" ] && [ "$2" != stopped ]; then
+      body="$body, \"app\": {\"connected\": true, \"chats\": 1, \"judgeModel\": \"gpt-6-luna\"}"
+    fi
     printf '{"at": "%s", %s}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$body" > "$dir/link.json"
     cp "$dir/link.json" "$home/codex-link.json"
     ;;

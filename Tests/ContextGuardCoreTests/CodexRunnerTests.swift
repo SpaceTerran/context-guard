@@ -14,6 +14,7 @@ final class CodexRunnerTests: XCTestCase {
     var flags: [String] = []
     var attached: Bool? = true
     var canSteer = true
+    var onlyWatching = false
     var surface = CodexSurface.terminal
     var endReason: String?
 
@@ -30,7 +31,8 @@ final class CodexRunnerTests: XCTestCase {
 
     var thread: CodexThreadLook {
         CodexThreadLook(threadId: id, path: log.path, cwd: "/Users/demo/code", name: "Settings screen", status: status,
-                        flags: flags, attached: attached, canSteer: canSteer, surface: surface, endReason: endReason)
+                        flags: flags, attached: attached, canSteer: canSteer, onlyWatching: onlyWatching, surface: surface,
+                        endReason: endReason)
     }
 
     /// The session's rollout starts as a Codex app chat's does, or as another client's.
@@ -288,6 +290,51 @@ final class CodexRunnerTests: XCTestCase {
         XCTAssertEqual(state?.phase, .queued)
         attached = nil
         guard case .deliver = tick() else { return XCTFail("sent when it can't be told") }
+    }
+
+    func testASessionTheLinkOnlyWatchesIsntAsked() throws {
+        try configure()
+        onlyWatching = true
+        log.append(CodexLine.turn("two", reply: "ok", tokens: 160_000))
+        XCTAssertEqual(tick(), .none)
+        XCTAssertEqual(state?.phase, .watching, "nothing could be sent, so nothing asks")
+        XCTAssertEqual(state?.codex?.onlyWatching, true)
+        XCTAssertEqual(state?.codex?.attached, true, "a terminal still shows it")
+        XCTAssertTrue(state?.guarded ?? false, "still watched")
+        clock.advance(600)
+        tick()
+        XCTAssertEqual(state?.phase, .watching, "and no countdown sends it")
+
+        onlyWatching = false
+        tick()
+        XCTAssertEqual(state?.phase, .asking, "asked once the link can act")
+        XCTAssertNil(state?.codex?.onlyWatching)
+    }
+
+    func testAQuestionStopsWhenTheLinkCanOnlyWatch() throws {
+        try configure()
+        log.append(CodexLine.turn("two", reply: "ok", tokens: 160_000))
+        tick()
+        XCTAssertEqual(state?.phase, .asking)
+        onlyWatching = true
+        tick()
+        XCTAssertEqual(state?.phase, .watching, "the popup closes")
+    }
+
+    func testNothingGoesToASessionTheLinkOnlyWatches() throws {
+        try configure()
+        turnRunning()
+        tick()
+        try answer(.yes)
+        onlyWatching = true
+        XCTAssertEqual(tick(), .none, "not into the running turn")
+        log.append(CodexLine.taskComplete())
+        status = "idle"
+        XCTAssertEqual(tick(), .none, "not between turns either")
+        XCTAssertEqual(state?.phase, .queued, "your Yes stands")
+
+        onlyWatching = false
+        guard case .deliver = tick() else { return XCTFail("sent once the link can act") }
     }
 
     func testFromTheSaveMessageToContinue() throws {
