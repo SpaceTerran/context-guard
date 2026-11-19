@@ -739,11 +739,36 @@ final class CodexAppServerTests: XCTestCase {
         let app = #"C:\Program Files\WindowsApps\OpenAI.Codex_26.1111.0.0_x64__2p2nqsd0c76g0\app"#
         XCTAssertEqual(CodexAppBundle.codexBinary(hostExecutable: app + #"\ChatGPT.exe"#, isExecutable: { _ in true }),
                        app + #"\resources\codex.exe"#)
-        XCTAssertNil(CodexAppBundle.codexBinary(hostExecutable: app + #"\ChatGPT.exe"#, isExecutable: { _ in false }))
-        XCTAssertNil(CodexAppBundle.codexBinary(hostExecutable: nil, isExecutable: { _ in true }))
+        XCTAssertNil(CodexAppBundle.codexBinary(hostExecutable: app + #"\ChatGPT.exe"#, installedApp: { nil }, isExecutable: { _ in false }))
+        XCTAssertNil(CodexAppBundle.codexBinary(hostExecutable: nil, installedApp: { nil }, isExecutable: { _ in true }))
+    }
+
+    func testTheInstalledAppWhenAnotherProgramRunsTheRouter() {
+        let package = #"C:\Program Files\WindowsApps\OpenAI.Codex_26.1111.0.0_x64__2p2nqsd0c76g0"#
+        let code = #"C:\Users\demo\AppData\Local\Programs\Microsoft VS Code\Code.exe"#
+        XCTAssertEqual(CodexAppBundle.codexBinary(hostExecutable: code, installedApp: { package },
+                                                  isExecutable: { $0.hasPrefix(package) }),
+                       package + #"\app\resources\codex.exe"#)
+        XCTAssertEqual(CodexAppBundle.codexBinary(hostExecutable: nil, installedApp: { package }, isExecutable: { _ in true }),
+                       package + #"\app\resources\codex.exe"#)
+        XCTAssertNil(CodexAppBundle.codexBinary(hostExecutable: code, installedApp: { nil }, isExecutable: { $0.hasPrefix(package) }))
     }
 }
 #endif
+
+/// The newest of the Codex app's Store packages (Windows keeps one per version until it cleans up).
+final class CodexAppPackageTests: XCTestCase {
+    func testVersionsReadFromThePackageFolder() {
+        XCTAssertEqual(CodexAppBundle.packageVersion(#"C:\Program Files\WindowsApps\OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0"#),
+                       [26, 1111, 2228, 0])
+        XCTAssertEqual(CodexAppBundle.packageVersion("OpenAI.Codex"), [])
+        XCTAssertEqual(CodexAppBundle.packageVersion("OpenAI.Codex_beta_x64__2p2nqsd0c76g0"), [])
+        let base = #"C:\Program Files\WindowsApps\OpenAI.Codex_"#
+        XCTAssertEqual(CodexAppBundle.newest([base + "26.1111.2228.0_x64__x", base + "26.1112.611.0_x64__x", base + "26.999.9999.0_x64__x"]),
+                       base + "26.1112.611.0_x64__x")
+        XCTAssertNil(CodexAppBundle.newest([]))
+    }
+}
 
 // MARK: - Fakes
 
