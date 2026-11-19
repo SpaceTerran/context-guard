@@ -75,7 +75,7 @@ header when your last change was saved, or that it wasn't and why.
 
 | The session's menu | Settings |
 |---|---|
-| ![A session's menu with Compact Now](docs/menu.png) | ![Settings, the messages it sends](docs/settings.png) |
+| ![The menu, and a Codex app chat's own menu with Compact Now](docs/menu.png) | ![Settings, the messages it sends](docs/settings.png) |
 
 It doesn't care which terminal you use (tested in Warp, Terminal and Ghostty): everything goes
 through Claude Code's own hooks and plugins.
@@ -92,13 +92,13 @@ share of each chat's window (60% and 80%), Cursor's Auto model as the judge, and
 
 - macOS 14 or newer.
 - Xcode Command Line Tools 16.4 or newer (Swift 6.1 or newer): `xcode-select --install`.
-- Claude Code with plugin support (tested with 2.1.318), signed in as usual.
-- For Codex sessions: the Codex CLI (tested with 0.167.1), signed in as usual. Without it, nothing
+- Claude Code with plugin support (tested with 2.1.328), signed in as usual.
+- For Codex sessions: the Codex CLI (tested with 0.169.0), signed in as usual. Without it, nothing
   changes.
 - For Codex app chats: the Codex app (tested with 26.1111.71025), signed in as usual. They don't need
   the Codex CLI.
 - For Cursor chats: the Cursor app (tested with 3.30.14), the Cursor CLI `cursor-agent` (tested with
-  2026.11.13), or both, signed in as usual. The judge needs the Cursor CLI. Without Cursor, nothing
+  2026.11.19), or both, signed in as usual. The judge needs the Cursor CLI. Without Cursor, nothing
   changes.
 
 ## Install, update, uninstall
@@ -148,7 +148,7 @@ below. `~` in the paths here is your user folder, `%USERPROFILE%`.
 
 - Windows 11 on x64.
 - Claude Code 2.1.287 or newer (tested with 2.1.322), signed in as usual.
-- For Codex sessions: the Codex CLI 0.154 or newer (tested with 0.167.2), signed in as usual.
+- For Codex sessions: the Codex CLI 0.154 or newer (tested with 0.170.0), signed in as usual.
   Without it, nothing changes.
 - For Codex app chats: the Codex app (tested with 26.1111.2228.0), signed in as usual. They don't
   need the Codex CLI.
@@ -333,8 +333,8 @@ What's different from Claude Code:
   running in terminals: the folder each runs in, the session a `codex resume <id>` names, and a
   session started there since (as `/new` does). A `codex resume` from another folder, without an id,
   isn't seen; its messages wait and `status` says "no terminal shows it". The Codex app has a chat
-  open once you've opened it since the app started. On Windows, closing the app's window leaves its
-  chats open (the app keeps running); quitting the app closes them until you open them again.
+  open once you've opened it since the app started. Closing the app's window leaves its chats open
+  (the app keeps running); quitting the app closes them until you open them again.
 - **Archiving or deleting a chat** in the Codex app ends its session at once.
 - **Watch This Session** belongs to the Codex session, not the tab. `/new` starts a new session,
   which is watched again.
