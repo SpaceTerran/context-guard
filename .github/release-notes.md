@@ -4,7 +4,7 @@ Download `context-guard-windows-x64.zip`, extract it, and run the `install.ps1` 
 `context-guard` folder, as the
 [README](https://github.com/SpaceTerran/context-guard#install-update-uninstall-on-windows) shows.
 Doing the same with a newer release updates it. It needs Windows 11 on x64, Claude Code 2.1.287 or
-newer, and for Codex sessions the Codex CLI 0.154 or newer.
+newer, and for Codex sessions the Codex CLI 0.154 or newer. Codex app chats need only the Codex app.
 
 `context-guard-windows-x64.zip.sha256` has the zip's SHA-256, which `Get-FileHash` shows too.
 
