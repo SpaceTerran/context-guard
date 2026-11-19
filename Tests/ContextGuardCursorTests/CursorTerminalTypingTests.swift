@@ -52,6 +52,41 @@ enum HerdrScreen {
     }
 }
 
+/// The Cursor CLI's screen when it draws its prompt box as filled rows rather than between `▄` and
+/// `▀` (`tmux capture-pane -e` of cursor-agent 2026.11.19 in a tmux server with no client attached).
+/// Your earlier prompts show the same way, in another color.
+enum PaddedScreen {
+    static let pad = " \u{1B}[48;2;21;21;21m" + String(repeating: " ", count: 100) + "\u{1B}[49m"
+    static let footer = CLIScreen.footer
+    static let header = ["", "", "  Cursor Agent", "  \u{1B}[2mv2026.11.19-f005e9d\u{1B}[0m", "", ""]
+    static let earlierPrompt = [
+        " \u{1B}[48;2;36;36;40m" + String(repeating: " ", count: 100) + "\u{1B}[49m",
+        " \u{1B}[48;2;36;36;40m  Read the notes, then reply with just OK." + String(repeating: " ", count: 58) + "\u{1B}[49m",
+        " \u{1B}[48;2;36;36;40m" + String(repeating: " ", count: 100) + "\u{1B}[49m",
+        "",
+        "  OK",
+        "",
+    ]
+
+    static let emptyBox = " \u{1B}[48;2;21;21;21m \u{1B}[2m→ \u{1B}[0;7m\u{1B}[48;2;21;21;21mA\u{1B}[0;2m\u{1B}[48;2;21;21;21mdd a follow-up\u{1B}[0m\u{1B}[48;2;21;21;21m      \u{1B}[49m"
+
+    static func typedBox(_ text: String) -> String {
+        " \u{1B}[48;2;21;21;21m → \(text)\u{1B}[7m \u{1B}[0m\u{1B}[48;2;21;21;21m        \u{1B}[49m"
+    }
+
+    static let wrapped = [
+        " \u{1B}[48;2;21;21;21m → first words of a long draft that wraps   \u{1B}[49m",
+        " \u{1B}[48;2;21;21;21m   onto a second row\u{1B}[7m \u{1B}[0m\u{1B}[48;2;21;21;21m        \u{1B}[49m",
+    ]
+
+    static let summarizeBox = " \u{1B}[48;2;21;21;21m → \u{1B}[1m\u{1B}[36m/summarize\u{1B}[0;7m\u{1B}[48;2;21;21;21m \u{1B}[0m\u{1B}[48;2;21;21;21m      \u{1B}[49m"
+    static let summarizeMenu = [""] + CLIScreen.summarizeMenu
+
+    static func screen(box: [String], below: [String] = footer, earlier: [String] = earlierPrompt) -> String {
+        (header + earlier + [pad] + box + [pad, ""] + below + Array(repeating: "", count: 12)).joined(separator: "\n")
+    }
+}
+
 /// A pane running the Cursor CLI, driven through fake `tmux` / `herdr` calls.
 final class FakePane: @unchecked Sendable {
     private let lock = NSLock()
@@ -60,6 +95,8 @@ final class FakePane: @unchecked Sendable {
     var offersSummarize = true
     /// Shows a question instead of the prompt box.
     var blocked = false
+    /// Draws the prompt box as filled rows (`PaddedScreen`).
+    var padded = false
     var summarizing = false
     var calls: [[String]] = []
     var environments: [[String: String]] = []
@@ -109,6 +146,11 @@ final class FakePane: @unchecked Sendable {
             if box == "/summarize", offersSummarize { return HerdrScreen.screen(box: [HerdrScreen.summarizeBox], below: HerdrScreen.summarizeMenu) }
             return HerdrScreen.screen(box: [HerdrScreen.typedBox(box)])
         }
+        if padded {
+            if box.isEmpty { return PaddedScreen.screen(box: [PaddedScreen.emptyBox]) }
+            if box == "/summarize", offersSummarize { return PaddedScreen.screen(box: [PaddedScreen.summarizeBox], below: PaddedScreen.summarizeMenu) }
+            return PaddedScreen.screen(box: [PaddedScreen.typedBox(box)])
+        }
         if box.isEmpty { return CLIScreen.screen(box: [CLIScreen.emptyBox]) }
         if box == "/summarize", offersSummarize { return CLIScreen.screen(box: [CLIScreen.summarizeBox], below: CLIScreen.summarizeMenu) }
         return CLIScreen.screen(box: [CLIScreen.typedBox(box)])
@@ -140,6 +182,35 @@ final class CursorTerminalTypingTests: XCTestCase {
         XCTAssertEqual(CursorCLIScreen.boxText(menu), "/summarize")
         XCTAssertEqual(CursorCLIScreen.pickedCommand(menu), "/summarize                Summarize the conversation to reduce context")
         XCTAssertNil(CursorCLIScreen.pickedCommand(HerdrScreen.screen(box: [HerdrScreen.emptyBox])))
+    }
+
+    func testReadsAScreenWhoseBoxIsFilledRows() {
+        XCTAssertEqual(CursorCLIScreen.boxText(PaddedScreen.screen(box: [PaddedScreen.emptyBox])), "")
+        XCTAssertEqual(CursorCLIScreen.boxText(PaddedScreen.screen(box: [PaddedScreen.typedBox("hello there")])), "hello there")
+        XCTAssertEqual(CursorCLIScreen.boxText(PaddedScreen.screen(box: PaddedScreen.wrapped)),
+                       "first words of a long draft that wraps\nonto a second row")
+        let menu = PaddedScreen.screen(box: [PaddedScreen.summarizeBox], below: PaddedScreen.summarizeMenu)
+        XCTAssertEqual(CursorCLIScreen.boxText(menu), "/summarize")
+        XCTAssertEqual(CursorCLIScreen.pickedCommand(menu), "/summarize                Summarize the conversation to reduce context")
+        XCTAssertNil(CursorCLIScreen.pickedCommand(PaddedScreen.screen(box: [PaddedScreen.emptyBox])))
+        // Without an earlier prompt above it, too.
+        XCTAssertEqual(CursorCLIScreen.boxText(PaddedScreen.screen(box: [PaddedScreen.typedBox("hi")], earlier: [])), "hi")
+        // An earlier prompt alone isn't the box: its text doesn't start with the box's arrow.
+        XCTAssertNil(CursorCLIScreen.boxText((PaddedScreen.header + PaddedScreen.earlierPrompt).joined(separator: "\n")))
+        // Filled rows that aren't a box: no blank row above and below.
+        XCTAssertNil(CursorCLIScreen.boxText([PaddedScreen.typedBox("a"), PaddedScreen.pad].joined(separator: "\n")))
+        // The box lowest on screen wins whichever way it's drawn.
+        let both = CLIScreen.screen(box: [CLIScreen.typedBox("old")], below: [PaddedScreen.pad, PaddedScreen.typedBox("new"), PaddedScreen.pad])
+        XCTAssertEqual(CursorCLIScreen.boxText(both), "new")
+    }
+
+    func testFindsTheBackgroundColor() {
+        XCTAssertEqual(CursorCLIScreen.background(PaddedScreen.pad), "48;2;21;21;21")
+        XCTAssertEqual(CursorCLIScreen.background(PaddedScreen.earlierPrompt[0]), "48;2;36;36;40")
+        XCTAssertEqual(CursorCLIScreen.background("\u{1B}[0;7m\u{1B}[1;48;5;236mx"), "48;5;236")
+        XCTAssertEqual(CursorCLIScreen.background("\u{1B}[38;2;48;48;48;44mx"), "44")
+        XCTAssertNil(CursorCLIScreen.background("\u{1B}[38;2;21;21;21m▄▄▄\u{1B}[39m"))
+        XCTAssertNil(CursorCLIScreen.background("plain"))
     }
 
     func testTheArrowIsDimmedOnlyInThePlaceholder() {
@@ -181,6 +252,18 @@ final class CursorTerminalTypingTests: XCTestCase {
         XCTAssertEqual(pane.calls.first, ["-S", "/tmp/tmux-501/default", "capture-pane", "-p", "-e", "-t", "%3"])
         XCTAssertTrue(pane.calls.contains(["-S", "/tmp/tmux-501/default", "send-keys", "-t", "%3", "-l", "--", "/summarize"]))
         XCTAssertEqual(pane.calls.last, ["-S", "/tmp/tmux-501/default", "send-keys", "-t", "%3", "Enter"])
+    }
+
+    func testSummarizesThroughTmuxWhenTheBoxIsFilledRows() throws {
+        let pane = FakePane()
+        pane.padded = true
+        let t = typing(pane)
+        XCTAssertEqual(t.compact(tmuxChat, started: { pane.started }), .compacted(continued: false))
+        XCTAssertTrue(pane.started)
+        XCTAssertEqual(t.send(tmuxChat, text: "Carry on."), .sent)
+        pane.box = "half a thought"
+        XCTAssertEqual(t.compact(tmuxChat, started: { true }), .draft)
+        XCTAssertEqual(pane.box, "half a thought")
     }
 
     func testNeverTypesOverADraft() throws {

@@ -1,10 +1,11 @@
 import ContextGuardCore
 import Foundation
 
-/// What the Cursor CLI shows in its pane, read from the screen with its colors: its prompt box (the
-/// rows between a row of `▄` and a row of `▀`) and the slash-command menu under it. tmux
-/// (`capture-pane -e`) and herdr (`pane read --format ansi`) draw the same screen with different
-/// escape sequences, and herdr ends its rows with CRLF.
+/// What the Cursor CLI shows in its pane, read from the screen with its colors: its prompt box and
+/// the slash-command menu under it. The CLI draws the box in one of two ways, depending on the
+/// terminal: its rows between a row of `▄` and a row of `▀`, or rows filled with the box's color, a
+/// blank one above and below. tmux (`capture-pane -e`) and herdr (`pane read --format ansi`) draw
+/// the same screen with different escape sequences, and herdr ends its rows with CRLF.
 enum CursorCLIScreen {
     /// The text in the prompt box ("" when it's empty and shows its dimmed placeholder). nil when the
     /// screen shows no prompt box (a question, a permission prompt, or not the CLI at all).
@@ -30,16 +31,73 @@ enum CursorCLIScreen {
         return nil
     }
 
-    /// The rows, and where the last prompt box on screen starts and ends.
+    /// The rows, and where the last prompt box on screen starts and ends (the rows just outside its text).
     private static func box(_ ansi: String) -> ([String], Int, Int)? {
         let rows = ansi.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        let found = [edged(rows), filled(rows)].compactMap { $0 }
+        guard let (top, bottom) = found.max(by: { $0.0 < $1.0 }) else { return nil }
+        return (rows, top, bottom)
+    }
+
+    /// A box drawn between a row of `▄` and a row of `▀`.
+    private static func edged(_ rows: [String]) -> (Int, Int)? {
         func all(_ row: String, _ ch: Character) -> Bool {
             let t = plain(row).trimmingCharacters(in: .whitespaces)
             return t.count >= 10 && t.allSatisfy { $0 == ch }
         }
         guard let top = rows.lastIndex(where: { all($0, "▄") }),
               let bottom = rows[(top + 1)...].firstIndex(where: { all($0, "▀") }), bottom > top + 1 else { return nil }
-        return (rows, top, bottom)
+        return (top, bottom)
+    }
+
+    /// A box drawn as rows filled with one color, the first and last blank. Your earlier prompts
+    /// are drawn so too, in another color; the prompt box is the one whose text starts with its `→`.
+    private static func filled(_ rows: [String]) -> (Int, Int)? {
+        func blank(_ row: String) -> Bool { plain(row).trimmingCharacters(in: .whitespaces).isEmpty }
+        var end = rows.count - 1
+        while end >= 0 {
+            guard let color = background(rows[end]) else { end -= 1; continue }
+            var start = end
+            while start > 0, background(rows[start - 1]) == color { start -= 1 }
+            if end - start >= 2, blank(rows[start]), blank(rows[end]),
+               plain(rows[start + 1]).trimmingCharacters(in: .whitespaces).hasPrefix("→") { return (start, end) }
+            end = start - 1
+        }
+        return nil
+    }
+
+    /// The first background color `row` sets (SGR 40–47, 100–107 or 48), as its parameters; nil
+    /// when it sets none.
+    static func background(_ row: String) -> String? {
+        var it = row.unicodeScalars.makeIterator()
+        while let c = it.next() {
+            guard c == "\u{1B}", it.next() == "[" else { continue }
+            var params = ""
+            var final: Unicode.Scalar?
+            while let d = it.next() {
+                if (0x40...0x7E).contains(d.value) { final = d; break }
+                params.unicodeScalars.append(d)
+            }
+            guard final == "m" else { continue }
+            let codes = params.split(separator: ";", omittingEmptySubsequences: false).map(String.init)
+            var i = 0
+            while i < codes.count {
+                let code = Int(codes[i]) ?? 0
+                switch code {
+                case 40...47, 100...107:
+                    return codes[i]
+                case 38, 48, 58:
+                    // A color: 5;n or 2;r;g;b.
+                    let end = min(i + (i + 1 < codes.count && codes[i + 1] == "5" ? 2 : 4), codes.count - 1)
+                    if code == 48 { return codes[i...end].joined(separator: ";") }
+                    i = end
+                default:
+                    break
+                }
+                i += 1
+            }
+        }
+        return nil
     }
 
     /// Whether `mark` is drawn dimmed (SGR 2) where it first shows in `row`; nil when it doesn't.
