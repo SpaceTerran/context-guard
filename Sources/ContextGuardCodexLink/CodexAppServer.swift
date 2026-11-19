@@ -4,13 +4,21 @@ import Darwin
 #endif
 import Foundation
 
+/// A program this one started.
+protocol ChildRunning: AnyObject {
+    var isRunning: Bool { get }
+    func terminate()
+}
+
+extension Process: ChildRunning {}
+
 /// JSON-RPC over a child process's standard input and output, one message per line: how
 /// `codex app-server` talks when it's run directly.
 public final class StdioChannel: RPCChannel, @unchecked Sendable {
     /// Larger than any reply the link reads (the model list is the largest).
     public static let maxLine = 32 << 20
 
-    private let process: Process
+    private let process: ChildRunning
     private let input: FileHandle
     private let output: FileHandle
     private let writeLock = NSLock()
@@ -19,7 +27,7 @@ public final class StdioChannel: RPCChannel, @unchecked Sendable {
     // Reader only.
     private var buffer = Data()
 
-    init(process: Process, input: FileHandle, output: FileHandle) {
+    init(process: ChildRunning, input: FileHandle, output: FileHandle) {
         self.process = process
         self.input = input
         self.output = output
@@ -28,6 +36,12 @@ public final class StdioChannel: RPCChannel, @unchecked Sendable {
     /// Starts `executable` with `arguments`, its standard error discarded.
     public static func start(executable: String, arguments: [String], environment: [String: String],
                              directory: URL) throws -> StdioChannel {
+        #if os(Windows)
+        // Without a console window of its own (Foundation's `Process` would give it one).
+        let child = try WindowsChild.start(executable: PathRules.native(executable), arguments: arguments,
+                                           environment: environment, directory: PathRules.native(directory.path))
+        return StdioChannel(process: child, input: child.input, output: child.output)
+        #else
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -50,6 +64,7 @@ public final class StdioChannel: RPCChannel, @unchecked Sendable {
         try? toChild.fileHandleForReading.close()
         try? fromChild.fileHandleForWriting.close()
         return StdioChannel(process: process, input: toChild.fileHandleForWriting, output: fromChild.fileHandleForReading)
+        #endif
     }
 
     public func receive() throws -> String? {
@@ -143,11 +158,27 @@ public struct CodexAppServerLauncher: CodexAppServerLaunching {
 /// Where the Codex app keeps the Codex CLI it runs.
 public enum CodexAppBundle {
     #if os(Windows)
-    /// Next to the app's program: `<package>\app\resources\codex.exe`.
-    public static func codexBinary(hostExecutable: String?,
+    /// The Codex app's Store package family.
+    public static let packageFamily = "OpenAI.Codex_2p2nqsd0c76g0"
+
+    /// Next to the app's program (`<package>\app\resources\codex.exe`) when the app runs the
+    /// router, else in the Codex app the Store installed for you.
+    /// `installedApp` stands in for the Store's answer in tests.
+    public static func codexBinary(hostExecutable: String?, installedApp: (() -> String?)? = nil,
                                    isExecutable: (String) -> Bool = FileManager.default.isExecutableFile(atPath:)) -> String? {
-        guard let host = hostExecutable.map({ PathRules.native($0) }), let cut = host.lastIndex(of: "\\") else { return nil }
-        let path = String(host[..<cut]) + "\\resources\\codex.exe"
+        if let host = hostExecutable.map({ PathRules.native($0) }), let cut = host.lastIndex(of: "\\") {
+            let path = String(host[..<cut]) + "\\resources\\codex.exe"
+            if isExecutable(path) { return path }
+        }
+        // A stand-in that answers nil means no app, not "ask the Store".
+        let installed: String?
+        if let installedApp {
+            installed = installedApp()
+        } else {
+            installed = WindowsProcess.packageFolder(family: packageFamily)
+        }
+        guard let folder = installed.map({ PathRules.native($0) }) else { return nil }
+        let path = folder + "\\app\\resources\\codex.exe"
         return isExecutable(path) ? path : nil
     }
     #else
@@ -174,4 +205,19 @@ public enum CodexAppBundle {
         return bundles.map { ($0 as NSString).appendingPathComponent(inBundle) }.first(where: isExecutable)
     }
     #endif
+
+    /// A Store package folder's version: `…\OpenAI.Codex_26.1111.2228.0_x64__2p2nqsd0c76g0` →
+    /// [26, 1111, 2228, 0]. Empty when the name has none.
+    public static func packageVersion(_ folder: String) -> [Int] {
+        let name = folder.split(whereSeparator: { $0 == "\\" || $0 == "/" }).last.map(String.init) ?? folder
+        let parts = name.split(separator: "_", omittingEmptySubsequences: false)
+        guard parts.count > 1 else { return [] }
+        let numbers = parts[1].split(separator: ".").map { Int($0) }
+        return numbers.contains(nil) ? [] : numbers.compactMap { $0 }
+    }
+
+    /// The newest of a package's folders, by `packageVersion`.
+    public static func newest(_ folders: [String]) -> String? {
+        folders.max { packageVersion($0).lexicographicallyPrecedes(packageVersion($1)) }
+    }
 }

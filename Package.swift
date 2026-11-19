@@ -13,7 +13,9 @@ cliDependencies.append("ContextGuardCursor")
 var targets: [Target] = [
     .target(name: "ContextGuardCore"),
     // `context-guard codex`: talks to the Codex app server. Only the CLI uses it.
-    .target(name: "ContextGuardCodexLink", dependencies: ["ContextGuardCore"]),
+    .target(name: "ContextGuardCodexLink", dependencies: ["ContextGuardCore"],
+            // Windows: whose program serves the Codex app's pipe (its process token).
+            linkerSettings: [.linkedLibrary("advapi32", .when(platforms: [.windows]))]),
     .executableTarget(name: "context-guard", dependencies: cliDependencies),
     // Fixtures both test targets use.
     .target(name: "ContextGuardTestSupport", path: "Tests/ContextGuardTestSupport"),

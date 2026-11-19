@@ -60,17 +60,18 @@ public enum CodexLinkService {
         exit(0)
     }
 
-    /// The connection to the Codex app, where Context Guard has one (the Mac; Windows: P3).
+    /// The connection to the Codex app: its router's socket on the Mac, its pipe on Windows.
     static func appLink(paths: Paths, env: [String: String], options: CodexLink.Options, log: CodexLinkLog,
                         drivers: CodexDrivers) -> CodexAppLink? {
-        #if os(Windows)
-        return nil
-        #else
         let home = CodexHome.path(env)
-        return CodexAppLink(paths: paths, connector: CodexAppSocketConnector(codexHome: home),
+        #if os(Windows)
+        let connector = CodexAppPipeConnector()
+        #else
+        let connector = CodexAppSocketConnector(codexHome: home)
+        #endif
+        return CodexAppLink(paths: paths, connector: connector,
                             launcher: CodexAppServerLauncher(codexHome: home, folder: CodexLink.defaultJudgeFolder),
                             codexHome: home, drivers: drivers, options: CodexAppLink.Options(onlyCwd: options.onlyCwd), log: log)
-        #endif
     }
 
     // MARK: The background link's arguments
